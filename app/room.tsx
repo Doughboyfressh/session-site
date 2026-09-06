@@ -551,6 +551,8 @@ export default function Room({
           projectInfo={state.projectInfo}
           userId={user.id}
           projects={projects}
+          members={state.members || []}
+          editors={state.editors || []}
           onChanged={onProjectsChanged}
           notify={notify}
         />

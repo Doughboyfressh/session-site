@@ -38,6 +38,8 @@ import {
   type Arrangement,
 } from '@/lib/audio';
 import { action, upload, Range, Confirm } from './helpers';
+import { useProjectSync } from './use-project-sync';
+import ConflictValues from './conflict-values';
 export default function Studio({
   initial,
   onDraft,
@@ -51,7 +53,6 @@ export default function Studio({
   onBrowse: () => void;
   notify: (s: string) => void;
 }) {
-  const canEdit = initial?.canEdit !== false;
   const [title, setTitle] = useState(initial?.title || 'Untitled session'),
     [id, setId] = useState(initial?.id || ''),
     [data, setData] = useState<Arrangement>(
@@ -71,7 +72,6 @@ export default function Studio({
     [loopEnd, setLoopEnd] = useState(8),
     [metronome, setMetronome] = useState(false),
     [level, setLevel] = useState(0),
-    [revision, setRevision] = useState(initial?.revision || 0),
     [autosave, setAutosave] = useState(false),
     [saveLabel, setSaveLabel] = useState(''),
     [versions, setVersions] = useState<any[] | null>(null),
@@ -90,6 +90,36 @@ export default function Studio({
   const titleRef = useRef(title);
   titleRef.current = title;
   tracksRef.current = data;
+  const sync = useProjectSync({
+    initial,
+    id,
+    snapshot: { title, data },
+    paused: recording || playing || !!busy,
+    apply: (p, changed, resetHistory = true) => {
+      setTitle(p.title);
+      setData(p.data);
+      setDirty(changed);
+      titleRef.current = p.title;
+      tracksRef.current = p.data;
+      if (resetHistory) {
+        past.current = [];
+        future.current = [];
+        setHistoryTick((x) => x + 1);
+      }
+    },
+    permissionEnded: () => {
+      editAllowed.current = false;
+      setAutosave(false);
+      stop();
+      if (recorder.current?.state === 'recording') recorder.current.stop();
+      recorder.current?.stream.getTracks().forEach((t) => t.stop());
+      clearTimeout(recTimer.current);
+      setRecording(false);
+    },
+  });
+  const { canEdit, canManage, revision } = sync;
+  const editAllowed = useRef(canEdit);
+  editAllowed.current = canEdit;
   useEffect(() => {
     onDraft({
       id,
@@ -98,9 +128,11 @@ export default function Studio({
       revision,
       dirty,
       canEdit,
+      canManage,
+      baseline: sync.baseline.current,
       owner: initial?.owner,
     });
-  }, [id, title, data, revision, dirty]);
+  }, [id, title, data, revision, dirty, canEdit, canManage]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -183,7 +215,11 @@ export default function Studio({
     data.tracks
       .map(
         (t) =>
-          t.id + JSON.stringify(t.notes || t.sequence || []) + (t.sound || ''),
+          t.id +
+          JSON.stringify(t.notes || t.sequence || []) +
+          (t.sound || '') +
+          (t.fileId || '') +
+          !!t.peaks,
       )
       .join(','),
     data.bpm,
@@ -192,10 +228,29 @@ export default function Studio({
     playback.current?.update?.(data);
   }, [data]);
   useEffect(() => {
-    if (!canEdit || !autosave || !id || !dirty || busy || recording) return;
+    if (
+      !canEdit ||
+      sync.conflict ||
+      !autosave ||
+      !id ||
+      !dirty ||
+      busy ||
+      recording
+    )
+      return;
     const timer = setTimeout(() => save(true), 10000);
     return () => clearTimeout(timer);
-  }, [autosave, id, dirty, data, title, busy, recording]);
+  }, [
+    autosave,
+    id,
+    dirty,
+    data,
+    title,
+    busy,
+    recording,
+    canEdit,
+    sync.conflict,
+  ]);
   function undo(redo = false) {
     const source = redo ? future : past,
       target = redo ? past : future;
@@ -239,7 +294,7 @@ export default function Studio({
     setSelected(t.id);
   }
   async function checkpointList() {
-    if (!canEdit) return;
+    if (!canManage) return;
     try {
       setVersions(await action({ action: 'projectVersions', id }));
     } catch (e: any) {
@@ -282,8 +337,7 @@ export default function Studio({
     }
   }
   async function save(automatic = false) {
-    if (!canEdit)
-      return notify('Only the project owner can save this room project.');
+    if (!canEdit || sync.conflict) return;
     if (saving.current) return;
     saving.current = true;
     const savedData = data;
@@ -291,18 +345,8 @@ export default function Studio({
     if (!automatic) setBusy('Saving');
     setSaveLabel(automatic ? 'Autosaving…' : 'Saving…');
     try {
-      const r = await action({
-        action: 'project',
-        checkpoint: !automatic,
-        baseRevision: revision,
-        id: id || undefined,
-        title,
-        data,
-      });
+      const r = await sync.save(!automatic);
       setId(r.id);
-      setRevision(r.revision);
-      if (tracksRef.current === savedData && titleRef.current === savedTitle)
-        setDirty(false);
       onSaved({
         id: r.id,
         title: savedTitle,
@@ -316,7 +360,10 @@ export default function Studio({
             minute: '2-digit',
           }),
       );
-      if (!automatic) notify('Project saved privately.');
+      if (!automatic)
+        notify(
+          'Project saved. Room members with access will receive your changes.',
+        );
     } catch (e: any) {
       setSaveLabel('Save needs attention');
       if (automatic) setAutosave(false);
@@ -327,7 +374,7 @@ export default function Studio({
     }
   }
   async function addFile(file: File) {
-    if (!canEdit) return;
+    if (!editAllowed.current) return;
     if (data.tracks.length >= 32) {
       notify('This session has reached 32 tracks.');
       return;
@@ -336,7 +383,9 @@ export default function Studio({
     try {
       const b = await context().decodeAudioData(await file.arrayBuffer());
       if (b.duration > 300) throw new Error('Use audio up to 5 minutes long.');
+      if (!alive.current || !editAllowed.current) return;
       const f = await upload(file);
+      if (!alive.current || !editAllowed.current) return;
       const t: MixerTrack = {
         id: crypto.randomUUID(),
         name: file.name.replace(/\.[^.]+$/, ''),
@@ -387,7 +436,11 @@ export default function Studio({
           autoGainControl: false,
         },
       });
-      if (!alive.current || captureGeneration !== generation.current) {
+      if (
+        !alive.current ||
+        !editAllowed.current ||
+        captureGeneration !== generation.current
+      ) {
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
@@ -405,7 +458,7 @@ export default function Studio({
       rec.onstop = async () => {
         clearTimeout(recTimer.current);
         rec.stream.getTracks().forEach((t) => t.stop());
-        if (!alive.current) return;
+        if (!alive.current || !editAllowed.current) return;
         setRecording(false);
         stop();
         const blob = new Blob(chunks, { type: rec.mimeType });
@@ -421,7 +474,11 @@ export default function Studio({
       };
       if (data.tracks.length) {
         const backing = await playMix(data);
-        if (!alive.current || captureGeneration !== generation.current) {
+        if (
+          !alive.current ||
+          !editAllowed.current ||
+          captureGeneration !== generation.current
+        ) {
           backing.stop();
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -494,6 +551,17 @@ export default function Studio({
       (t) => (t.duration || 20) + t.offset - t.trimStart - t.trimEnd,
     ),
   );
+  if (sync.accessEnded)
+    return (
+      <div className="studio-access-note" role="alert">
+        <h2>Project access has ended</h2>
+        <p>
+          The room owner may have removed you or changed the shared project.
+          Your unsaved draft is kept in this tab. Return to the room to check
+          access.
+        </p>
+      </div>
+    );
   return (
     <div className="studio">
       <div className="studio-heading">
@@ -532,7 +600,7 @@ export default function Studio({
           <button
             className="button primary"
             onClick={() => save()}
-            disabled={!canEdit || !!busy || recording}
+            disabled={!canEdit || !!sync.conflict || !!busy || recording}
           >
             <Save size={16} /> Save project
           </button>
@@ -540,11 +608,67 @@ export default function Studio({
       </div>
       {!canEdit && (
         <p className="studio-access-note" role="status">
-          Only the project owner can save, record, or import into this
-          arrangement. You can listen and audition adjustments locally; those
-          adjustments are not shared or saved. Reopen the room studio to load
-          the owner’s latest save.
+          Ask the project owner to allow editing in the room. Until then, you
+          can listen and audition adjustments locally. Saved changes arrive
+          automatically when playback stops.
         </p>
+      )}
+      {id && (
+        <p className="studio-access-note" role="status">
+          {sync.status || 'Checking for saved changes…'}
+          {canEdit ? '. ' : ''}
+          {canEdit &&
+            ' Saving shares your arrangement and any added audio with members of rooms connected to this project.'}
+        </p>
+      )}
+      {sync.conflict && (
+        <section
+          className="studio-conflict"
+          role="alert"
+          aria-label="Competing project changes"
+        >
+          <h3>Choose how to combine these changes</h3>
+          <p>
+            Saving is paused. Independent changes will be kept. Choose which
+            version to use for: {sync.conflict.labels.join(', ')}.
+          </p>
+          <ConflictValues details={sync.conflict.details} />
+          <div className="actions">
+            <button
+              className="button secondary"
+              disabled={
+                sync.conflict.overflow || recording || playing || !!busy
+              }
+              onClick={() => sync.resolve('local')}
+            >
+              Use my competing changes
+            </button>
+            <button
+              className="button primary"
+              disabled={
+                sync.conflict.overflow || recording || playing || !!busy
+              }
+              onClick={() => sync.resolve('remote')}
+            >
+              Use saved competing changes
+            </button>
+            {sync.conflict.overflow && (
+              <button
+                className="button secondary"
+                disabled={recording || playing || !!busy}
+                onClick={() => sync.loadSaved()}
+              >
+                Discard local changes and load saved project
+              </button>
+            )}
+          </div>
+          {sync.conflict.overflow && (
+            <p>
+              Reduce tracks or notes in your local draft until the combined
+              project fits the save limits, or discard your local changes above.
+            </p>
+          )}
+        </section>
       )}
       <div className="transport">
         <div className="actions">
@@ -650,7 +774,7 @@ export default function Studio({
           </button>
           <button
             className="button secondary"
-            disabled={!canEdit || !id}
+            disabled={!canManage || !id}
             onClick={checkpointList}
           >
             Saved versions
@@ -668,7 +792,12 @@ export default function Studio({
         <span className="small-note">
           {!canEdit
             ? 'Local listening preview'
-            : saveLabel || 'Save once to enable autosave'}
+            : saveLabel ||
+              (id
+                ? autosave
+                  ? 'Autosave after 10 seconds idle'
+                  : 'Autosave is off'
+                : 'Save once to enable autosave')}
         </span>
       </div>
       <div className="loop-controls">

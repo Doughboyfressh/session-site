@@ -39,37 +39,42 @@ export async function GET(
         u.userId,
         session,
       );
-    const [members, sessions, events, active, projectInfo] = await Promise.all([
-      all(
-        "SELECT m.user,m.seen,COALESCE(p.name,'Creator') AS name,p.avatar FROM members m LEFT JOIN profiles p ON p.id=m.user WHERE m.room=?",
-        id,
-      ),
-      all(
-        'SELECT s.* FROM media_sessions s JOIN members m ON m.room=s.room AND m.user=s.user WHERE s.room=? AND s.seen>?',
-        id,
-        now - 30000,
-      ),
-      all(
-        'SELECT e.* FROM events e WHERE e.room=? AND e.id>? AND (e.recipient IS NULL OR e.recipient=?) AND e.created>? AND EXISTS (SELECT 1 FROM members m WHERE m.room=e.room AND m.user=e.sender) ORDER BY e.id ASC LIMIT 200',
-        id,
-        since,
-        u.userId,
-        now - 86400000,
-      ),
-      session
-        ? one(
-            'SELECT session FROM media_sessions WHERE room=? AND user=?',
-            id,
-            u.userId,
-          )
-        : null,
-      room.project
-        ? one(
-            'SELECT id,title,owner,revision FROM projects WHERE id=?',
-            room.project,
-          )
-        : null,
-    ]);
+    const [members, sessions, events, active, projectInfo, editors] =
+      await Promise.all([
+        all(
+          "SELECT m.user,m.seen,COALESCE(p.name,'Creator') AS name,p.avatar FROM members m LEFT JOIN profiles p ON p.id=m.user WHERE m.room=?",
+          id,
+        ),
+        all(
+          'SELECT s.* FROM media_sessions s JOIN members m ON m.room=s.room AND m.user=s.user WHERE s.room=? AND s.seen>?',
+          id,
+          now - 30000,
+        ),
+        all(
+          'SELECT e.* FROM events e WHERE e.room=? AND e.id>? AND (e.recipient IS NULL OR e.recipient=?) AND e.created>? AND EXISTS (SELECT 1 FROM members m WHERE m.room=e.room AND m.user=e.sender) ORDER BY e.id ASC LIMIT 200',
+          id,
+          since,
+          u.userId,
+          now - 86400000,
+        ),
+        session
+          ? one(
+              'SELECT session FROM media_sessions WHERE room=? AND user=?',
+              id,
+              u.userId,
+            )
+          : null,
+        room.project
+          ? one(
+              'SELECT id,title,owner,revision FROM projects WHERE id=?',
+              room.project,
+            )
+          : null,
+        all(
+          'SELECT e.user FROM room_editors e JOIN members m ON m.room=e.room AND m.user=e.user JOIN rooms r ON r.id=e.room AND r.project=e.project WHERE e.room=?',
+          id,
+        ),
+      ]);
     const safeEvents = events
       .map((e) => ({ ...e, body: JSON.parse(e.body) }))
       .filter(
@@ -89,6 +94,7 @@ export async function GET(
         },
         members,
         projectInfo,
+        editors: editors.map((e) => e.user),
         sessions,
         mediaReplaced: !!session && !!active && active.session !== session,
         mediaMissing: !!session && !active,

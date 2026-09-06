@@ -34,6 +34,8 @@ export async function privacyAction(b: any, uid: string) {
       comments: 'SELECT * FROM comments WHERE user=?',
       reports: 'SELECT * FROM reports WHERE user=?',
       memberships: 'SELECT room,seen FROM members WHERE user=?',
+      editingPermissions:
+        'SELECT room,project,grantedBy,created FROM room_editors WHERE user=?',
     }))
       result[key] = await all(sql, uid);
     return result;

@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 const base='http://127.0.0.1:8787';let checks=0;const tag=Date.now().toString(36),A='qa_owner_'+tag,B='qa_engineer_'+tag,C='qa_artist_'+tag,D='qa_other_'+tag;
 const headers=id=>id?{'oai-authenticated-user-id':id,'oai-authenticated-user-email':id+'@example.test'}:{};
-async function call(id,path,body,status=200,extra={}){const r=await fetch(base+path,{method:body?'POST':'GET',headers:{...headers(id),...(body?{'Content-Type':'application/json'}:{}),...extra},body:body?JSON.stringify(body):undefined});const t=await r.text();assert.equal(r.status,status,path+': '+t);checks++;try{return JSON.parse(t);}catch{return t;}}
+async function call(id,path,body,status=200,extra={}){const r=await fetch(base+path,{method:body?'POST':'GET',headers:{Connection:'close',...headers(id),...(body?{'Content-Type':'application/json'}:{}),...extra},body:body?JSON.stringify(body):undefined});const t=await r.text();assert.equal(r.status,status,path+': '+t);checks++;try{return JSON.parse(t);}catch{return t;}}
 const act=(id,b,status=200)=>call(id,'/api/action',b,status);
-await act(null,{action:'profile'},401);
-await call(A,'/api/action',{action:'saved',id:'demo-1',value:true},503,{Origin:'https://unrelated.example'});
+// The local Wrangler proxy can abort the next request after an early rejection of an unread body.
+// These guards run before body parsing, so bodyless POSTs verify their exact application response.
+for (const [h,status,message] of [[{},401,'Sign in to save your work.'],[{...headers(A),Origin:'https://unrelated.example'},403,'Request not allowed.']]) {
+const r=await fetch(base+'/api/action',{method:'POST',headers:h});assert.equal(r.status,status);assert.equal((await r.json()).error,message);checks++;
+}
 for(const [id,role]of[[A,'Producer'],[B,'Engineer'],[C,'Artist']])await act(id,{action:'profile',username:id.slice(0,24),name:'QA '+role,roles:[role],visibility:'private'});
 const raw=new Uint8Array(204),v=new DataView(raw.buffer);function s(i,t){for(let x=0;x<t.length;x++)raw[i+x]=t.charCodeAt(x);}s(0,'RIFF');v.setUint32(4,196,true);s(8,'WAVE');s(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,8000,true);v.setUint32(28,16000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);s(36,'data');v.setUint32(40,160,true);
 const fd=new FormData();fd.set('purpose','audio');fd.set('file',new File([raw],'test.wav',{type:'audio/wav'}));const up=await fetch(base+'/api/upload',{method:'POST',headers:headers(A),body:fd});assert.equal(up.status,200,await up.clone().text());checks++;const file=await up.json();
@@ -73,8 +76,8 @@ assert.deepEqual(races.map(r=>r.status).sort(),[200,409]);checks++;
 await act(B,[],400);
 await act(B,{action:'project',title:'Invalid null track',data:{bpm:92,tracks:[null]}},400);
 await act(B,{action:'project',title:'Missing gain',data:{bpm:92,tracks:[{...data.tracks[0],volume:undefined}]}},400);
-await act(B,{action:'project',id:project.id,title:'QA invalid tempo',data:{...data,bpm:900},baseRevision:2},400);
-await act(B,{action:'project',id:project.id,title:'QA invalid automation',data:{...data,tracks:[{...data.tracks[0],automation:[{time:1,value:99}]}]},baseRevision:2},400);
+await act(B,{action:'project',id:project.id,title:'QA invalid tempo',data:{...data,bpm:900},baseRevision:5},400);
+await act(B,{action:'project',id:project.id,title:'QA invalid automation',data:{...data,tracks:[{...data.tracks[0],automation:[{time:1,value:99}]}]},baseRevision:5},400);
 const rtc=await call(B,'/api/rtc?room='+room.id);assert.equal(rtc.relay,false);assert.equal(rtc.iceServers[0].urls,'stun:stun.cloudflare.com:3478');checks+=2;
 await call(D,'/api/rtc?room='+room.id,undefined,403);await call(null,'/api/rtc',undefined,401);
 const sB=crypto.randomUUID(),sC=crypto.randomUUID(),sC2=crypto.randomUUID();

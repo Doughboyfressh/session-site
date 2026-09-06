@@ -1195,7 +1195,7 @@ export default function SessionApp({
             />
             <p className="small-note">
               Room members can listen to the attached project and its private
-              audio. Only its owner can save changes.
+              audio. The owner can allow room members to edit and save changes.
             </p>
             <button className="button primary wide" disabled={roomBusy}>
               {roomBusy ? 'Creating your room…' : 'Create private room'}

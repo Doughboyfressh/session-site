@@ -1,4 +1,6 @@
-import { privacyAction, validateArrangement } from '@/lib/privacy';
+import { saveProject } from '@/lib/project-save';
+import { setRoomEditor } from '@/lib/room-editors';
+import { privacyAction } from '@/lib/privacy';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import {
   all,
@@ -9,7 +11,7 @@ import {
   choice,
   fail,
   roomAccess,
-  projectAccess,
+  readProject,
   readJSON,
   limit,
 } from '@/lib/server';
@@ -188,90 +190,7 @@ export async function POST(req: Request) {
         break;
       }
       case 'project': {
-        const id = b.id || crypto.randomUUID(),
-          existing = await one('SELECT * FROM projects WHERE id=?', id);
-        if (existing && existing.owner !== uid)
-          fail('Only the project owner can save this arrangement.', 403);
-        const data = b.data;
-        validateArrangement(data);
-        if (JSON.stringify(data).length > 250000)
-          fail('This arrangement is too large.');
-        if (
-          existing &&
-          Number(b.baseRevision ?? existing.revision) !== existing.revision
-        )
-          fail(
-            'A newer version was saved in another tab. Open it before saving, or create a new project.',
-            409,
-          );
-        const fileIds = [
-          ...new Set(data.tracks.map((t: any) => t.fileId).filter(Boolean)),
-        ] as string[];
-        for (const f of fileIds)
-          if (
-            !(await one(
-              "SELECT f.id FROM files f WHERE f.id=? AND (f.owner=? OR EXISTS (SELECT 1 FROM tracks t WHERE t.fileId=f.id AND t.visibility='public' AND t.permission='collaborate') OR EXISTS (SELECT 1 FROM project_files pf WHERE pf.project=? AND pf.file=f.id))",
-              f,
-              uid,
-              id,
-            ))
-          )
-            fail('This track does not allow collaboration.', 403);
-        const revision = existing ? existing.revision + 1 : 1;
-        const saved = existing
-          ? await one(
-              'UPDATE projects SET title=?,data=?,updated=?,revision=? WHERE id=? AND owner=? AND revision=? RETURNING id',
-              str(b.title),
-              JSON.stringify(data),
-              now,
-              revision,
-              id,
-              uid,
-              existing.revision,
-            )
-          : await one(
-              'INSERT INTO projects (id,owner,title,data,updated,revision) VALUES (?,?,?,?,?,?) RETURNING id',
-              id,
-              uid,
-              str(b.title),
-              JSON.stringify(data),
-              now,
-              revision,
-            );
-        if (!saved)
-          fail(
-            'Another save completed first. Reload the project before saving.',
-            409,
-          );
-        // Keep previously authorized sources available to this project's history.
-        // Project deletion or explicit file erasure removes these access links.
-        if (fileIds.length)
-          await database().batch([
-            ...fileIds.map((f) =>
-              database()
-                .prepare(
-                  'INSERT OR IGNORE INTO project_files (project,file) SELECT ?,? WHERE EXISTS (SELECT 1 FROM projects WHERE id=? AND owner=?) AND EXISTS (SELECT 1 FROM files WHERE id=?)',
-                )
-                .bind(id, f, id, uid, f),
-            ),
-          ]);
-        if (b.checkpoint !== false) {
-          await run(
-            'INSERT INTO project_versions (id,project,owner,title,data,created) VALUES (?,?,?,?,?,?)',
-            crypto.randomUUID(),
-            id,
-            uid,
-            str(b.title),
-            JSON.stringify(data),
-            now,
-          );
-          await run(
-            'DELETE FROM project_versions WHERE project=? AND id NOT IN (SELECT id FROM project_versions WHERE project=? ORDER BY created DESC LIMIT 20)',
-            id,
-            id,
-          );
-        }
-        result = { id, revision };
+        result = await saveProject(b, uid, now);
         break;
       }
       case 'deleteProject': {
@@ -282,6 +201,9 @@ export async function POST(req: Request) {
         );
         if (!p) fail('Project unavailable.', 404);
         await database().batch([
+          database()
+            .prepare('DELETE FROM room_editors WHERE project=?')
+            .bind(b.id),
           database()
             .prepare('DELETE FROM project_versions WHERE project=?')
             .bind(b.id),
@@ -377,17 +299,27 @@ export async function POST(req: Request) {
             )
               fail('Choose a saved project you own.', 403);
           }
-          const changed = await one(
-            'UPDATE rooms SET project=? WHERE id=? AND owner=? AND project IS ? AND (? IS NULL OR EXISTS (SELECT 1 FROM projects WHERE id=? AND owner=?)) RETURNING id',
-            project,
-            room.id,
-            uid,
-            b.expectedProject,
-            project,
-            project,
-            uid,
-          );
-          if (!changed)
+          const changed = await database().batch([
+            database()
+              .prepare(
+                'UPDATE rooms SET project=? WHERE id=? AND owner=? AND project IS ? AND (? IS NULL OR EXISTS (SELECT 1 FROM projects WHERE id=? AND owner=?)) RETURNING id',
+              )
+              .bind(
+                project,
+                room.id,
+                uid,
+                b.expectedProject,
+                project,
+                project,
+                uid,
+              ),
+            database()
+              .prepare(
+                'DELETE FROM room_editors WHERE room=? AND project IS NOT ? AND EXISTS (SELECT 1 FROM rooms WHERE id=? AND owner=? AND project IS ?)',
+              )
+              .bind(room.id, project, room.id, uid, project),
+          ]);
+          if (!changed[0].results?.length)
             fail(
               'The room or selected project changed. Reload and try again.',
               409,
@@ -409,9 +341,11 @@ export async function POST(req: Request) {
             403,
           );
         await run(
-          'INSERT OR IGNORE INTO members (room,user,seen) SELECT ?,?,? WHERE (SELECT COUNT(*) FROM members WHERE room=?)<4',
-          r.id,
+          'INSERT OR IGNORE INTO members (room,user,seen) SELECT id,?,? FROM rooms WHERE id=? AND invite=? AND expires>? AND (SELECT COUNT(*) FROM members WHERE room=?)<4',
           uid,
+          now,
+          r.id,
+          b.invite,
           now,
           r.id,
         );
@@ -436,6 +370,9 @@ export async function POST(req: Request) {
           fail('Only the host can remove collaborators.', 403);
         await database().batch([
           database()
+            .prepare('DELETE FROM room_editors WHERE room=? AND user=?')
+            .bind(b.id, b.user),
+          database()
             .prepare('DELETE FROM members WHERE room=? AND user=?')
             .bind(b.id, b.user),
           database()
@@ -459,6 +396,7 @@ export async function POST(req: Request) {
         if (r.owner === uid) fail('The host can close the room instead.');
         await database().batch(
           [
+            'DELETE FROM room_editors WHERE room=? AND user=?',
             'DELETE FROM members WHERE room=? AND user=?',
             'DELETE FROM media_sessions WHERE room=? AND user=?',
             'DELETE FROM events WHERE room=? AND sender=?',
@@ -471,6 +409,7 @@ export async function POST(req: Request) {
         if (r.owner !== uid) fail('Only the host can close a room.', 403);
         await database().batch(
           [
+            'DELETE FROM room_editors WHERE room=?',
             'DELETE FROM media_sessions WHERE room=?',
             'DELETE FROM events WHERE room=?',
             'DELETE FROM members WHERE room=?',
@@ -480,9 +419,11 @@ export async function POST(req: Request) {
         break;
       }
       case 'projectRead': {
-        const p = await projectAccess(b.id, uid);
-        if (!p) fail('Project unavailable.', 403);
-        result = { ...p, canEdit: p.owner === uid, data: JSON.parse(p.data) };
+        result = await readProject(b.id, uid);
+        break;
+      }
+      case 'roomEditor': {
+        result = await setRoomEditor(b, uid);
         break;
       }
       case 'report': {

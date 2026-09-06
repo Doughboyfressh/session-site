@@ -49,11 +49,32 @@ export async function roomAccess(id: string, user: string) {
 }
 export async function projectAccess(id: string, user: string) {
   return one(
-    'SELECT p.* FROM projects p WHERE p.id=? AND (p.owner=? OR EXISTS (SELECT 1 FROM rooms r JOIN members m ON r.id=m.room WHERE r.project=p.id AND m.user=?))',
+    `SELECT p.*,${projectEditCondition('p')} AS canEdit FROM projects p WHERE p.id=? AND (p.owner=? OR EXISTS (SELECT 1 FROM rooms r JOIN members m ON r.id=m.room WHERE r.project=p.id AND m.user=?))`,
+    user,
+    user,
     id,
     user,
     user,
   );
+}
+// Alias is a fixed application identifier, never request input.
+export function projectEditCondition(alias: string) {
+  return `(${alias}.owner=? OR EXISTS (SELECT 1 FROM room_editors e JOIN rooms r ON r.id=e.room AND r.project=e.project JOIN members m ON m.room=e.room AND m.user=e.user WHERE e.project=${alias}.id AND e.user=? AND r.owner=${alias}.owner AND e.grantedBy=${alias}.owner))`;
+}
+export async function readProject(id: string, user: string) {
+  const p = await projectAccess(id, user);
+  if (!p) fail('Project access ended or the project is unavailable.', 403);
+  const editor = p.updatedBy
+    ? await one('SELECT name FROM profiles WHERE id=?', p.updatedBy)
+    : null;
+  const { lastSaveId: _lastSaveId, ...visible } = p;
+  return {
+    ...visible,
+    canEdit: !!p.canEdit,
+    canManage: p.owner === user,
+    lastEditorName: editor?.name || 'Collaborator',
+    data: JSON.parse(p.data),
+  };
 }
 export async function fileAccess(id: string, user: string) {
   return one(

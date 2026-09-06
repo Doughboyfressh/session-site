@@ -2,12 +2,15 @@
 import { useState } from 'react';
 import { ArrowUpRight, Music2, Plus } from 'lucide-react';
 import { action, Pick } from './helpers';
+import { Switch } from '@/components/ui/switch';
 
 export default function RoomStudio({
   room,
   projectInfo,
   userId,
   projects,
+  members,
+  editors,
   onChanged,
   notify,
 }: {
@@ -15,6 +18,8 @@ export default function RoomStudio({
   projectInfo: { title: string } | null;
   userId: string;
   projects: { id: string; title: string }[];
+  members: { user: string; name: string }[];
+  editors: string[];
   onChanged: () => unknown;
   notify: (message: string) => void;
 }) {
@@ -22,6 +27,29 @@ export default function RoomStudio({
     [selected, setSelected] = useState(''),
     [busy, setBusy] = useState(false);
   const host = room.owner === userId;
+  async function allowEditing(user: string, editable: boolean) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await action({
+        action: 'roomEditor',
+        id: room.id,
+        project: room.project,
+        user,
+        editable,
+      });
+      notify(
+        editable
+          ? 'Editing enabled for this room project.'
+          : 'Editing access removed.',
+      );
+      await onChanged();
+    } catch (e: any) {
+      notify(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function update(mode: 'create' | 'attach' | 'detach') {
     if (busy) return;
     setBusy(true);
@@ -94,11 +122,51 @@ export default function RoomStudio({
         Use Share screen &amp; audio and select the studio tab with tab audio
         enabled so everyone can hear your work.
         {room.project &&
-          ' Room members can open the project; only its owner can save changes. Reopen it to load the latest save.'}
+          ' Room members can open the project. Saved changes arrive automatically when studio playback or recording stops.'}
         {!room.project &&
           !host &&
           ' The host can create or attach the room’s shared project.'}
       </p>
+      {room.project && (
+        <div className="room-editor-access">
+          <h3>
+            {host
+              ? 'Who can edit this project'
+              : editors.includes(userId)
+                ? 'You can edit this project'
+                : 'You have listening access'}
+          </h3>
+          <p className="room-studio-note">
+            {host
+              ? 'Allow trusted room members to save arrangements and add audio. New audio becomes available to members of every room connected to this project. Editing access ends when they leave this room or you change its project.'
+              : 'The project owner controls editing access. Members with editing access can save changes and add recordings.'}
+          </p>
+          {host &&
+            members
+              .filter((member) => member.user !== room.owner)
+              .map((member) => (
+                <label className="room-editor-row" key={member.user}>
+                  <span>{member.name}</span>
+                  <span className="inline-switch">
+                    <Switch
+                      checked={editors.includes(member.user)}
+                      disabled={busy}
+                      onCheckedChange={(value) =>
+                        allowEditing(member.user, value)
+                      }
+                      aria-label={'Allow editing for ' + member.name}
+                    />{' '}
+                    Allow editing
+                  </span>
+                </label>
+              ))}
+          {host && members.length < 2 && (
+            <p className="room-studio-note">
+              Editing controls appear here when another member enters the room.
+            </p>
+          )}
+        </div>
+      )}
       {host && (editing || !room.project) && (
         <div className="room-studio-setup">
           {!room.project && (

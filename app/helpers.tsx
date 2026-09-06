@@ -22,7 +22,10 @@ export async function action(body: any) {
     body: JSON.stringify(body),
   });
   const j = (await r.json()) as any;
-  if (!r.ok) throw new Error(j.error || 'Could not save.');
+  if (!r.ok)
+    throw Object.assign(new Error(j.error || 'Could not save.'), {
+      status: r.status,
+    });
   return j;
 }
 export async function upload(file: File, purpose = 'audio') {
