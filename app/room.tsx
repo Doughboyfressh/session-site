@@ -20,6 +20,7 @@ import {
 import { action, Avatar, Confirm } from './helpers';
 import { PeerLink } from '@/lib/peer';
 import Diagnostics from './diagnostics';
+import RoomStudio from './room-studio';
 function MediaTile({
   stream,
   muted,
@@ -47,13 +48,15 @@ export default function Room({
   id,
   user,
   onExit,
-  onProject,
+  projects,
+  onProjectsChanged,
   notify,
 }: {
   id: string;
   user: any;
   onExit: () => void;
-  onProject: (p: any) => void;
+  projects: { id: string; title: string }[];
+  onProjectsChanged: () => unknown;
   notify: (m: string) => void;
 }) {
   const [state, setState] = useState<any>(null),
@@ -542,6 +545,16 @@ export default function Room({
           <Diagnostics key={id} roomId={id} onRelay={setRelay} />
         </section>
       )}
+      {state && (
+        <RoomStudio
+          room={state.room}
+          projectInfo={state.projectInfo}
+          userId={user.id}
+          projects={projects}
+          onChanged={onProjectsChanged}
+          notify={notify}
+        />
+      )}
       <div className="room-layout">
         <div>
           <div className="video-grid">
@@ -669,25 +682,6 @@ export default function Room({
                 with audio enabled. One person drives the session while everyone
                 listens and talks. Headphones help prevent echo.
               </p>
-              {state?.room.project && (
-                <button
-                  className="button secondary"
-                  onClick={async () => {
-                    try {
-                      onProject(
-                        await action({
-                          action: 'projectRead',
-                          id: state.room.project,
-                        }),
-                      );
-                    } catch (e: any) {
-                      notify(e.message);
-                    }
-                  }}
-                >
-                  Open room project
-                </button>
-              )}
             </div>
           </div>
           <p className="small-note">

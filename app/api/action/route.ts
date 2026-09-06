@@ -323,6 +323,79 @@ export async function POST(req: Request) {
         result = { id };
         break;
       }
+      case 'roomProject': {
+        const room = await roomAccess(b.id, uid);
+        if (room.owner !== uid)
+          fail('Only the room host can choose its studio project.', 403);
+        const mode = choice(b.mode, ['create', 'attach', 'detach']);
+        if (b.expectedProject !== null && typeof b.expectedProject !== 'string')
+          fail('Reload the room before choosing a project.');
+        if (room.project !== b.expectedProject)
+          fail('The room project changed in another tab. Try again.', 409);
+        let project: string | null = null;
+        if (mode === 'create') {
+          if (room.project)
+            fail(
+              'Remove the current room project before creating another.',
+              409,
+            );
+          project = crypto.randomUUID();
+          // The conditional insert and attachment are one transaction so two
+          // host tabs cannot create an orphan or replace each other's project.
+          await database().batch([
+            database()
+              .prepare(
+                'INSERT INTO projects (id,owner,title,data,updated,revision) SELECT ?,?,?,?,?,1 WHERE EXISTS (SELECT 1 FROM rooms WHERE id=? AND owner=? AND project IS NULL)',
+              )
+              .bind(
+                project,
+                uid,
+                (room.title + ' — studio').slice(0, 120),
+                JSON.stringify({ bpm: 92, tracks: [] }),
+                now,
+                room.id,
+                uid,
+              ),
+            database()
+              .prepare(
+                'UPDATE rooms SET project=? WHERE id=? AND owner=? AND project IS NULL AND EXISTS (SELECT 1 FROM projects WHERE id=? AND owner=?)',
+              )
+              .bind(project, room.id, uid, project, uid),
+          ]);
+          const current = await roomAccess(room.id, uid);
+          if (current.project !== project)
+            fail('The room project changed in another tab. Try again.', 409);
+        } else {
+          if (mode === 'attach') {
+            project = str(b.project);
+            if (
+              !(await one(
+                'SELECT id FROM projects WHERE id=? AND owner=?',
+                project,
+                uid,
+              ))
+            )
+              fail('Choose a saved project you own.', 403);
+          }
+          const changed = await one(
+            'UPDATE rooms SET project=? WHERE id=? AND owner=? AND project IS ? AND (? IS NULL OR EXISTS (SELECT 1 FROM projects WHERE id=? AND owner=?)) RETURNING id',
+            project,
+            room.id,
+            uid,
+            b.expectedProject,
+            project,
+            project,
+            uid,
+          );
+          if (!changed)
+            fail(
+              'The room or selected project changed. Reload and try again.',
+              409,
+            );
+        }
+        result = { project };
+        break;
+      }
       case 'joinRoom': {
         const r = await one(
           'SELECT * FROM rooms WHERE id=? AND invite=? AND expires>?',
@@ -409,7 +482,7 @@ export async function POST(req: Request) {
       case 'projectRead': {
         const p = await projectAccess(b.id, uid);
         if (!p) fail('Project unavailable.', 403);
-        result = { ...p, data: JSON.parse(p.data) };
+        result = { ...p, canEdit: p.owner === uid, data: JSON.parse(p.data) };
         break;
       }
       case 'report': {

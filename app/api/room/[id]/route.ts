@@ -39,7 +39,7 @@ export async function GET(
         u.userId,
         session,
       );
-    const [members, sessions, events, active] = await Promise.all([
+    const [members, sessions, events, active, projectInfo] = await Promise.all([
       all(
         "SELECT m.user,m.seen,COALESCE(p.name,'Creator') AS name,p.avatar FROM members m LEFT JOIN profiles p ON p.id=m.user WHERE m.room=?",
         id,
@@ -63,6 +63,12 @@ export async function GET(
             u.userId,
           )
         : null,
+      room.project
+        ? one(
+            'SELECT id,title,owner,revision FROM projects WHERE id=?',
+            room.project,
+          )
+        : null,
     ]);
     const safeEvents = events
       .map((e) => ({ ...e, body: JSON.parse(e.body) }))
@@ -82,6 +88,7 @@ export async function GET(
           invite: room.owner === u.userId ? room.invite : undefined,
         },
         members,
+        projectInfo,
         sessions,
         mediaReplaced: !!session && !!active && active.session !== session,
         mediaMissing: !!session && !active,

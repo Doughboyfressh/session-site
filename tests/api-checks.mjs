@@ -20,7 +20,46 @@ await act(C,{action:'joinRoom',id:room.id,invite:'bad'},403);await act(C,{action
 await call(C,'/api/file/'+file.id);await act(C,{action:'projectRead',id:project.id});await act(C,{action:'project',id:project.id,title:'QA overwrite',data},403);await call(D,'/api/file/'+file.id,undefined,404);await act(D,{action:'projectRead',id:project.id},403);await act(C,{action:'removeMember',id:room.id,user:B},403);
 await call(C,'/api/room/'+room.id,{kind:'chat',clientId:crypto.randomUUID(),body:{text:'QA session note'}});const messages=await call(B,'/api/room/'+room.id);assert(messages.events.some(e=>e.body.text==='QA session note'));checks++;
 
+// Connecting a room to its studio must preserve ownership and revoke only
+// the room's access grant when the attachment is removed.
+assert.equal(messages.projectInfo.id,project.id);checks++;
+await act(C,{action:'roomProject',id:room.id,mode:'detach',expectedProject:project.id},403);
+await act(D,{action:'roomProject',id:room.id,mode:'attach',expectedProject:project.id,project:project.id},403);
+await act(B,{action:'roomProject',id:room.id,mode:'detach',expectedProject:null},409);
+await act(B,{action:'roomProject',id:room.id,mode:'detach',expectedProject:project.id});
+const detached=await call(C,'/api/room/'+room.id);assert.equal(detached.room.project,null);assert.equal(detached.projectInfo,null);checks+=2;
+await act(C,{action:'projectRead',id:project.id},403);await call(C,'/api/file/'+file.id,undefined,404);
+const foreignProject=await act(C,{action:'project',title:'QA member-owned project',data:{bpm:100,tracks:[]}});
+await act(B,{action:'roomProject',id:room.id,mode:'attach',expectedProject:null,project:foreignProject.id},403);
+await act(B,{action:'roomProject',id:room.id,mode:'attach',expectedProject:null,project:project.id});
+const listening=await act(C,{action:'projectRead',id:project.id});assert.equal(listening.canEdit,false);checks++;
+await call(C,'/api/file/'+file.id);
+await act(C,{action:'project',title:'QA unauthorized room fork',data},403);
+const emptyRoom=await act(B,{action:'room',title:'QA new room studio'});
+const emptyRoomState=await call(B,'/api/room/'+emptyRoom.id);
+await act(C,{action:'joinRoom',id:emptyRoom.id,invite:emptyRoomState.room.invite});
+await act(C,{action:'roomProject',id:emptyRoom.id,mode:'create',expectedProject:null},403);
+const beforeCreate=await call(B,'/api/state');
+const createRace=await Promise.all([1,2].map(()=>fetch(base+'/api/action',{method:'POST',headers:{...headers(B),'Content-Type':'application/json'},body:JSON.stringify({action:'roomProject',id:emptyRoom.id,mode:'create',expectedProject:null})})));
+assert.deepEqual(createRace.map(r=>r.status).sort(),[200,409]);checks++;
+await Promise.all(createRace.map(r=>r.text()));
+const createdRoom=await call(B,'/api/room/'+emptyRoom.id),createdId=createdRoom.room.project;
+assert(createdId);assert.equal(createdRoom.projectInfo.id,createdId);checks+=2;
+const afterCreate=await call(B,'/api/state');assert.equal(afterCreate.projects.length,beforeCreate.projects.length+1);checks++;
+const createdProject=await act(B,{action:'projectRead',id:createdId});assert.equal(createdProject.canEdit,true);assert.deepEqual(createdProject.data,{bpm:92,tracks:[]});checks+=2;
+await act(C,{action:'projectRead',id:createdId});
+await act(C,{action:'project',id:createdId,title:'QA forbidden edit',data:{bpm:120,tracks:[]}},403);
+await act(B,{action:'roomProject',id:emptyRoom.id,mode:'create',expectedProject:null},409);
+await act(B,{action:'roomProject',id:emptyRoom.id,mode:'attach',expectedProject:createdId,project:project.id});
+await act(C,{action:'projectRead',id:createdId},403);
+await act(B,{action:'roomProject',id:emptyRoom.id,mode:'detach',expectedProject:project.id});
+await call(C,'/api/file/'+file.id); // The original room still grants access.
+await act(B,{action:'closeRoom',id:emptyRoom.id});
+await act(B,{action:'roomProject',id:emptyRoom.id,mode:'create',expectedProject:null},403);
+await act(B,{action:'deleteProject',id:createdId});await act(C,{action:'deleteProject',id:foreignProject.id});
+
 const ownerVersion=await act(B,{action:'projectRead',id:project.id});
+assert.equal(ownerVersion.canEdit,true);checks++;
 assert.equal(ownerVersion.revision,1);checks++;
 const update=await act(B,{action:'project',id:project.id,title:'QA revised',data,baseRevision:1});assert.equal(update.revision,2);checks++;
 await act(B,{action:'project',id:project.id,title:'QA stale',data,baseRevision:1},409);

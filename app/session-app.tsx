@@ -1055,12 +1055,8 @@ export default function SessionApp({
                   go('Studio rooms');
                   refresh();
                 }}
-                onProject={(p) => {
-                  const url = new URL(window.location.href);
-                  url.search = '?project=' + p.id;
-                  url.hash = '';
-                  window.open(url.href, '_blank', 'noopener');
-                }}
+                projects={state.projects}
+                onProjectsChanged={refresh}
               />
             ) : (
               signin

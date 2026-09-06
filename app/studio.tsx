@@ -51,6 +51,7 @@ export default function Studio({
   onBrowse: () => void;
   notify: (s: string) => void;
 }) {
+  const canEdit = initial?.canEdit !== false;
   const [title, setTitle] = useState(initial?.title || 'Untitled session'),
     [id, setId] = useState(initial?.id || ''),
     [data, setData] = useState<Arrangement>(
@@ -90,7 +91,15 @@ export default function Studio({
   titleRef.current = title;
   tracksRef.current = data;
   useEffect(() => {
-    onDraft({ id, title, data, revision, dirty });
+    onDraft({
+      id,
+      title,
+      data,
+      revision,
+      dirty,
+      canEdit,
+      owner: initial?.owner,
+    });
   }, [id, title, data, revision, dirty]);
   useEffect(() => {
     alive.current = true;
@@ -183,7 +192,7 @@ export default function Studio({
     playback.current?.update?.(data);
   }, [data]);
   useEffect(() => {
-    if (!autosave || !id || !dirty || busy || recording) return;
+    if (!canEdit || !autosave || !id || !dirty || busy || recording) return;
     const timer = setTimeout(() => save(true), 10000);
     return () => clearTimeout(timer);
   }, [autosave, id, dirty, data, title, busy, recording]);
@@ -230,6 +239,7 @@ export default function Studio({
     setSelected(t.id);
   }
   async function checkpointList() {
+    if (!canEdit) return;
     try {
       setVersions(await action({ action: 'projectVersions', id }));
     } catch (e: any) {
@@ -272,6 +282,8 @@ export default function Studio({
     }
   }
   async function save(automatic = false) {
+    if (!canEdit)
+      return notify('Only the project owner can save this room project.');
     if (saving.current) return;
     saving.current = true;
     const savedData = data;
@@ -315,6 +327,7 @@ export default function Studio({
     }
   }
   async function addFile(file: File) {
+    if (!canEdit) return;
     if (data.tracks.length >= 32) {
       notify('This session has reached 32 tracks.');
       return;
@@ -351,6 +364,7 @@ export default function Studio({
     }
   }
   async function record() {
+    if (!canEdit) return;
     if (recording) {
       recorder.current?.stop();
       return;
@@ -490,6 +504,7 @@ export default function Studio({
           <input
             className="project-title"
             aria-label="Project title"
+            readOnly={!canEdit}
             value={title}
             maxLength={120}
             onChange={(e) => {
@@ -499,7 +514,11 @@ export default function Studio({
           />
           <span className="subtle">
             <LockKeyhole size={13} />
-            {dirty ? 'Unsaved changes' : 'Private project'}
+            {!canEdit
+              ? 'Room project · listening preview'
+              : dirty
+                ? 'Unsaved changes'
+                : 'Private project'}
           </span>
         </div>
         <div className="actions">
@@ -513,12 +532,20 @@ export default function Studio({
           <button
             className="button primary"
             onClick={() => save()}
-            disabled={!!busy || recording}
+            disabled={!canEdit || !!busy || recording}
           >
             <Save size={16} /> Save project
           </button>
         </div>
       </div>
+      {!canEdit && (
+        <p className="studio-access-note" role="status">
+          Only the project owner can save, record, or import into this
+          arrangement. You can listen and audition adjustments locally; those
+          adjustments are not shared or saved. Reopen the room studio to load
+          the owner’s latest save.
+        </p>
+      )}
       <div className="transport">
         <div className="actions">
           <button
@@ -539,7 +566,7 @@ export default function Studio({
           <button
             className={'record-button ' + (recording ? 'recording' : '')}
             onClick={record}
-            disabled={!!busy}
+            disabled={!canEdit || !!busy}
             aria-label={recording ? 'Stop recording' : 'Record microphone'}
           >
             <span />
@@ -623,7 +650,7 @@ export default function Studio({
           </button>
           <button
             className="button secondary"
-            disabled={!id}
+            disabled={!canEdit || !id}
             onClick={checkpointList}
           >
             Saved versions
@@ -633,13 +660,15 @@ export default function Studio({
           <Switch
             checked={autosave}
             onCheckedChange={setAutosave}
-            disabled={!id}
+            disabled={!canEdit || !id}
             aria-label="Autosave"
           />{' '}
           Autosave
         </label>
         <span className="small-note">
-          {saveLabel || 'Save once to enable autosave'}
+          {!canEdit
+            ? 'Local listening preview'
+            : saveLabel || 'Save once to enable autosave'}
         </span>
       </div>
       <div className="loop-controls">
@@ -828,23 +857,35 @@ export default function Studio({
               <div className="studio-empty">
                 <AudioLines size={46} />
                 <h2>Every great track starts somewhere.</h2>
-                <p>Bring in a beat, record a vocal, or build your own drums.</p>
-                <button className="button primary" onClick={onBrowse}>
+                <p>
+                  {canEdit
+                    ? 'Bring in a beat, record a vocal, or build your own drums.'
+                    : 'The owner has not added tracks to this room project yet.'}
+                </p>
+                <button
+                  className="button primary"
+                  onClick={onBrowse}
+                  disabled={!canEdit}
+                >
                   <Disc3 size={17} /> Find a beat
                 </button>
               </div>
             )}
             <div className="add-track">
-              <button onClick={() => input.current?.click()} disabled={!!busy}>
+              <button
+                onClick={() => input.current?.click()}
+                disabled={!canEdit || !!busy}
+              >
                 <Plus size={16} /> Import audio
               </button>
-              <button onClick={onBrowse}>
+              <button onClick={onBrowse} disabled={!canEdit}>
                 <Disc3 size={16} /> Add from beat library
               </button>
             </div>
             <input
               ref={input}
               type="file"
+              disabled={!canEdit}
               accept="audio/*,.wav,.mp3,.flac,.m4a"
               hidden
               onChange={(e) => {
