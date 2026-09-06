@@ -93,7 +93,8 @@ export default function Diagnostics({
       b: PeerLink | null = null,
       stream: MediaStream | null = null,
       extra: MediaStream | null = null,
-      timer: any;
+      timer: any,
+      requestTimer: ReturnType<typeof setTimeout> | undefined;
     const resources: MediaStream[] = [];
     const tones: OscillatorNode[] = [];
     const seen = new Map<string, MediaStream>();
@@ -119,6 +120,7 @@ export default function Diagnostics({
       if (disposed) return;
       disposed = true;
       abort.abort();
+      clearTimeout(requestTimer);
       clearInterval(timer);
       a?.close();
       b?.close();
@@ -148,16 +150,22 @@ export default function Diagnostics({
       await until(() => c!.state === 'running', 4000);
       if (roomId)
         await step('Private room relay access', async () => {
+          requestTimer = setTimeout(() => abort.abort(), 15000);
           const response = await fetch(
             '/api/rtc?room=' + encodeURIComponent(roomId),
             { signal: abort.signal },
-          );
+          ).catch(() => {
+            throw new Error(
+              'Relay access could not be reached within the connection check. Check your network and try again.',
+            );
+          });
           const issued = (await response.json()) as {
             error?: string;
             iceServers?: RTCIceServer[];
             relay?: boolean;
             expires?: number;
           };
+          clearTimeout(requestTimer);
           active();
           if (!response.ok)
             throw new Error(
@@ -435,13 +443,29 @@ export default function Diagnostics({
         );
         const before = await Promise.all([a!.stats(), b!.stats()]);
         await until(async () => {
+          // Observe fresh audio over time so buffered pre-restart media cannot
+          // make a stalled connection look recovered.
+          for (let sample = 0; sample < 5; sample++) {
+            await pause(250);
+            active();
+            if (
+              c!.state !== 'running' ||
+              receivedRms(stream!.id) <= 0.005 ||
+              receivedRms(trackB.id) <= 0.005
+            )
+              return false;
+          }
           const after = await Promise.all([a!.stats(), b!.stats()]);
-          return after.every(
-            (value, index) =>
-              value.state === 'connected' &&
-              value.bytes > before[index].bytes &&
-              value.frames > before[index].frames &&
-              (!roomId || value.route === 'relay'),
+          return (
+            a!.pc.signalingState === 'stable' &&
+            b!.pc.signalingState === 'stable' &&
+            after.every(
+              (value, index) =>
+                value.state === 'connected' &&
+                value.bytes > before[index].bytes &&
+                value.frames > before[index].frames &&
+                (!roomId || value.route === 'relay'),
+            )
           );
         });
         await until(
@@ -452,7 +476,7 @@ export default function Diagnostics({
           throw new Error('Audio missing after ICE restart. ' + graph());
         });
         const after = await Promise.all([a!.stats(), b!.stats()]);
-        return `Both ICE identities changed. Received ${after[0].bytes - before[0].bytes}/${after[1].bytes - before[1].bytes} new bytes, new video frames, and nonzero audio in both directions.${roomId ? ' Both selected routes remained relay connections.' : ''}`;
+        return `Both ICE identities changed. Received ${after[0].bytes - before[0].bytes}/${after[1].bytes - before[1].bytes} new bytes, new video frames, and sustained nonzero audio in both directions over five samples.${roomId ? ' Both selected routes remained relay connections.' : ''}`;
       });
       await step('Add and stop a second shared stream', async () => {
         const dest = c!.createMediaStreamDestination(),
