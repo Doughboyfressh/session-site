@@ -79,19 +79,77 @@ export function mergeProject(
     );
   }
   const tracks = new Map<string, MixerTrack>();
+  const handled = new Set<string>();
+  // Splits are transactions: selecting a competing move/removal must also remove
+  // children introduced by the rejected split, rather than leaving orphan halves.
+  const families = new Map<string, Set<string>>();
+  for (const map of maps)
+    for (const t of map.values())
+      if (t.splitFrom) {
+        const members = families.get(t.splitFrom) || new Set([t.splitFrom]);
+        members.add(t.id);
+        families.set(t.splitFrom, members);
+      }
+  for (const [root, ids] of families) {
+    const groups = [base, local, remote].map((p) =>
+      p.data.tracks.filter((t) => ids.has(t.id)),
+    );
+    const topology = groups.map((group) => group.map((t) => t.id).sort());
+    if (equal(topology[0], topology[1]) && equal(topology[0], topology[2]))
+      continue;
+    const label =
+      (bm.get(root) || lm.get(root) || rm.get(root) || groups.flat()[0])
+        ?.name || 'Clip';
+    const selected = pick(
+      groups[0],
+      groups[1],
+      groups[2],
+      label + ' · split / related edits',
+    );
+    for (const t of selected) tracks.set(t.id, structuredClone(t));
+    for (const id of ids) handled.add(id);
+  }
+  const geometry = [
+    'offset',
+    'trimStart',
+    'trimEnd',
+    'fadeStart',
+    'fadeEnd',
+    'fadeIn',
+    'fadeOut',
+    'splitFrom',
+  ];
+  const timing = (t: MixerTrack) =>
+    Object.fromEntries(
+      geometry
+        .filter((k) => (t as any)[k] !== undefined)
+        .map((k) => [k, (t as any)[k]]),
+    );
   for (const id of [
     ...new Set([...bm.keys(), ...lm.keys(), ...rm.keys()]),
   ].sort()) {
+    if (handled.has(id)) continue;
     const b = bm.get(id),
       l = lm.get(id),
       r = rm.get(id);
     const label = (l || r || b)!.name;
     let merged: MixerTrack | undefined;
     if (b && l && r) {
-      merged = { id } as MixerTrack;
+      merged = {
+        id,
+        ...structuredClone(
+          pick(
+            timing(b),
+            timing(l),
+            timing(r),
+            label + ' · clip timing and fades',
+          ),
+        ),
+      } as MixerTrack;
       for (const key of [
         ...new Set([...Object.keys(b), ...Object.keys(l), ...Object.keys(r)]),
       ].sort()) {
+        if (geometry.includes(key)) continue;
         const value = pick(
           (b as any)[key],
           (l as any)[key],

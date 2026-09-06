@@ -115,6 +115,8 @@ export function validateArrangement(d: any) {
       ['compression', 0, 1],
       ['fadeIn', 0, 30],
       ['fadeOut', 0, 30],
+      ['fadeStart', 0, 300],
+      ['fadeEnd', 0, 300],
     ] as [string, number, number][]) {
       if (
         t[key] !== undefined &&
@@ -124,6 +126,13 @@ export function validateArrangement(d: any) {
     }
     if (t.fileId && typeof t.fileId !== 'string')
       fail('Invalid audio reference.');
+    if (
+      t.splitFrom !== undefined &&
+      (typeof t.splitFrom !== 'string' ||
+        !t.splitFrom.length ||
+        t.splitFrom.length > 128)
+    )
+      fail('Invalid split reference.');
     if (t.notes) {
       if (!Array.isArray(t.notes) || t.notes.length > 256)
         fail('Use up to 256 notes per instrument.');

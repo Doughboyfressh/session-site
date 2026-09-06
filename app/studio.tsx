@@ -43,6 +43,17 @@ import ExportAudio from './export-audio';
 import RecordTake from './record-take';
 import type { RecordedTake } from '@/lib/recording';
 import type { RoomAudio } from '@/lib/room-audio';
+import ArrangementTimeline from './arrangement-timeline';
+import MixerBoard from './mixer-board';
+import {
+  clipLength,
+  duplicateClip,
+  gridSeconds,
+  moveClip,
+  snapTime,
+  splitClip,
+  type ClipGrid,
+} from '@/lib/clip-edit';
 export default function Studio({
   initial,
   onDraft,
@@ -65,6 +76,21 @@ export default function Studio({
   catalog?: Track[];
 }) {
   const [library, setLibrary] = useState(false);
+  const [grid, setGrid] = useState<ClipGrid>('quarter');
+  const [zoom, setZoom] = useState(1);
+  const [levels, setLevels] = useState<Record<string, number>>({});
+  const [gesturing, setGesturing] = useState(false);
+  const gesture = useRef<{ recorded: boolean } | null>(null);
+  function beginGesture() {
+    if (!gesture.current) {
+      gesture.current = { recorded: false };
+      setGesturing(true);
+    }
+  }
+  function endGesture() {
+    gesture.current = null;
+    setGesturing(false);
+  }
   const browse = () => (catalog ? setLibrary(true) : onBrowse());
   const [title, setTitle] = useState(initial?.title || 'Untitled session'),
     [id, setId] = useState(initial?.id || ''),
@@ -114,7 +140,7 @@ export default function Studio({
     initial,
     id,
     snapshot: { title, data },
-    paused: recording || playing || !!busy || !!exportSnapshot,
+    paused: recording || playing || !!busy || !!exportSnapshot || gesturing,
     apply: (p, changed, resetHistory = true) => {
       setTitle(p.title);
       setData(p.data);
@@ -132,6 +158,7 @@ export default function Studio({
       setAutosave(false);
       stop();
       editEpoch.current++;
+      endGesture();
     },
   });
   const { revision } = sync;
@@ -144,14 +171,17 @@ export default function Studio({
   editAllowed.current = canEdit;
   useEffect(() => {
     if (!roomAllowed) {
+      endGesture();
       setAutosave(false);
       stop();
       editEpoch.current++;
     }
   }, [roomAllowed]);
   useEffect(() => {
-    onActivity?.(recording || !!busy || !!exportSnapshot || library);
-  }, [recording, busy, exportSnapshot, library]);
+    onActivity?.(
+      recording || !!busy || !!exportSnapshot || library || gesturing,
+    );
+  }, [recording, busy, exportSnapshot, library, gesturing]);
   useEffect(() => () => onActivity?.(false), []);
   useEffect(() => {
     onDraft({
@@ -190,22 +220,38 @@ export default function Studio({
     const timer = setInterval(() => {
       setPosition(playback.current?.position?.() || 0);
       setLevel(playback.current?.level?.() || 0);
+      setLevels(playback.current?.levels?.() || {});
     }, 70);
     return () => clearInterval(timer);
   }, [playing]);
   const mutate = (fn: (d: Arrangement) => Arrangement) => {
-    setData((d) => {
+    const d = tracksRef.current;
+    const next = fn(d);
+    if (JSON.stringify(d) === JSON.stringify(next)) return;
+    if (!gesture.current?.recorded) {
       past.current = [...past.current.slice(-49), structuredClone(d)];
       future.current = [];
       setHistoryTick((x) => x + 1);
-      return fn(d);
-    });
+      if (gesture.current) gesture.current.recorded = true;
+    }
+    tracksRef.current = next;
+    setData(next);
     setDirty(true);
   };
   const patch = (tid: string, p: Partial<MixerTrack>) =>
     mutate((d) => ({
       ...d,
-      tracks: d.tracks.map((t) => (t.id === tid ? { ...t, ...p } : t)),
+      tracks: d.tracks.map((t) =>
+        t.id === tid
+          ? {
+              ...t,
+              ...p,
+              ...(['notes', 'sequence', 'sound', 'fileId'].some((k) => k in p)
+                ? { peaks: undefined, duration: undefined }
+                : {}),
+            }
+          : t,
+      ),
     }));
   async function enrich(t: MixerTrack) {
     const b = await bufferFor(t, data.bpm);
@@ -262,6 +308,7 @@ export default function Studio({
       !id ||
       !dirty ||
       busy ||
+      gesturing ||
       recording
     )
       return;
@@ -277,8 +324,10 @@ export default function Studio({
     recording,
     canEdit,
     sync.conflict,
+    gesturing,
   ]);
   function undo(redo = false) {
+    if (playing || recording || busy || gesturing) return;
     const source = redo ? future : past,
       target = redo ? past : future;
     if (!source.current.length) return;
@@ -302,23 +351,58 @@ export default function Studio({
     setTab('Piano roll');
   }
   function duplicate() {
-    if (!focus || data.tracks.length >= 32) return;
-    if (
-      focus.offset + (focus.duration || 0) - focus.trimStart - focus.trimEnd >=
-      300
-    )
-      return notify(
-        'A duplicate would extend beyond the five-minute project limit.',
+    if (!focus || !canEdit || structuralLocked) return;
+    try {
+      const newId = crypto.randomUUID();
+      mutate((d) => duplicateClip(d, focus.id, newId));
+      setSelected(newId);
+    } catch (error: any) {
+      notify(error.message);
+    }
+  }
+  function split() {
+    if (!focus || !canEdit || structuralLocked) return;
+    try {
+      const newId = crypto.randomUUID();
+      mutate((d) => splitClip(d, focus.id, position, newId));
+      setSelected(newId);
+      notify(
+        'Clip split. Both halves use the original audio and keep its fades.',
       );
-    const t = {
-      ...structuredClone(focus),
-      id: crypto.randomUUID(),
-      name: focus.name + ' copy',
-      offset:
-        focus.offset + (focus.duration || 0) - focus.trimStart - focus.trimEnd,
-    };
-    mutate((d) => ({ ...d, tracks: [...d.tracks, t] }));
-    setSelected(t.id);
+    } catch (error: any) {
+      notify(error.message);
+    }
+  }
+  function moveSelected(offset: number) {
+    if (!focus || !canEdit || structuralLocked) return;
+    try {
+      const next = moveClip(focus, offset);
+      patch(focus.id, { offset: next.offset });
+    } catch (error: any) {
+      notify(error.message);
+    }
+  }
+  function trimSelected(key: 'trimStart' | 'trimEnd', value: number) {
+    if (!focus || !canEdit || structuralLocked) return;
+    try {
+      if (
+        !Number.isFinite(focus.duration) ||
+        !focus.duration ||
+        focus.duration > 300
+      )
+        throw new Error('Wait for valid source audio to finish loading.');
+      const other = key === 'trimStart' ? 'trimEnd' : 'trimStart';
+      const min = Math.max(
+        0,
+        focus.duration! + focus.offset - focus[other] - 300,
+      );
+      const max = Math.max(min, focus.duration! - focus[other] - 0.01);
+      const next = { ...focus, [key]: Math.max(min, Math.min(max, value)) };
+      clipLength(next);
+      patch(focus.id, { [key]: next[key] });
+    } catch (error: any) {
+      notify(error.message);
+    }
   }
   async function checkpointList() {
     if (!canManage) return;
@@ -334,6 +418,8 @@ export default function Studio({
     playback.current = null;
     setPlaying(false);
     setPosition(0);
+    setLevel(0);
+    setLevels({});
   }
   async function play() {
     if (playing) {
@@ -348,6 +434,8 @@ export default function Studio({
         () => {
           setPlaying(false);
           setPosition(0);
+          setLevel(0);
+          setLevels({});
         },
         {
           from: position,
@@ -532,6 +620,8 @@ export default function Studio({
     }
   }
   const focus = data.tracks.find((t) => t.id === selected) || data.tracks[0];
+  const structuralLocked =
+    playing || recording || !!busy || !!exportSnapshot || gesturing;
   const length = Math.max(
     30,
     ...data.tracks.map(
@@ -816,21 +906,26 @@ export default function Studio({
             <div className="actions">
               <button
                 className="button secondary"
-                disabled={!past.current.length || recording}
+                disabled={!past.current.length || structuralLocked}
                 onClick={() => undo()}
               >
                 Undo
               </button>
               <button
                 className="button secondary"
-                disabled={!future.current.length || recording}
+                disabled={!future.current.length || structuralLocked}
                 onClick={() => undo(true)}
               >
                 Redo
               </button>
               <button
                 className="button secondary"
-                disabled={!focus || data.tracks.length >= 32}
+                disabled={
+                  !canEdit ||
+                  !focus?.duration ||
+                  data.tracks.length >= 32 ||
+                  structuralLocked
+                }
                 onClick={duplicate}
               >
                 Duplicate clip
@@ -922,9 +1017,9 @@ export default function Studio({
                 type="number"
                 min={0}
                 max={length}
-                step={0.1}
+                step={0.001}
                 disabled={playing || recording}
-                value={Number(position.toFixed(1))}
+                value={Number(position.toFixed(3))}
                 onChange={(e) =>
                   setPosition(Math.max(0, Math.min(length, +e.target.value)))
                 }
@@ -938,122 +1033,105 @@ export default function Studio({
               </TabsTrigger>
               <TabsTrigger value="Piano roll">Piano roll</TabsTrigger>
               <TabsTrigger value="Automation">Automation</TabsTrigger>
+              <TabsTrigger value="Mixer">
+                <SlidersHorizontal size={15} /> Mixer
+              </TabsTrigger>
               <TabsTrigger value="Drum sequencer">
                 <Disc3 size={15} /> Drum sequencer
               </TabsTrigger>
             </TabsList>
           </Tabs>
+          {tab === 'Arrangement' && (
+            <div className="clip-tools">
+              <div className="clip-tool-actions">
+                <label>
+                  Grid{' '}
+                  <select
+                    aria-label="Timeline grid"
+                    value={grid}
+                    onChange={(e) => setGrid(e.target.value as ClipGrid)}
+                  >
+                    <option value="off">Off · 10 ms nudge</option>
+                    <option value="bar">1 bar</option>
+                    <option value="beat">1 beat</option>
+                    <option value="half">½ beat</option>
+                    <option value="quarter">¼ beat</option>
+                  </select>
+                </label>
+                <label>
+                  Zoom{' '}
+                  <select
+                    aria-label="Timeline zoom"
+                    value={zoom}
+                    onChange={(e) => setZoom(+e.target.value)}
+                  >
+                    <option value={1}>Fit</option>
+                    <option value={2}>2×</option>
+                    <option value={4}>4×</option>
+                    <option value={8}>8×</option>
+                  </select>
+                </label>
+                <button
+                  className="button secondary"
+                  disabled={!canEdit || !focus?.duration || structuralLocked}
+                  onClick={() =>
+                    moveSelected(
+                      focus.offset - (gridSeconds(grid, data.bpm) || 0.01),
+                    )
+                  }
+                >
+                  ← Nudge
+                </button>
+                <button
+                  className="button secondary"
+                  disabled={!canEdit || !focus?.duration || structuralLocked}
+                  onClick={() =>
+                    moveSelected(
+                      focus.offset + (gridSeconds(grid, data.bpm) || 0.01),
+                    )
+                  }
+                >
+                  Nudge →
+                </button>
+                <button
+                  className="button primary"
+                  disabled={
+                    !canEdit ||
+                    !focus?.duration ||
+                    data.tracks.length >= 32 ||
+                    structuralLocked
+                  }
+                  onClick={split}
+                >
+                  Split at playhead
+                </button>
+              </div>
+              <p>
+                Click the ruler or a track to place the playhead. Splitting
+                creates separate channels; compression may change at the cut.
+                Automation stays at its project times when clips move.
+              </p>
+            </div>
+          )}
           {tab === 'Arrangement' ? (
             <div className="studio-workspace">
               <div className="arrangement">
-                <div className="timeline-ruler">
-                  <span>TRACKS · {data.tracks.length}/32</span>
-                  <div>
-                    {Array.from({ length: 7 }, (_, i) => (
-                      <span key={i}>{Math.round((i * length) / 6)}s</span>
-                    ))}
-                  </div>
-                </div>
-                {data.tracks.length ? (
-                  data.tracks.map((t, i) => (
-                    <div
-                      className={
-                        'audio-row ' + (focus?.id === t.id ? 'selected' : '')
-                      }
-                      key={t.id}
-                    >
-                      <div
-                        className="track-controls"
-                        onClick={() => setSelected(t.id)}
-                      >
-                        <span className={'track-number tint-' + (i % 4)}>
-                          {String(i + 1).padStart(2, '0')}
-                        </span>
-                        <input
-                          aria-label={'Name for track ' + (i + 1)}
-                          value={t.name}
-                          onChange={(e) =>
-                            patch(t.id, { name: e.target.value.slice(0, 100) })
-                          }
-                        />
-                        <div className="track-buttons">
-                          <button
-                            className={t.muted ? 'on' : ''}
-                            aria-label={
-                              (t.muted ? 'Unmute ' : 'Mute ') + t.name
-                            }
-                            onClick={() => patch(t.id, { muted: !t.muted })}
-                          >
-                            M
-                          </button>
-                          <button
-                            className={t.solo ? 'on' : ''}
-                            aria-label={'Solo ' + t.name}
-                            onClick={() => patch(t.id, { solo: !t.solo })}
-                          >
-                            S
-                          </button>
-                          <button
-                            aria-label={'Remove ' + t.name}
-                            onClick={() => setRemove(t.id)}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </div>
-                      <button
-                        className="track-lane"
-                        aria-label={'Select ' + t.name}
-                        onClick={() => setSelected(t.id)}
-                      >
-                        <div
-                          className={'wave-clip tint-' + (i % 4)}
-                          style={{
-                            left: (t.offset / length) * 100 + '%',
-                            width:
-                              Math.max(
-                                1,
-                                (((t.duration || 20) -
-                                  t.trimStart -
-                                  t.trimEnd) /
-                                  length) *
-                                  100,
-                              ) + '%',
-                            opacity: t.muted ? 0.3 : 1,
-                          }}
-                        >
-                          <span>{t.name}</span>
-                          <svg
-                            viewBox="0 0 360 40"
-                            preserveAspectRatio="none"
-                            aria-label="Audio waveform"
-                          >
-                            {(t.peaks || []).map((p, j) => (
-                              <line
-                                key={j}
-                                x1={j * 3}
-                                x2={j * 3}
-                                y1={20 - p * 20}
-                                y2={20 + p * 20}
-                                stroke="currentColor"
-                                strokeWidth="2"
-                              />
-                            ))}
-                          </svg>
-                        </div>
-                        {playing && (
-                          <div
-                            className="playhead"
-                            style={{
-                              left:
-                                Math.min(100, (position / length) * 100) + '%',
-                            }}
-                          />
-                        )}
-                      </button>
-                    </div>
-                  ))
-                ) : (
+                <ArrangementTimeline
+                  tracks={data.tracks}
+                  selected={focus?.id}
+                  length={length}
+                  position={position}
+                  zoom={zoom}
+                  canEdit={canEdit}
+                  locked={structuralLocked}
+                  onSelect={setSelected}
+                  onSeek={(seconds) =>
+                    setPosition(snapTime(seconds, grid, data.bpm))
+                  }
+                  onPatch={patch}
+                  onRemove={setRemove}
+                />
+                {!data.tracks.length ? (
                   <div className="studio-empty">
                     <AudioLines size={46} />
                     <h2>Every great track starts somewhere.</h2>
@@ -1070,7 +1148,7 @@ export default function Studio({
                       <Disc3 size={17} /> Find a beat
                     </button>
                   </div>
-                )}
+                ) : null}
                 <div className="add-track">
                   <button
                     onClick={() => input.current?.click()}
@@ -1159,9 +1237,16 @@ export default function Studio({
                           max={Math.min(30, focus.duration || 20)}
                           step={0.1}
                           value={focus[k] || 0}
+                          disabled={
+                            !canEdit || !focus.duration || structuralLocked
+                          }
                           onChange={(e) =>
                             patch(focus.id, {
                               [k]: Math.max(0, Math.min(30, +e.target.value)),
+                              [k === 'fadeIn' ? 'fadeStart' : 'fadeEnd']:
+                                k === 'fadeIn'
+                                  ? focus.trimStart
+                                  : focus.duration! - focus.trimEnd,
                             })
                           }
                         />
@@ -1173,14 +1258,18 @@ export default function Studio({
                       <input
                         type="number"
                         min="0"
-                        max="120"
-                        step=".1"
-                        value={focus.offset}
-                        onChange={(e) =>
-                          patch(focus.id, {
-                            offset: Math.max(0, Math.min(120, +e.target.value)),
-                          })
+                        max={
+                          300 -
+                          ((focus.duration || 300) -
+                            focus.trimStart -
+                            focus.trimEnd)
                         }
+                        step=".001"
+                        disabled={
+                          !canEdit || !focus.duration || structuralLocked
+                        }
+                        value={focus.offset}
+                        onChange={(e) => moveSelected(+e.target.value)}
                       />
                     </label>
                     {(['trimStart', 'trimEnd'] as const).map((k) => (
@@ -1195,30 +1284,17 @@ export default function Studio({
                           max={Math.max(
                             0,
                             (focus.duration || 20) -
-                              0.1 -
+                              0.01 -
                               focus[
                                 k === 'trimStart' ? 'trimEnd' : 'trimStart'
                               ],
                           )}
-                          step=".1"
+                          step=".001"
                           value={focus[k]}
-                          onChange={(e) =>
-                            patch(focus.id, {
-                              [k]: Math.max(
-                                0,
-                                Math.min(
-                                  +e.target.value,
-                                  (focus.duration || 20) -
-                                    0.1 -
-                                    focus[
-                                      k === 'trimStart'
-                                        ? 'trimEnd'
-                                        : 'trimStart'
-                                    ],
-                                ),
-                              ),
-                            })
+                          disabled={
+                            !canEdit || !focus.duration || structuralLocked
                           }
+                          onChange={(e) => trimSelected(k, +e.target.value)}
                         />
                       </label>
                     ))}
@@ -1228,6 +1304,20 @@ export default function Studio({
                 )}
               </aside>
             </div>
+          ) : tab === 'Mixer' ? (
+            <MixerBoard
+              tracks={data.tracks}
+              levels={levels}
+              disabled={recording || !!busy || !!exportSnapshot}
+              onPatch={patch}
+              onSelect={(tid) => {
+                endGesture();
+                setSelected(tid);
+                setTab('Arrangement');
+              }}
+              onGestureStart={beginGesture}
+              onGestureEnd={endGesture}
+            />
           ) : tab === 'Piano roll' ? (
             <PianoRoll
               track={focus}

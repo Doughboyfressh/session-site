@@ -32,6 +32,9 @@ export type MixerTrack = {
   compression?: number;
   fadeIn?: number;
   fadeOut?: number;
+  fadeStart?: number;
+  fadeEnd?: number;
+  splitFrom?: string;
   automation?: AutomationPoint[];
 };
 export type Arrangement = { bpm: number; tracks: MixerTrack[] };
@@ -287,7 +290,39 @@ export function peaks(b: AudioBuffer) {
   }
   return out;
 }
-export function channel(c: BaseAudioContext, t: MixerTrack, dest: AudioNode) {
+export function stereoMeter(c: BaseAudioContext, source: AudioNode) {
+  const splitter = c.createChannelSplitter(2);
+  source.connect(splitter);
+  const meters = [0, 1].map((index) => {
+    const analyser = c.createAnalyser();
+    analyser.fftSize = 256;
+    splitter.connect(analyser, index);
+    return { analyser, samples: new Float32Array(256) };
+  });
+  return {
+    level: () => {
+      let peak = 0;
+      for (const { analyser, samples } of meters) {
+        analyser.getFloatTimeDomainData(samples);
+        for (const sample of samples) peak = Math.max(peak, Math.abs(sample));
+      }
+      return peak;
+    },
+    dispose: () => {
+      splitter.disconnect();
+      meters.forEach((m) => m.analyser.disconnect());
+    },
+  };
+}
+export function channel(
+  c: BaseAudioContext,
+  t: MixerTrack,
+  dest: AudioNode,
+  metering = false,
+) {
+  const output = c.createGain();
+  output.connect(dest);
+  const meter = metering ? stereoMeter(c, output) : null;
   const input = c.createGain(),
     eqs = [200, 1200, 5000].map((f, i) => {
       const e = c.createBiquadFilter();
@@ -305,7 +340,7 @@ export function channel(c: BaseAudioContext, t: MixerTrack, dest: AudioNode) {
     .connect(pan)
     .connect(gain)
     .connect(auto)
-    .connect(dest);
+    .connect(output);
   let compressor = c.createDynamicsCompressor();
   const convolver = c.createConvolver(),
     wet = c.createGain(),
@@ -323,12 +358,12 @@ export function channel(c: BaseAudioContext, t: MixerTrack, dest: AudioNode) {
     }
   }
   convolver.buffer = impulse;
-  auto.connect(convolver).connect(wet).connect(dest);
+  auto.connect(convolver).connect(wet).connect(output);
   auto.connect(delay);
   delay.delayTime.value = 0.25;
   feedback.gain.value = 0.28;
   delay.connect(feedback).connect(delay);
-  delay.connect(echo).connect(dest);
+  delay.connect(echo).connect(output);
   let compressionEnabled = false;
   const update = (next: MixerTrack, solo = false, initial = false) => {
     const set = (param: AudioParam, value: number, smoothing = 0.015) => {
@@ -364,7 +399,11 @@ export function channel(c: BaseAudioContext, t: MixerTrack, dest: AudioNode) {
     input,
     auto,
     update,
+    level: () => {
+      return meter?.level() || 0;
+    },
     dispose: () => {
+      meter?.dispose();
       [
         input,
         ...eqs,
@@ -377,6 +416,7 @@ export function channel(c: BaseAudioContext, t: MixerTrack, dest: AudioNode) {
         delay,
         feedback,
         echo,
+        output,
       ].forEach((n) => n.disconnect());
     },
   };
@@ -417,34 +457,56 @@ export function scheduleClip(
   to: number,
   automationDelay = 0,
 ) {
-  const end = t.offset + b.duration - t.trimStart - t.trimEnd,
-    first = Math.max(from, t.offset),
-    last = Math.min(to, end);
+  const end = t.offset + b.duration - t.trimStart - t.trimEnd;
+  // Shared boundaries land on the same output sample. Fractional start times
+  // otherwise combine browser grain rounding with a second source correction.
+  const startFrame = Math.round(
+    (when + Math.max(from, t.offset) - from) * c.sampleRate,
+  );
+  const endFrame = Math.round((when + Math.min(to, end) - from) * c.sampleRate);
+  const first = from + startFrame / c.sampleRate - when;
+  const last = from + endFrame / c.sampleRate - when;
   if (last <= first) return null;
   const source = c.createBufferSource(),
     fade = c.createGain(),
     fadeOut = c.createGain();
   source.buffer = b;
   source.connect(fade).connect(fadeOut).connect(ch.input);
-  const at = when + first - from,
-    dur = last - first,
-    relative = first - t.offset;
-  fade.gain.setValueAtTime(t.fadeIn ? Math.min(1, relative / t.fadeIn) : 1, at);
-  if (t.fadeIn && relative < t.fadeIn)
+  const at = startFrame / c.sampleRate,
+    dur = (endFrame - startFrame) / c.sampleRate,
+    relative = first - t.offset,
+    fadeElapsed = t.trimStart + relative - (t.fadeStart ?? t.trimStart);
+  fade.gain.value = t.fadeIn
+    ? Math.max(0, Math.min(1, fadeElapsed / t.fadeIn))
+    : 1;
+  fade.gain.setValueAtTime(
+    t.fadeIn ? Math.max(0, Math.min(1, fadeElapsed / t.fadeIn)) : 1,
+    at,
+  );
+  if (t.fadeIn && fadeElapsed < t.fadeIn) {
+    if (fadeElapsed < 0)
+      fade.gain.setValueAtTime(0, Math.min(at + dur, at - fadeElapsed));
     fade.gain.linearRampToValueAtTime(
-      Math.min(1, (last - t.offset) / t.fadeIn),
-      Math.min(at + dur, at + t.fadeIn - relative),
+      Math.max(0, Math.min(1, (fadeElapsed + dur) / t.fadeIn)),
+      Math.min(at + dur, at + t.fadeIn - fadeElapsed),
     );
+  }
   if (t.fadeOut) {
-    const start = end - t.fadeOut;
+    const fadeEnd =
+      t.offset + (t.fadeEnd ?? b.duration - t.trimEnd) - t.trimStart;
+    const start = fadeEnd - t.fadeOut;
+    fadeOut.gain.value = Math.min(
+      1,
+      Math.max(0, (fadeEnd - first) / t.fadeOut),
+    );
     if (start < last) {
       fadeOut.gain.setValueAtTime(
-        Math.min(1, Math.max(0, (end - first) / t.fadeOut)),
+        Math.min(1, Math.max(0, (fadeEnd - first) / t.fadeOut)),
         Math.max(at, when + start - from),
       );
       fadeOut.gain.linearRampToValueAtTime(
-        Math.max(0, (end - last) / t.fadeOut),
-        at + dur,
+        Math.max(0, (fadeEnd - last) / t.fadeOut),
+        Math.max(at, Math.min(at + dur, when + fadeEnd - from)),
       );
     }
   }
@@ -463,7 +525,7 @@ export function scheduleClip(
     automationAt(points, to),
     when + automationDelay + to - from,
   );
-  source.start(at, t.trimStart + relative, dur);
+  source.start(at, Math.max(0, t.trimStart + relative), dur);
   source.onended = () => {
     source.disconnect();
     fade.disconnect();
@@ -484,7 +546,10 @@ export async function playMix(
   const loaded = await Promise.all(
     data.tracks.map(async (t) => ({
       t,
-      b: await bufferFor(t, data.bpm, { signal: options.signal }),
+      b: await bufferFor(t, data.bpm, {
+        signal: options.signal,
+        sampleRate: c.sampleRate,
+      }),
     })),
   );
   if (options.signal?.aborted)
@@ -518,9 +583,7 @@ export async function playMix(
   master.threshold.value = -1;
   master.ratio.value = 20;
   master.connect(c.destination);
-  const analyser = c.createAnalyser();
-  analyser.fftSize = 256;
-  master.connect(analyser);
+  const masterMeter = stereoMeter(c, master);
   const releaseOutput = options.output?.(master);
   const channels = new Map(
     loaded.map(({ t }) => [
@@ -532,6 +595,7 @@ export async function playMix(
           muted: t.muted || (data.tracks.some((x) => x.solo) && !t.solo),
         },
         master,
+        true,
       ),
     ]),
   );
@@ -632,7 +696,7 @@ export async function playMix(
     channels.forEach((ch) => ch.dispose());
     releaseOutput?.();
     master.disconnect();
-    analyser.disconnect();
+    masterMeter.dispose();
   }
   options.signal?.addEventListener('abort', stop, { once: true });
   return {
@@ -660,17 +724,20 @@ export async function playMix(
       });
     },
     level: () => {
-      const samples = new Float32Array(analyser.fftSize);
-      analyser.getFloatTimeDomainData(samples);
-      return Math.max(...samples.map(Math.abs));
+      return masterMeter.level();
     },
+    levels: () =>
+      Object.fromEntries([...channels].map(([id, ch]) => [id, ch.level()])),
   };
 }
 export async function renderBuffer(data: Arrangement) {
   const loaded = await Promise.all(
     data.tracks
       .filter((t) => !t.muted && (!data.tracks.some((x) => x.solo) || t.solo))
-      .map(async (t) => ({ t, b: await bufferFor(t, data.bpm) })),
+      .map(async (t) => ({
+        t,
+        b: await bufferFor(t, data.bpm, { sampleRate: 44100 }),
+      })),
   );
   if (!loaded.length) throw new Error('Add or unmute a track first.');
   const duration = Math.min(
