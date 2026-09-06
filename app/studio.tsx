@@ -1,31 +1,1163 @@
 'use client';
-import { useEffect,useRef,useState } from 'react';
-import { AudioLines,Play,Square,Mic,Plus,Download,Save,Disc3,Volume2,VolumeX,Trash2,Loader2,SlidersHorizontal,LockKeyhole } from 'lucide-react';
-import { Tabs,TabsList,TabsTrigger } from '@/components/ui/tabs';
+import { useEffect, useRef, useState } from 'react';
+import {
+  AudioLines,
+  Play,
+  Square,
+  Mic,
+  Plus,
+  Download,
+  Save,
+  Disc3,
+  Volume2,
+  VolumeX,
+  Trash2,
+  Loader2,
+  SlidersHorizontal,
+  LockKeyhole,
+} from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import PianoRoll, { AutomationEditor } from './piano-roll';
+import { Switch } from '@/components/ui/switch';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { defaultPattern } from '@/lib/catalog';
-import { context,bufferFor,peaks,playMix,renderMix,download,type MixerTrack,type Arrangement } from '@/lib/audio';
-import { action,upload,Range,Confirm } from './helpers';
-export default function Studio({initial,onDraft,onSaved,onBrowse,notify}:{initial:any;onDraft:(p:any)=>void;onSaved:(p:any)=>void;onBrowse:()=>void;notify:(s:string)=>void}){
-const [title,setTitle]=useState(initial?.title||'Untitled session'),[id,setId]=useState(initial?.id||''),[data,setData]=useState<Arrangement>(initial?.data||{bpm:92,tracks:[]}),[selected,setSelected]=useState(''),[busy,setBusy]=useState(''),[playing,setPlaying]=useState(false),[position,setPosition]=useState(0),[recording,setRecording]=useState(false),[pattern,setPattern]=useState(defaultPattern.map(r=>[...r])),[tab,setTab]=useState('Arrangement'),[remove,setRemove]=useState(''),[dirty,setDirty]=useState(false);
-const playback=useRef<any>(null),recorder=useRef<MediaRecorder|null>(null),input=useRef<HTMLInputElement>(null),recTimer=useRef<any>(null),recStart=useRef(0),alive=useRef(true);
-const tracksRef=useRef(data);tracksRef.current=data;
-useEffect(()=>{onDraft({id,title,data});},[id,title,data]);
-useEffect(()=>{alive.current=true;return()=>{alive.current=false;playback.current?.stop();if(recorder.current?.state==='recording')recorder.current.stop();recorder.current?.stream.getTracks().forEach(t=>t.stop());clearTimeout(recTimer.current);};},[]);
-useEffect(()=>{const f=(e:BeforeUnloadEvent)=>{if(dirty){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',f);return()=>window.removeEventListener('beforeunload',f);},[dirty]);
-useEffect(()=>{if(!playing&&!recording)return;const timer=setInterval(()=>setPosition((performance.now()-(recording?recStart.current:playback.current?.start||performance.now()))/1000),70);return()=>clearInterval(timer);},[playing,recording]);
-const mutate=(fn:(d:Arrangement)=>Arrangement)=>{setData(fn);setDirty(true);};
-const patch=(tid:string,p:Partial<MixerTrack>)=>mutate(d=>({...d,tracks:d.tracks.map(t=>t.id===tid?{...t,...p}:t)}));
-async function enrich(t:MixerTrack){const b=await bufferFor(t,data.bpm);if(b.duration>180)throw new Error('Use audio up to 3 minutes long in this studio.');return {...t,duration:b.duration,peaks:peaks(b)};}
-useEffect(()=>{let cancelled=false;Promise.all(data.tracks.filter(t=>!t.peaks).map(async t=>{try{const next=await enrich(t);if(!cancelled)setData(d=>({...d,tracks:d.tracks.map(x=>x.id===t.id?next:x)}));}catch(e:any){notify(e.message);}}));return()=>{cancelled=true;};},[data.tracks.map(t=>t.id).join(','),data.bpm]);
-function stop(){playback.current?.stop();playback.current=null;setPlaying(false);setPosition(0);}
-async function play(){if(playing){stop();return;}setBusy('Loading audio');try{playback.current=await playMix(data,()=>{setPlaying(false);setPosition(0);});setPlaying(true);}catch(e:any){notify(e.message);}finally{setBusy('');}}
-async function save(){setBusy('Saving');try{const r=await action({action:'project',id:id||undefined,title,data});setId(r.id);setDirty(false);onSaved({id:r.id,title,data});notify('Project saved privately.');}catch(e:any){notify(e.message);}finally{setBusy('');}}
-async function addFile(file:File){if(data.tracks.length>=16){notify('This session has reached 16 tracks.');return;}setBusy('Importing audio');try{const b=await context().decodeAudioData(await file.arrayBuffer());if(b.duration>180)throw new Error('Use audio up to 3 minutes long.');const f=await upload(file);const t:MixerTrack={id:crypto.randomUUID(),name:file.name.replace(/\.[^.]+$/,''),fileId:f.id,volume:.8,pan:0,muted:false,solo:false,offset:0,trimStart:0,trimEnd:0,low:0,mid:0,high:0,duration:b.duration,peaks:peaks(b)};mutate(d=>({...d,tracks:[...d.tracks,t]}));setSelected(t.id);notify('Audio imported. Save the project to keep your arrangement.');}catch(e:any){notify(e.message);}finally{setBusy('');}}
-async function record(){if(recording){recorder.current?.stop();return;}if(data.tracks.length>=16){notify('This session has reached 16 tracks.');return;}let stream:MediaStream|null=null;try{stop();stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});const mime=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(t=>MediaRecorder.isTypeSupported(t));const rec=new MediaRecorder(stream,mime?{mimeType:mime}:{});recorder.current=rec;const chunks:Blob[]=[];rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};rec.onstop=async()=>{clearTimeout(recTimer.current);rec.stream.getTracks().forEach(t=>t.stop());if(!alive.current)return;setRecording(false);stop();const blob=new Blob(chunks,{type:rec.mimeType});await addFile(new File([blob],'Vocal take '+(data.tracks.length+1)+(rec.mimeType.includes('mp4')?'.m4a':'.webm'),{type:rec.mimeType}));};if(data.tracks.length){playback.current=await playMix(data);setPlaying(true);}rec.start();recStart.current=performance.now();setRecording(true);recTimer.current=setTimeout(()=>{if(rec.state==='recording')rec.stop();},120000);}catch(e:any){stream?.getTracks().forEach(t=>t.stop());notify('Microphone could not start. Allow microphone access and try again.');}}
-async function bounce(){setBusy('Rendering WAV');try{download(await renderMix(data),title.replace(/[^a-z0-9 _-]/gi,'')+'.wav');notify('Your stereo WAV is ready.');}catch(e:any){notify(e.message);}finally{setBusy('');}}
-async function addSequence(){if(data.tracks.length>=16)return notify('This session has reached 16 tracks.');setBusy('Building drums');try{const t=await enrich({id:crypto.randomUUID(),name:'Drum pattern '+(data.tracks.length+1),sequence:pattern.map(r=>[...r]),volume:.8,pan:0,muted:false,solo:false,offset:0,trimStart:0,trimEnd:0,low:0,mid:0,high:0});mutate(d=>({...d,tracks:[...d.tracks,t]}));setTab('Arrangement');setSelected(t.id);}catch(e:any){notify(e.message);}finally{setBusy('');}}
-const focus=data.tracks.find(t=>t.id===selected)||data.tracks[0];const length=Math.max(30,...data.tracks.map(t=>(t.duration||20)+t.offset-t.trimStart-t.trimEnd));
-return <div className="studio"><div className="studio-heading"><div><span className="eyebrow">SESSION STUDIO <span className="studio-beta">EARLY ACCESS</span></span><input className="project-title" aria-label="Project title" value={title} maxLength={120} onChange={e=>{setTitle(e.target.value);setDirty(true);}}/><span className="subtle"><LockKeyhole size={13}/>{dirty?'Unsaved changes':'Private project'}</span></div><div className="actions"><button className="button secondary" onClick={bounce} disabled={!!busy||!data.tracks.length}><Download size={16}/> Export WAV</button><button className="button primary" onClick={save} disabled={!!busy||recording}><Save size={16}/> Save project</button></div></div><div className="transport"><div className="actions"><button className={'transport-play '+(playing?'active':'')} onClick={play} disabled={!!busy||recording} aria-label={playing?'Stop playback':'Play arrangement'}>{playing?<Square size={18}/>:<Play size={19} fill="currentColor"/>}</button><button onClick={stop} aria-label="Stop" disabled={recording}><Square size={17}/></button><button className={'record-button '+(recording?'recording':'')} onClick={record} disabled={!!busy} aria-label={recording?'Stop recording':'Record microphone'}><span/>{recording?'Stop recording':'Record'}</button></div><output className="time-display">{Math.floor(position/60).toString().padStart(2,'0')}:{Math.floor(position%60).toString().padStart(2,'0')}<span>.{Math.floor(position%1*100).toString().padStart(2,'0')}</span></output><label className="tempo"><input type="number" min="40" max="240" value={data.bpm} onChange={e=>mutate(d=>({...d,bpm:Math.max(40,Math.min(240,Number(e.target.value)||92)),tracks:d.tracks.map(t=>t.demo||t.sequence?{...t,peaks:undefined,duration:undefined}:t)}))}/> BPM</label><span className="meter">4 / 4</span><div className="save-state">{busy&&<><Loader2 className="spin" size={15}/>{busy}…</>}</div></div><Tabs value={tab} onValueChange={v=>setTab(String(v))}><TabsList className="studio-tabs"><TabsTrigger value="Arrangement"><AudioLines size={15}/> Arrangement</TabsTrigger><TabsTrigger value="Drum sequencer"><Disc3 size={15}/> Drum sequencer</TabsTrigger></TabsList></Tabs>{tab==='Arrangement'?<div className="studio-workspace"><div className="arrangement"><div className="timeline-ruler"><span>TRACKS · {data.tracks.length}/16</span><div>{Array.from({length:7},(_,i)=><span key={i}>{Math.round(i*length/6)}s</span>)}</div></div>{data.tracks.length?data.tracks.map((t,i)=><div className={'audio-row '+(focus?.id===t.id?'selected':'')} key={t.id}><div className="track-controls" onClick={()=>setSelected(t.id)}><span className={'track-number tint-'+i%4}>{String(i+1).padStart(2,'0')}</span><input aria-label={'Name for track '+(i+1)} value={t.name} onChange={e=>patch(t.id,{name:e.target.value.slice(0,100)})}/><div className="track-buttons"><button className={t.muted?'on':''} aria-label={(t.muted?'Unmute ':'Mute ')+t.name} onClick={()=>patch(t.id,{muted:!t.muted})}>M</button><button className={t.solo?'on':''} aria-label={'Solo '+t.name} onClick={()=>patch(t.id,{solo:!t.solo})}>S</button><button aria-label={'Remove '+t.name} onClick={()=>setRemove(t.id)}><Trash2 size={13}/></button></div></div><button className="track-lane" aria-label={'Select '+t.name} onClick={()=>setSelected(t.id)}><div className={'wave-clip tint-'+i%4} style={{left:t.offset/length*100+'%',width:Math.max(1,((t.duration||20)-t.trimStart-t.trimEnd)/length*100)+'%',opacity:t.muted?.3:1}}><span>{t.name}</span><svg viewBox="0 0 360 40" preserveAspectRatio="none" aria-label="Audio waveform">{(t.peaks||[]).map((p,j)=><line key={j} x1={j*3} x2={j*3} y1={20-p*20} y2={20+p*20} stroke="currentColor" strokeWidth="2"/>)}</svg></div>{playing&&<div className="playhead" style={{left:Math.min(100,position/length*100)+'%'}}/>}</button></div>):<div className="studio-empty"><AudioLines size={46}/><h2>Every great track starts somewhere.</h2><p>Bring in a beat, record a vocal, or build your own drums.</p><button className="button primary" onClick={onBrowse}><Disc3 size={17}/> Find a beat</button></div>}<div className="add-track"><button onClick={()=>input.current?.click()} disabled={!!busy}><Plus size={16}/> Import audio</button><button onClick={onBrowse}><Disc3 size={16}/> Add from beat library</button></div><input ref={input} type="file" accept="audio/*,.wav,.mp3,.flac,.m4a" hidden onChange={e=>{const f=e.target.files?.[0];if(f)addFile(f);e.target.value='';}}/></div><aside className="mixer"><div className="section-title"><h2><SlidersHorizontal size={16}/> Channel strip</h2></div>{focus?<><h3>{focus.name}</h3><Range label={'Volume · '+Math.round(focus.volume*100)+'%'} value={focus.volume} min={0} max={1.5} onChange={v=>patch(focus.id,{volume:v})}/><Range label={'Pan · '+(focus.pan===0?'Center':Math.round(Math.abs(focus.pan)*100)+(focus.pan<0?' L':' R'))} value={focus.pan} min={-1} max={1} onChange={v=>patch(focus.id,{pan:v})}/><div className="mixer-divider">3-BAND EQ</div>{(['low','mid','high'] as const).map(b=><Range key={b} label={b+' · '+focus[b]+' dB'} min={-12} max={12} step={1} value={focus[b]} onChange={v=>patch(focus.id,{[b]:v})}/>)}<div className="mixer-divider">ARRANGEMENT</div><label className="field"><span>Start position (seconds)</span><input type="number" min="0" max="120" step=".1" value={focus.offset} onChange={e=>patch(focus.id,{offset:Math.max(0,Math.min(120,+e.target.value))})}/></label>{(['trimStart','trimEnd'] as const).map(k=><label className="field" key={k}><span>{k==='trimStart'?'Trim beginning':'Trim ending'} (seconds)</span><input type="number" min="0" max={Math.max(0,(focus.duration||20)-.1-focus[k==='trimStart'?'trimEnd':'trimStart'])} step=".1" value={focus[k]} onChange={e=>patch(focus.id,{[k]:Math.max(0,Math.min(+e.target.value,(focus.duration||20)-.1-focus[k==='trimStart'?'trimEnd':'trimStart']))})}/></label>)}</>:<p>Select a track to adjust its sound.</p>}</aside></div>:<div className="sequencer"><div className="section-title"><div><h2>Make your own rhythm.</h2><p>16 steps. Three sounds. Eight bars when added to your arrangement.</p></div><button className="button primary" disabled={!!busy} onClick={addSequence}><Plus size={15}/> Add drum track</button></div><div className="step-ruler"><span/>{Array.from({length:16},(_,i)=><span key={i}>{i+1}</span>)}</div>{['Kick','Snare','Hi-hat'].map((name,r)=><div className="step-row" key={name}><strong>{name}</strong>{pattern[r].map((v,i)=><button key={i} className={(v?'enabled ':'')+(i%4===0?'beat-start':'')} aria-label={name+' step '+(i+1)} aria-pressed={!!v} onClick={()=>setPattern(p=>p.map((row,ri)=>ri===r?row.map((x,xi)=>xi===i?1-x:x):row))}/>)}</div>)}<div className="actions"><button className="button secondary" onClick={async()=>{stop();playback.current=await playMix({bpm:data.bpm,tracks:[{id:'preview',name:'Drums',sequence:pattern,volume:.8,pan:0,muted:false,solo:false,offset:0,trimStart:0,trimEnd:0,low:0,mid:0,high:0}]},()=>setPlaying(false));setPlaying(true);}}><Play size={16}/> Audition pattern</button><button className="button secondary" onClick={()=>setPattern(pattern.map(r=>r.map(()=>0)))}>Clear pattern</button></div></div>}<div className="studio-footnote"><HeadphoneNote/><p>Use headphones while recording. Recording is limited to 2 minutes; stereo export to 3 minutes. Mixer changes apply on the next playback. Tempo changes affect generated beats and drums; imported audio keeps its original speed.</p></div><Confirm open={!!remove} onClose={()=>setRemove('')} onConfirm={()=>mutate(d=>({...d,tracks:d.tracks.filter(t=>t.id!==remove)}))} title="Remove this track?" description="This removes it from the arrangement. Your original upload stays in your library."/></div>
+import {
+  context,
+  defaults,
+  bufferFor,
+  peaks,
+  playMix,
+  renderMix,
+  download,
+  type MixerTrack,
+  type Arrangement,
+} from '@/lib/audio';
+import { action, upload, Range, Confirm } from './helpers';
+export default function Studio({
+  initial,
+  onDraft,
+  onSaved,
+  onBrowse,
+  notify,
+}: {
+  initial: any;
+  onDraft: (p: any) => void;
+  onSaved: (p: any) => void;
+  onBrowse: () => void;
+  notify: (s: string) => void;
+}) {
+  const [title, setTitle] = useState(initial?.title || 'Untitled session'),
+    [id, setId] = useState(initial?.id || ''),
+    [data, setData] = useState<Arrangement>(
+      initial?.data || { bpm: 92, tracks: [] },
+    ),
+    [selected, setSelected] = useState(''),
+    [busy, setBusy] = useState(''),
+    [playing, setPlaying] = useState(false),
+    [position, setPosition] = useState(0),
+    [recording, setRecording] = useState(false),
+    [pattern, setPattern] = useState(defaultPattern.map((r) => [...r])),
+    [tab, setTab] = useState('Arrangement'),
+    [remove, setRemove] = useState(''),
+    [dirty, setDirty] = useState(!!initial?.dirty),
+    [loop, setLoop] = useState(false),
+    [loopStart, setLoopStart] = useState(0),
+    [loopEnd, setLoopEnd] = useState(8),
+    [metronome, setMetronome] = useState(false),
+    [level, setLevel] = useState(0),
+    [revision, setRevision] = useState(initial?.revision || 0),
+    [autosave, setAutosave] = useState(false),
+    [saveLabel, setSaveLabel] = useState(''),
+    [versions, setVersions] = useState<any[] | null>(null),
+    [historyTick, setHistoryTick] = useState(0);
+  const past = useRef<Arrangement[]>([]),
+    future = useRef<Arrangement[]>([]),
+    generation = useRef(0),
+    saving = useRef(false);
+  const playback = useRef<any>(null),
+    recorder = useRef<MediaRecorder | null>(null),
+    input = useRef<HTMLInputElement>(null),
+    recTimer = useRef<any>(null),
+    recStart = useRef(0),
+    alive = useRef(true);
+  const tracksRef = useRef(data);
+  const titleRef = useRef(title);
+  titleRef.current = title;
+  tracksRef.current = data;
+  useEffect(() => {
+    onDraft({ id, title, data, revision, dirty });
+  }, [id, title, data, revision, dirty]);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      generation.current++;
+      playback.current?.stop();
+      if (recorder.current?.state === 'recording') recorder.current.stop();
+      recorder.current?.stream.getTracks().forEach((t) => t.stop());
+      clearTimeout(recTimer.current);
+    };
+  }, []);
+  useEffect(() => {
+    const f = (e: BeforeUnloadEvent) => {
+      if (dirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', f);
+    return () => window.removeEventListener('beforeunload', f);
+  }, [dirty]);
+  useEffect(() => {
+    if (!playing && !recording) return;
+    const timer = setInterval(() => {
+      setPosition(
+        recording
+          ? (performance.now() - recStart.current) / 1000
+          : playback.current?.position?.() || 0,
+      );
+      setLevel(playback.current?.level?.() || 0);
+    }, 70);
+    return () => clearInterval(timer);
+  }, [playing, recording]);
+  const mutate = (fn: (d: Arrangement) => Arrangement) => {
+    setData((d) => {
+      past.current = [...past.current.slice(-49), structuredClone(d)];
+      future.current = [];
+      setHistoryTick((x) => x + 1);
+      return fn(d);
+    });
+    setDirty(true);
+  };
+  const patch = (tid: string, p: Partial<MixerTrack>) =>
+    mutate((d) => ({
+      ...d,
+      tracks: d.tracks.map((t) => (t.id === tid ? { ...t, ...p } : t)),
+    }));
+  async function enrich(t: MixerTrack) {
+    const b = await bufferFor(t, data.bpm);
+    if (b.duration > 300)
+      throw new Error('Use audio up to 5 minutes long in this studio.');
+    return { ...t, duration: b.duration, peaks: peaks(b) };
+  }
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
+      data.tracks
+        .filter((t) => !t.peaks)
+        .map(async (t) => {
+          try {
+            const next = await enrich(t);
+            if (!cancelled)
+              setData((d) => ({
+                ...d,
+                tracks: d.tracks.map((x) =>
+                  x.id === t.id
+                    ? { ...x, duration: next.duration, peaks: next.peaks }
+                    : x,
+                ),
+              }));
+          } catch (e: any) {
+            notify(e.message);
+          }
+        }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    data.tracks
+      .map(
+        (t) =>
+          t.id + JSON.stringify(t.notes || t.sequence || []) + (t.sound || ''),
+      )
+      .join(','),
+    data.bpm,
+  ]);
+  useEffect(() => {
+    playback.current?.update?.(data);
+  }, [data]);
+  useEffect(() => {
+    if (!autosave || !id || !dirty || busy || recording) return;
+    const timer = setTimeout(() => save(true), 10000);
+    return () => clearTimeout(timer);
+  }, [autosave, id, dirty, data, title, busy, recording]);
+  function undo(redo = false) {
+    const source = redo ? future : past,
+      target = redo ? past : future;
+    if (!source.current.length) return;
+    target.current.push(structuredClone(data));
+    setData(source.current.pop()!);
+    setDirty(true);
+    setHistoryTick((x) => x + 1);
+  }
+  function addInstrument() {
+    if (data.tracks.length >= 32)
+      return notify('This session has reached 32 tracks.');
+    const t = {
+      ...defaults(
+        'Instrument ' + (data.tracks.filter((t) => t.notes).length + 1),
+      ),
+      sound: 'keys' as const,
+      notes: [],
+    };
+    mutate((d) => ({ ...d, tracks: [...d.tracks, t] }));
+    setSelected(t.id);
+    setTab('Piano roll');
+  }
+  function duplicate() {
+    if (!focus || data.tracks.length >= 32) return;
+    if (
+      focus.offset + (focus.duration || 0) - focus.trimStart - focus.trimEnd >=
+      300
+    )
+      return notify(
+        'A duplicate would extend beyond the five-minute project limit.',
+      );
+    const t = {
+      ...structuredClone(focus),
+      id: crypto.randomUUID(),
+      name: focus.name + ' copy',
+      offset:
+        focus.offset + (focus.duration || 0) - focus.trimStart - focus.trimEnd,
+    };
+    mutate((d) => ({ ...d, tracks: [...d.tracks, t] }));
+    setSelected(t.id);
+  }
+  async function checkpointList() {
+    try {
+      setVersions(await action({ action: 'projectVersions', id }));
+    } catch (e: any) {
+      notify(e.message);
+    }
+  }
+  function stop() {
+    generation.current++;
+    playback.current?.stop();
+    playback.current = null;
+    setPlaying(false);
+    setPosition(0);
+  }
+  async function play() {
+    if (playing) {
+      stop();
+      return;
+    }
+    setBusy('Loading audio');
+    try {
+      const request = ++generation.current;
+      const p = await playMix(
+        data,
+        () => {
+          setPlaying(false);
+          setPosition(0);
+        },
+        { from: position, loop, loopStart, loopEnd, metronome },
+      );
+      if (request !== generation.current || !alive.current) {
+        p.stop();
+        return;
+      }
+      playback.current = p;
+      setPlaying(true);
+    } catch (e: any) {
+      notify(e.message);
+    } finally {
+      setBusy('');
+    }
+  }
+  async function save(automatic = false) {
+    if (saving.current) return;
+    saving.current = true;
+    const savedData = data;
+    const savedTitle = title;
+    if (!automatic) setBusy('Saving');
+    setSaveLabel(automatic ? 'Autosaving…' : 'Saving…');
+    try {
+      const r = await action({
+        action: 'project',
+        checkpoint: !automatic,
+        baseRevision: revision,
+        id: id || undefined,
+        title,
+        data,
+      });
+      setId(r.id);
+      setRevision(r.revision);
+      if (tracksRef.current === savedData && titleRef.current === savedTitle)
+        setDirty(false);
+      onSaved({
+        id: r.id,
+        title: savedTitle,
+        data: savedData,
+        revision: r.revision,
+      });
+      setSaveLabel(
+        'Saved ' +
+          new Date().toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+      );
+      if (!automatic) notify('Project saved privately.');
+    } catch (e: any) {
+      setSaveLabel('Save needs attention');
+      if (automatic) setAutosave(false);
+      notify(e.message);
+    } finally {
+      saving.current = false;
+      setBusy('');
+    }
+  }
+  async function addFile(file: File) {
+    if (data.tracks.length >= 32) {
+      notify('This session has reached 32 tracks.');
+      return;
+    }
+    setBusy('Importing audio');
+    try {
+      const b = await context().decodeAudioData(await file.arrayBuffer());
+      if (b.duration > 300) throw new Error('Use audio up to 5 minutes long.');
+      const f = await upload(file);
+      const t: MixerTrack = {
+        id: crypto.randomUUID(),
+        name: file.name.replace(/\.[^.]+$/, ''),
+        fileId: f.id,
+        volume: 0.8,
+        pan: 0,
+        muted: false,
+        solo: false,
+        offset: 0,
+        trimStart: 0,
+        trimEnd: 0,
+        low: 0,
+        mid: 0,
+        high: 0,
+        duration: b.duration,
+        peaks: peaks(b),
+      };
+      mutate((d) => ({ ...d, tracks: [...d.tracks, t] }));
+      setSelected(t.id);
+      notify('Audio imported. Save the project to keep your arrangement.');
+    } catch (e: any) {
+      notify(e.message);
+    } finally {
+      setBusy('');
+    }
+  }
+  async function record() {
+    if (recording) {
+      recorder.current?.stop();
+      return;
+    }
+    if (busy) return;
+    setBusy('Starting recording');
+    if (data.tracks.length >= 32) {
+      notify('This session has reached 32 tracks.');
+      setBusy('');
+      return;
+    }
+    let stream: MediaStream | null = null;
+    try {
+      stop();
+      const captureGeneration = generation.current;
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      });
+      if (!alive.current || captureGeneration !== generation.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      const mime = [
+        'audio/webm;codecs=opus',
+        'audio/mp4',
+        'audio/ogg;codecs=opus',
+      ].find((t) => MediaRecorder.isTypeSupported(t));
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
+      recorder.current = rec;
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => {
+        if (e.data.size) chunks.push(e.data);
+      };
+      rec.onstop = async () => {
+        clearTimeout(recTimer.current);
+        rec.stream.getTracks().forEach((t) => t.stop());
+        if (!alive.current) return;
+        setRecording(false);
+        stop();
+        const blob = new Blob(chunks, { type: rec.mimeType });
+        await addFile(
+          new File(
+            [blob],
+            'Vocal take ' +
+              (data.tracks.length + 1) +
+              (rec.mimeType.includes('mp4') ? '.m4a' : '.webm'),
+            { type: rec.mimeType },
+          ),
+        );
+      };
+      if (data.tracks.length) {
+        const backing = await playMix(data);
+        if (!alive.current || captureGeneration !== generation.current) {
+          backing.stop();
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        playback.current = backing;
+        setPlaying(true);
+      }
+      rec.start();
+      recStart.current = performance.now();
+      setRecording(true);
+      recTimer.current = setTimeout(() => {
+        if (rec.state === 'recording') rec.stop();
+      }, 120000);
+    } catch (e: any) {
+      stream?.getTracks().forEach((t) => t.stop());
+      notify(
+        'Microphone could not start. Allow microphone access and try again.',
+      );
+    } finally {
+      if (alive.current) setBusy('');
+    }
+  }
+  async function bounce() {
+    setBusy('Rendering WAV');
+    try {
+      download(
+        await renderMix(data),
+        title.replace(/[^a-z0-9 _-]/gi, '') + '.wav',
+      );
+      notify('Your stereo WAV is ready.');
+    } catch (e: any) {
+      notify(e.message);
+    } finally {
+      setBusy('');
+    }
+  }
+  async function addSequence() {
+    if (data.tracks.length >= 32)
+      return notify('This session has reached 32 tracks.');
+    setBusy('Building drums');
+    try {
+      const t = await enrich({
+        id: crypto.randomUUID(),
+        name: 'Drum pattern ' + (data.tracks.length + 1),
+        sequence: pattern.map((r) => [...r]),
+        volume: 0.8,
+        pan: 0,
+        muted: false,
+        solo: false,
+        offset: 0,
+        trimStart: 0,
+        trimEnd: 0,
+        low: 0,
+        mid: 0,
+        high: 0,
+      });
+      mutate((d) => ({ ...d, tracks: [...d.tracks, t] }));
+      setTab('Arrangement');
+      setSelected(t.id);
+    } catch (e: any) {
+      notify(e.message);
+    } finally {
+      setBusy('');
+    }
+  }
+  const focus = data.tracks.find((t) => t.id === selected) || data.tracks[0];
+  const length = Math.max(
+    30,
+    ...data.tracks.map(
+      (t) => (t.duration || 20) + t.offset - t.trimStart - t.trimEnd,
+    ),
+  );
+  return (
+    <div className="studio">
+      <div className="studio-heading">
+        <div>
+          <span className="eyebrow">
+            SESSION STUDIO <span className="studio-beta">EARLY ACCESS</span>
+          </span>
+          <input
+            className="project-title"
+            aria-label="Project title"
+            value={title}
+            maxLength={120}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              setDirty(true);
+            }}
+          />
+          <span className="subtle">
+            <LockKeyhole size={13} />
+            {dirty ? 'Unsaved changes' : 'Private project'}
+          </span>
+        </div>
+        <div className="actions">
+          <button
+            className="button secondary"
+            onClick={bounce}
+            disabled={!!busy || !data.tracks.length}
+          >
+            <Download size={16} /> Export WAV
+          </button>
+          <button
+            className="button primary"
+            onClick={() => save()}
+            disabled={!!busy || recording}
+          >
+            <Save size={16} /> Save project
+          </button>
+        </div>
+      </div>
+      <div className="transport">
+        <div className="actions">
+          <button
+            className={'transport-play ' + (playing ? 'active' : '')}
+            onClick={play}
+            disabled={!!busy || recording}
+            aria-label={playing ? 'Stop playback' : 'Play arrangement'}
+          >
+            {playing ? (
+              <Square size={18} />
+            ) : (
+              <Play size={19} fill="currentColor" />
+            )}
+          </button>
+          <button onClick={stop} aria-label="Stop" disabled={recording}>
+            <Square size={17} />
+          </button>
+          <button
+            className={'record-button ' + (recording ? 'recording' : '')}
+            onClick={record}
+            disabled={!!busy}
+            aria-label={recording ? 'Stop recording' : 'Record microphone'}
+          >
+            <span />
+            {recording ? 'Stop recording' : 'Record'}
+          </button>
+        </div>
+        <output className="time-display">
+          {Math.floor(position / 60)
+            .toString()
+            .padStart(2, '0')}
+          :
+          {Math.floor(position % 60)
+            .toString()
+            .padStart(2, '0')}
+          <span>
+            .
+            {Math.floor((position % 1) * 100)
+              .toString()
+              .padStart(2, '0')}
+          </span>
+        </output>
+        <label className="tempo">
+          <input
+            type="number"
+            min="40"
+            max="240"
+            value={data.bpm}
+            onChange={(e) =>
+              mutate((d) => ({
+                ...d,
+                bpm: Math.max(40, Math.min(240, Number(e.target.value) || 92)),
+                tracks: d.tracks.map((t) =>
+                  t.demo || t.sequence || t.notes
+                    ? { ...t, peaks: undefined, duration: undefined }
+                    : t,
+                ),
+              }))
+            }
+          />{' '}
+          BPM
+        </label>
+        <span className="meter">4 / 4</span>
+        <meter
+          aria-label="Master peak level"
+          min={0}
+          max={1}
+          value={Math.min(1, level)}
+          className="master-meter"
+        />
+        <div className="save-state">
+          {busy && (
+            <>
+              <Loader2 className="spin" size={15} />
+              {busy}…
+            </>
+          )}
+        </div>
+      </div>
+      <div className="studio-utilities">
+        <div className="actions">
+          <button
+            className="button secondary"
+            disabled={!past.current.length || recording}
+            onClick={() => undo()}
+          >
+            Undo
+          </button>
+          <button
+            className="button secondary"
+            disabled={!future.current.length || recording}
+            onClick={() => undo(true)}
+          >
+            Redo
+          </button>
+          <button
+            className="button secondary"
+            disabled={!focus || data.tracks.length >= 32}
+            onClick={duplicate}
+          >
+            Duplicate clip
+          </button>
+          <button
+            className="button secondary"
+            disabled={!id}
+            onClick={checkpointList}
+          >
+            Saved versions
+          </button>
+        </div>
+        <label className="inline-switch">
+          <Switch
+            checked={autosave}
+            onCheckedChange={setAutosave}
+            disabled={!id}
+            aria-label="Autosave"
+          />{' '}
+          Autosave
+        </label>
+        <span className="small-note">
+          {saveLabel || 'Save once to enable autosave'}
+        </span>
+      </div>
+      <div className="loop-controls">
+        <label className="inline-switch">
+          <Switch
+            checked={loop}
+            onCheckedChange={setLoop}
+            aria-label="Loop playback"
+          />{' '}
+          Loop
+        </label>
+        <label>
+          In{' '}
+          <input
+            aria-label="Loop start seconds"
+            type="number"
+            min={0}
+            max={Math.max(0, length - 0.25)}
+            step={0.25}
+            value={loopStart}
+            onChange={(e) =>
+              setLoopStart(
+                Math.max(0, Math.min(length - 0.25, +e.target.value)),
+              )
+            }
+          />
+        </label>
+        <label>
+          Out{' '}
+          <input
+            aria-label="Loop end seconds"
+            type="number"
+            min={loopStart + 0.25}
+            max={length}
+            step={0.25}
+            value={loopEnd}
+            onChange={(e) =>
+              setLoopEnd(
+                Math.max(loopStart + 0.25, Math.min(length, +e.target.value)),
+              )
+            }
+          />
+        </label>
+        <label className="inline-switch">
+          <Switch
+            checked={metronome}
+            onCheckedChange={setMetronome}
+            aria-label="Metronome"
+          />{' '}
+          Metronome
+        </label>
+        <label>
+          Start at{' '}
+          <input
+            aria-label="Playback start seconds"
+            type="number"
+            min={0}
+            max={length}
+            step={0.1}
+            disabled={playing || recording}
+            value={Number(position.toFixed(1))}
+            onChange={(e) =>
+              setPosition(Math.max(0, Math.min(length, +e.target.value)))
+            }
+          />
+        </label>
+      </div>
+      <Tabs value={tab} onValueChange={(v) => setTab(String(v))}>
+        <TabsList className="studio-tabs">
+          <TabsTrigger value="Arrangement">
+            <AudioLines size={15} /> Arrangement
+          </TabsTrigger>
+          <TabsTrigger value="Piano roll">Piano roll</TabsTrigger>
+          <TabsTrigger value="Automation">Automation</TabsTrigger>
+          <TabsTrigger value="Drum sequencer">
+            <Disc3 size={15} /> Drum sequencer
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+      {tab === 'Arrangement' ? (
+        <div className="studio-workspace">
+          <div className="arrangement">
+            <div className="timeline-ruler">
+              <span>TRACKS · {data.tracks.length}/32</span>
+              <div>
+                {Array.from({ length: 7 }, (_, i) => (
+                  <span key={i}>{Math.round((i * length) / 6)}s</span>
+                ))}
+              </div>
+            </div>
+            {data.tracks.length ? (
+              data.tracks.map((t, i) => (
+                <div
+                  className={
+                    'audio-row ' + (focus?.id === t.id ? 'selected' : '')
+                  }
+                  key={t.id}
+                >
+                  <div
+                    className="track-controls"
+                    onClick={() => setSelected(t.id)}
+                  >
+                    <span className={'track-number tint-' + (i % 4)}>
+                      {String(i + 1).padStart(2, '0')}
+                    </span>
+                    <input
+                      aria-label={'Name for track ' + (i + 1)}
+                      value={t.name}
+                      onChange={(e) =>
+                        patch(t.id, { name: e.target.value.slice(0, 100) })
+                      }
+                    />
+                    <div className="track-buttons">
+                      <button
+                        className={t.muted ? 'on' : ''}
+                        aria-label={(t.muted ? 'Unmute ' : 'Mute ') + t.name}
+                        onClick={() => patch(t.id, { muted: !t.muted })}
+                      >
+                        M
+                      </button>
+                      <button
+                        className={t.solo ? 'on' : ''}
+                        aria-label={'Solo ' + t.name}
+                        onClick={() => patch(t.id, { solo: !t.solo })}
+                      >
+                        S
+                      </button>
+                      <button
+                        aria-label={'Remove ' + t.name}
+                        onClick={() => setRemove(t.id)}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    className="track-lane"
+                    aria-label={'Select ' + t.name}
+                    onClick={() => setSelected(t.id)}
+                  >
+                    <div
+                      className={'wave-clip tint-' + (i % 4)}
+                      style={{
+                        left: (t.offset / length) * 100 + '%',
+                        width:
+                          Math.max(
+                            1,
+                            (((t.duration || 20) - t.trimStart - t.trimEnd) /
+                              length) *
+                              100,
+                          ) + '%',
+                        opacity: t.muted ? 0.3 : 1,
+                      }}
+                    >
+                      <span>{t.name}</span>
+                      <svg
+                        viewBox="0 0 360 40"
+                        preserveAspectRatio="none"
+                        aria-label="Audio waveform"
+                      >
+                        {(t.peaks || []).map((p, j) => (
+                          <line
+                            key={j}
+                            x1={j * 3}
+                            x2={j * 3}
+                            y1={20 - p * 20}
+                            y2={20 + p * 20}
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          />
+                        ))}
+                      </svg>
+                    </div>
+                    {playing && (
+                      <div
+                        className="playhead"
+                        style={{
+                          left: Math.min(100, (position / length) * 100) + '%',
+                        }}
+                      />
+                    )}
+                  </button>
+                </div>
+              ))
+            ) : (
+              <div className="studio-empty">
+                <AudioLines size={46} />
+                <h2>Every great track starts somewhere.</h2>
+                <p>Bring in a beat, record a vocal, or build your own drums.</p>
+                <button className="button primary" onClick={onBrowse}>
+                  <Disc3 size={17} /> Find a beat
+                </button>
+              </div>
+            )}
+            <div className="add-track">
+              <button onClick={() => input.current?.click()} disabled={!!busy}>
+                <Plus size={16} /> Import audio
+              </button>
+              <button onClick={onBrowse}>
+                <Disc3 size={16} /> Add from beat library
+              </button>
+            </div>
+            <input
+              ref={input}
+              type="file"
+              accept="audio/*,.wav,.mp3,.flac,.m4a"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) addFile(f);
+                e.target.value = '';
+              }}
+            />
+          </div>
+          <aside className="mixer">
+            <div className="section-title">
+              <h2>
+                <SlidersHorizontal size={16} /> Channel strip
+              </h2>
+            </div>
+            {focus ? (
+              <>
+                <h3>{focus.name}</h3>
+                <Range
+                  label={'Volume · ' + Math.round(focus.volume * 100) + '%'}
+                  value={focus.volume}
+                  min={0}
+                  max={1.5}
+                  onChange={(v) => patch(focus.id, { volume: v })}
+                />
+                <Range
+                  label={
+                    'Pan · ' +
+                    (focus.pan === 0
+                      ? 'Center'
+                      : Math.round(Math.abs(focus.pan) * 100) +
+                        (focus.pan < 0 ? ' L' : ' R'))
+                  }
+                  value={focus.pan}
+                  min={-1}
+                  max={1}
+                  onChange={(v) => patch(focus.id, { pan: v })}
+                />
+                <div className="mixer-divider">3-BAND EQ</div>
+                {(['low', 'mid', 'high'] as const).map((b) => (
+                  <Range
+                    key={b}
+                    label={b + ' · ' + focus[b] + ' dB'}
+                    min={-12}
+                    max={12}
+                    step={1}
+                    value={focus[b]}
+                    onChange={(v) => patch(focus.id, { [b]: v })}
+                  />
+                ))}
+                <div className="mixer-divider">LIVE EFFECTS</div>
+                {(['compression', 'reverb', 'delay'] as const).map((k) => (
+                  <Range
+                    key={k}
+                    label={k + ' · ' + Math.round((focus[k] || 0) * 100) + '%'}
+                    value={focus[k] || 0}
+                    onChange={(v) => patch(focus.id, { [k]: v })}
+                  />
+                ))}
+                <div className="mixer-divider">CLIP FADES</div>
+                {(['fadeIn', 'fadeOut'] as const).map((k) => (
+                  <label className="field" key={k}>
+                    <span>
+                      {k === 'fadeIn' ? 'Fade in' : 'Fade out'} (seconds)
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={Math.min(30, focus.duration || 20)}
+                      step={0.1}
+                      value={focus[k] || 0}
+                      onChange={(e) =>
+                        patch(focus.id, {
+                          [k]: Math.max(0, Math.min(30, +e.target.value)),
+                        })
+                      }
+                    />
+                  </label>
+                ))}
+                <div className="mixer-divider">ARRANGEMENT</div>
+                <label className="field">
+                  <span>Start position (seconds)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="120"
+                    step=".1"
+                    value={focus.offset}
+                    onChange={(e) =>
+                      patch(focus.id, {
+                        offset: Math.max(0, Math.min(120, +e.target.value)),
+                      })
+                    }
+                  />
+                </label>
+                {(['trimStart', 'trimEnd'] as const).map((k) => (
+                  <label className="field" key={k}>
+                    <span>
+                      {k === 'trimStart' ? 'Trim beginning' : 'Trim ending'}{' '}
+                      (seconds)
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      max={Math.max(
+                        0,
+                        (focus.duration || 20) -
+                          0.1 -
+                          focus[k === 'trimStart' ? 'trimEnd' : 'trimStart'],
+                      )}
+                      step=".1"
+                      value={focus[k]}
+                      onChange={(e) =>
+                        patch(focus.id, {
+                          [k]: Math.max(
+                            0,
+                            Math.min(
+                              +e.target.value,
+                              (focus.duration || 20) -
+                                0.1 -
+                                focus[
+                                  k === 'trimStart' ? 'trimEnd' : 'trimStart'
+                                ],
+                            ),
+                          ),
+                        })
+                      }
+                    />
+                  </label>
+                ))}
+              </>
+            ) : (
+              <p>Select a track to adjust its sound.</p>
+            )}
+          </aside>
+        </div>
+      ) : tab === 'Piano roll' ? (
+        <PianoRoll
+          track={focus}
+          bpm={data.bpm}
+          onAdd={addInstrument}
+          onChange={(p) => focus && patch(focus.id, p)}
+        />
+      ) : tab === 'Automation' ? (
+        <AutomationEditor
+          track={focus}
+          length={length}
+          onChange={(p) => focus && patch(focus.id, p)}
+        />
+      ) : (
+        <div className="sequencer">
+          <div className="section-title">
+            <div>
+              <h2>Make your own rhythm.</h2>
+              <p>
+                16 steps. Three sounds. Eight bars when added to your
+                arrangement.
+              </p>
+            </div>
+            <button
+              className="button primary"
+              disabled={!!busy}
+              onClick={addSequence}
+            >
+              <Plus size={15} /> Add drum track
+            </button>
+          </div>
+          <div className="step-ruler">
+            <span />
+            {Array.from({ length: 16 }, (_, i) => (
+              <span key={i}>{i + 1}</span>
+            ))}
+          </div>
+          {['Kick', 'Snare', 'Hi-hat'].map((name, r) => (
+            <div className="step-row" key={name}>
+              <strong>{name}</strong>
+              {pattern[r].map((v, i) => (
+                <button
+                  key={i}
+                  className={
+                    (v ? 'enabled ' : '') + (i % 4 === 0 ? 'beat-start' : '')
+                  }
+                  aria-label={name + ' step ' + (i + 1)}
+                  aria-pressed={!!v}
+                  onClick={() =>
+                    setPattern((p) =>
+                      p.map((row, ri) =>
+                        ri === r
+                          ? row.map((x, xi) => (xi === i ? 1 - x : x))
+                          : row,
+                      ),
+                    )
+                  }
+                />
+              ))}
+            </div>
+          ))}
+          <div className="actions">
+            <button
+              className="button secondary"
+              disabled={!!busy || recording}
+              onClick={async () => {
+                stop();
+                const epoch = ++generation.current;
+                setBusy('Loading drums');
+                try {
+                  const engine = await playMix(
+                    {
+                      bpm: data.bpm,
+                      tracks: [
+                        {
+                          id: 'preview',
+                          name: 'Drums',
+                          sequence: pattern,
+                          volume: 0.8,
+                          pan: 0,
+                          muted: false,
+                          solo: false,
+                          offset: 0,
+                          trimStart: 0,
+                          trimEnd: 0,
+                          low: 0,
+                          mid: 0,
+                          high: 0,
+                        },
+                      ],
+                    },
+                    () => setPlaying(false),
+                  );
+                  if (epoch !== generation.current || !alive.current) {
+                    engine.stop();
+                    return;
+                  }
+                  playback.current = engine;
+                  setPlaying(true);
+                } catch (e: any) {
+                  notify(e.message);
+                } finally {
+                  if (alive.current) setBusy('');
+                }
+              }}
+            >
+              <Play size={16} /> Audition pattern
+            </button>
+            <button
+              className="button secondary"
+              onClick={() => setPattern(pattern.map((r) => r.map(() => 0)))}
+            >
+              Clear pattern
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="studio-footnote">
+        <HeadphoneNote />
+        <p>
+          Use headphones while recording. Recording is limited to 2 minutes;
+          stereo export to 5 minutes. Volume, pan, EQ, compression, reverb, and
+          delay respond during playback. Note edits, fades, automation, and
+          timing changes apply on the next playback. Tempo changes affect
+          generated instruments and drums; imported audio keeps its original
+          speed.
+        </p>
+      </div>
+      <Dialog
+        open={versions !== null}
+        onOpenChange={(v) => !v && setVersions(null)}
+      >
+        <DialogContent className="form-dialog">
+          <DialogTitle>Saved versions</DialogTitle>
+          <DialogDescription>
+            Manual saves keep up to 20 arrangement checkpoints. Audio files are
+            referenced, not duplicated.
+          </DialogDescription>
+          {versions?.length ? (
+            versions.map((v) => (
+              <button
+                key={v.id}
+                className="version-row"
+                onClick={() => {
+                  mutate(() => JSON.parse(v.data));
+                  setTitle(v.title);
+                  setVersions(null);
+                  notify(
+                    'Version restored to the editor. Save to keep this change.',
+                  );
+                }}
+              >
+                <strong>{v.title}</strong>
+                <span>{new Date(v.created).toLocaleString()}</span>
+                <span>Restore</span>
+              </button>
+            ))
+          ) : (
+            <p>No checkpoints yet. Save the project to create one.</p>
+          )}
+        </DialogContent>
+      </Dialog>
+      <Confirm
+        open={!!remove}
+        onClose={() => setRemove('')}
+        onConfirm={() =>
+          mutate((d) => ({
+            ...d,
+            tracks: d.tracks.filter((t) => t.id !== remove),
+          }))
+        }
+        title="Remove this track?"
+        description="This removes it from the arrangement. Your original upload stays in your library."
+      />
+    </div>
+  );
 }
-function HeadphoneNote(){return <Volume2 size={17}/>;}
-
+function HeadphoneNote() {
+  return <Volume2 size={17} />;
+}
