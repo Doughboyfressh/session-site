@@ -1,0 +1,3 @@
+import { getChatGPTUser } from '@/app/chatgpt-auth';
+import { bucket,fileAccess } from '@/lib/server';
+export async function GET(req:Request,{params}:{params:Promise<{id:string}>}){const {id}=await params;const user=await getChatGPTUser();const file=await fileAccess(id,user?.userId||'');if(!file)return new Response('File unavailable',{status:404});const obj=await bucket().get(id);if(!obj)return new Response('File unavailable',{status:404});return new Response(obj.body,{headers:{'Content-Type':file.mime,'Content-Length':String(file.size),'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'",'Content-Disposition':'inline'}});}

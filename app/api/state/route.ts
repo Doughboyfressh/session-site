@@ -1,0 +1,12 @@
+import { getChatGPTUser } from '@/app/chatgpt-auth';
+import { all, one } from '@/lib/server';
+export async function GET(){try{const user=await getChatGPTUser(),id=user?.userId||'';
+const [profile,tracks,profiles,projects,rooms,saved,follows]=await Promise.all([
+one('SELECT * FROM profiles WHERE id=?',id),
+all("SELECT t.*,COALESCE(p.name,'Independent creator') AS creator,(SELECT COUNT(*) FROM saved s WHERE s.track=t.id) AS likes FROM tracks t LEFT JOIN profiles p ON p.id=t.owner WHERE t.visibility='public' OR t.owner=? ORDER BY t.created DESC LIMIT 200",id),
+all("SELECT p.*,(SELECT COUNT(*) FROM follows f WHERE f.target=p.id) AS followers FROM profiles p WHERE p.visibility='public' ORDER BY p.created DESC LIMIT 100"),
+all('SELECT * FROM projects WHERE owner=? ORDER BY updated DESC LIMIT 100',id),
+all('SELECT r.id,r.owner,r.title,r.project,r.created,(SELECT COUNT(*) FROM members x WHERE x.room=r.id AND x.seen>?) AS active FROM rooms r JOIN members m ON m.room=r.id WHERE m.user=? ORDER BY r.created DESC LIMIT 50',Date.now()-30000,id),
+all('SELECT track FROM saved WHERE user=?',id),all('SELECT target FROM follows WHERE user=?',id)]);
+return Response.json({profile,tracks,profiles,projects:projects.map(p=>({...p,data:JSON.parse(p.data)})),rooms,saved:saved.map(s=>s.track),follows:follows.map(f=>f.target)},{headers:{'Cache-Control':'private, no-store'}});
+}catch(e){console.error('State load failed',e);return Response.json({error:'Your workspace could not load. Please try again.'},{status:503});}}
