@@ -41,6 +41,10 @@ export type TransportOptions = {
   loopStart?: number;
   loopEnd?: number;
   metronome?: boolean;
+  audioContext?: AudioContext;
+  startDelay?: number;
+  allowPastEnd?: boolean;
+  signal?: AbortSignal;
 };
 let audio: AudioContext | null = null;
 const cache = new Map<string, AudioBuffer>();
@@ -470,12 +474,19 @@ export async function playMix(
   onEnd?: () => void,
   options: TransportOptions = {},
 ) {
-  const c = context();
+  const c = options.audioContext || context();
   await c.resume();
+  if (options.signal?.aborted)
+    throw new DOMException('Playback cancelled.', 'AbortError');
   if (!data.tracks.length) throw new Error('Add a track to play.');
   const loaded = await Promise.all(
-    data.tracks.map(async (t) => ({ t, b: await bufferFor(t, data.bpm) })),
+    data.tracks.map(async (t) => ({
+      t,
+      b: await bufferFor(t, data.bpm, { signal: options.signal }),
+    })),
   );
+  if (options.signal?.aborted)
+    throw new DOMException('Playback cancelled.', 'AbortError');
   for (const { t, b } of loaded)
     if (t.trimStart + t.trimEnd >= b.duration)
       throw new Error(t.name + ' is fully trimmed. Shorten its trim settings.');
@@ -487,7 +498,10 @@ export async function playMix(
         ),
       ),
     ),
-    from = Math.max(0, Math.min(options.from || 0, duration - 0.01)),
+    from = Math.max(
+      0,
+      Math.min(options.from || 0, options.allowPastEnd ? 300 : duration - 0.01),
+    ),
     end = options.loop
       ? Math.min(
           duration,
@@ -525,15 +539,21 @@ export async function playMix(
     ),
   );
   const nodes = new Set<AudioBufferSourceNode>();
+  const clicks = new Set<OscillatorNode>();
   let stopped = false,
-    next = c.currentTime + 0.08,
-    currentFrom = Math.min(from, end - 0.01),
+    next =
+      Math.ceil(
+        (c.currentTime + Math.max(0.08, options.startDelay || 0)) *
+          c.sampleRate,
+      ) / c.sampleRate,
+    currentFrom = options.allowPastEnd ? from : Math.min(from, end - 0.01),
     firstWhen = next;
   const initialFrom = currentFrom;
   let latest = data;
   function schedule() {
     if (stopped) return;
-    while (next < c.currentTime + 0.4) {
+    if (currentFrom >= end) return;
+    while (!options.loop || next < c.currentTime + 0.4) {
       for (const { t, b } of loaded) {
         const tr = latest.tracks.find((x) => x.id === t.id);
         if (!tr) continue;
@@ -567,6 +587,12 @@ export async function playMix(
             next + pos - currentFrom + 0.045,
           );
           o.connect(g).connect(master);
+          clicks.add(o);
+          o.onended = () => {
+            clicks.delete(o);
+            o.disconnect();
+            g.disconnect();
+          };
           o.start(next + pos - currentFrom);
           o.stop(next + pos - currentFrom + 0.05);
         }
@@ -593,12 +619,22 @@ export async function playMix(
         n.stop();
       } catch {}
     nodes.clear();
+    for (const click of clicks) {
+      try {
+        click.stop();
+      } catch {}
+    }
+    clicks.clear();
+    options.signal?.removeEventListener('abort', stop);
     channels.forEach((ch) => ch.dispose());
     master.disconnect();
     analyser.disconnect();
   }
+  options.signal?.addEventListener('abort', stop, { once: true });
   return {
     duration,
+    audioStartTime: firstWhen,
+    audioStartFrame: Math.round(firstWhen * c.sampleRate),
     start: performance.now(),
     stop,
     position: () => {

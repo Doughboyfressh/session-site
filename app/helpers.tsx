@@ -28,11 +28,20 @@ export async function action(body: any) {
     });
   return j;
 }
-export async function upload(file: File, purpose = 'audio') {
+export async function upload(
+  file: File,
+  purpose = 'audio',
+  options: { signal?: AbortSignal; projectId?: string } = {},
+) {
   const fd = new FormData();
   fd.set('file', file);
   fd.set('purpose', purpose);
-  const r = await fetch('/api/upload', { method: 'POST', body: fd });
+  if (options.projectId) fd.set('projectId', options.projectId);
+  const r = await fetch('/api/upload', {
+    method: 'POST',
+    body: fd,
+    signal: options.signal,
+  });
   const j = (await r.json()) as any;
   if (!r.ok) throw new Error(j.error || 'Upload failed.');
   return j;
@@ -131,12 +140,14 @@ export function Confirm({
   onConfirm,
   title,
   description,
+  confirmLabel = 'Delete',
 }: {
   open: boolean;
   onClose: () => void;
   onConfirm: () => void;
   title: string;
   description: string;
+  confirmLabel?: string;
 }) {
   return (
     <AlertDialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -152,7 +163,7 @@ export function Confirm({
               onClose();
             }}
           >
-            Delete
+            {confirmLabel}
           </button>
         </AlertDialogFooter>
       </AlertDialogContent>

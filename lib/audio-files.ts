@@ -31,7 +31,7 @@ function ascii(view: DataView, offset: number, text: string) {
 export async function encodeWave(
   samples: Samples,
   depth: WaveDepth,
-  options: { dither?: boolean; signal?: AbortSignal } = {},
+  options: { dither?: boolean; signal?: AbortSignal; channels?: 1 | 2 } = {},
 ) {
   checkCancelled(options.signal);
   if (
@@ -41,10 +41,12 @@ export async function encodeWave(
     ![44100, 48000].includes(samples.sampleRate)
   )
     throw new Error('Unsupported WAV settings.');
+  const channelCount = options.channels || 2;
   const bytes = depth / 8,
-    frameBytes = 2 * bytes,
+    frameBytes = channelCount * bytes,
     start = depth === 32 ? 58 : 44;
-  const size = samples.length * frameBytes + start;
+  const dataSize = samples.length * frameBytes;
+  const size = dataSize + start + (dataSize & 1);
   if (size > MAX_EXPORT_BYTES)
     throw new Error('This WAV exceeds the 128 MB export limit.');
   const data = new ArrayBuffer(size),
@@ -55,7 +57,7 @@ export async function encodeWave(
   ascii(view, 12, 'fmt ');
   view.setUint32(16, depth === 32 ? 18 : 16, true);
   view.setUint16(20, depth === 32 ? 3 : 1, true);
-  view.setUint16(22, 2, true);
+  view.setUint16(22, channelCount, true);
   view.setUint32(24, samples.sampleRate, true);
   view.setUint32(28, samples.sampleRate * frameBytes, true);
   view.setUint16(32, frameBytes, true);
@@ -77,7 +79,7 @@ export async function encodeWave(
   for (let first = 0; first < samples.length; first += 65536) {
     checkCancelled(options.signal);
     for (let i = first; i < Math.min(samples.length, first + 65536); i++)
-      for (let channel = 0; channel < 2; channel++) {
+      for (let channel = 0; channel < channelCount; channel++) {
         const value = channels[channel][i];
         if (!Number.isFinite(value))
           throw new Error(
