@@ -40,3 +40,4 @@ next-env.d.ts
 /tests/qa-result.json
 /.openai/local-wrangler.json
 *.tsbuildinfo
+/.openai/export-test.config.ts

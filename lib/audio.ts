@@ -84,6 +84,7 @@ export function instrument(
   index: number,
   time: number,
   volume = 1,
+  random = Math.random,
 ) {
   const gain = c.createGain();
   gain.connect(dest);
@@ -105,7 +106,7 @@ export function instrument(
       ),
       data = buffer.getChannelData(0);
     for (let i = 0; i < data.length; i++)
-      data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+      data[i] = (random() * 2 - 1) * (1 - i / data.length);
     const source = c.createBufferSource();
     source.buffer = buffer;
     const filter = c.createBiquadFilter();
@@ -150,21 +151,29 @@ export async function synth(
   bpm: number,
   pattern = defaultPattern,
   demo?: string,
+  sampleRate = 44100,
 ) {
   const c = new OfflineAudioContext(
       2,
-      Math.ceil(((60 / bpm) * 32 + 0.5) * 44100),
-      44100,
+      Math.ceil(((60 / bpm) * 32 + 0.5) * sampleRate),
+      sampleRate,
     ),
     master = c.createGain();
   master.gain.value = 0.7;
   master.connect(c.destination);
   const step = 60 / bpm / 4;
+  let seed = 2166136261;
+  for (const letter of JSON.stringify([bpm, pattern, demo]))
+    seed = Math.imul(seed ^ letter.charCodeAt(0), 16777619) >>> 0;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
   for (let bar = 0; bar < 8; bar++)
     for (let i = 0; i < 16; i++)
       for (let row = 0; row < 3; row++)
         if (pattern[row]?.[i])
-          instrument(c, master, row, (bar * 16 + i) * step, 0.8);
+          instrument(c, master, row, (bar * 16 + i) * step, 0.8, random);
   if (demo) {
     const roots =
       demo === 'demo-1'
@@ -185,23 +194,45 @@ export async function synth(
   }
   return c.startRendering();
 }
-export async function bufferFor(t: MixerTrack, bpm: number) {
+export async function bufferFor(
+  t: MixerTrack,
+  bpm: number,
+  options: {
+    sampleRate?: number;
+    signal?: AbortSignal;
+    revalidate?: boolean;
+  } = {},
+) {
+  const sampleRate = options.sampleRate || 44100;
   const key =
-    t.fileId ||
-    `${t.demo || 'seq'}-${bpm}-${t.sound}-${JSON.stringify(t.notes ?? t.sequence ?? [])}`;
-  if (cache.has(key)) return cache.get(key)!;
+    (t.fileId ||
+      `${t.demo || 'seq'}-${bpm}-${t.sound}-${JSON.stringify(t.notes ?? t.sequence ?? [])}`) +
+    ':' +
+    (options.sampleRate || 'playback');
+  const cached = cache.get(key);
+  if (cached && !(t.fileId && options.revalidate)) return cached;
   let b: AudioBuffer;
   if (t.fileId) {
-    const r = await fetch('/api/file/' + t.fileId);
+    const r = await fetch('/api/file/' + t.fileId, {
+      signal: options.signal,
+      cache: 'no-store',
+    });
     if (!r.ok)
       throw new Error('This audio is private or is no longer available.');
-    b = await context().decodeAudioData(await r.arrayBuffer());
+    if (cached) {
+      await r.body?.cancel();
+      return cached;
+    }
+    const decoder = options.sampleRate
+      ? new OfflineAudioContext(2, 1, sampleRate)
+      : context();
+    b = await decoder.decodeAudioData(await r.arrayBuffer());
   } else if (t.notes) {
     const beats = Math.max(8, ...t.notes.map((n) => n.start + n.length));
     const c = new OfflineAudioContext(
       2,
-      Math.ceil(Math.min(300, (beats * 60) / bpm + 0.5) * 44100),
-      44100,
+      Math.ceil(Math.min(300, (beats * 60) / bpm + 0.5) * sampleRate),
+      sampleRate,
     );
     for (const n of t.notes)
       playNote(
@@ -214,7 +245,14 @@ export async function bufferFor(t: MixerTrack, bpm: number) {
         t.sound,
       );
     b = await c.startRendering();
-  } else b = await synth(bpm, t.sequence || defaultPattern, t.demo);
+  } else b = await synth(bpm, t.sequence || defaultPattern, t.demo, sampleRate);
+  if (
+    b.numberOfChannels > 2 ||
+    b.length * b.numberOfChannels * 4 > 180 * 1024 * 1024
+  )
+    throw new Error(
+      'Use mono or stereo audio within the studio memory limit. Shorten or convert this source before importing.',
+    );
   cache.set(key, b);
   let bytes = 0;
   for (const v of cache.values()) bytes += v.length * v.numberOfChannels * 4;
@@ -243,7 +281,7 @@ export function peaks(b: AudioBuffer) {
   }
   return out;
 }
-function channel(c: BaseAudioContext, t: MixerTrack, dest: AudioNode) {
+export function channel(c: BaseAudioContext, t: MixerTrack, dest: AudioNode) {
   const input = c.createGain(),
     eqs = [200, 1200, 5000].map((f, i) => {
       const e = c.createBiquadFilter();
@@ -251,7 +289,6 @@ function channel(c: BaseAudioContext, t: MixerTrack, dest: AudioNode) {
       e.frequency.value = f;
       return e;
     }),
-    compressor = c.createDynamicsCompressor(),
     pan = c.createStereoPanner(),
     gain = c.createGain(),
     auto = c.createGain();
@@ -259,14 +296,11 @@ function channel(c: BaseAudioContext, t: MixerTrack, dest: AudioNode) {
     .connect(eqs[0])
     .connect(eqs[1])
     .connect(eqs[2])
-    .connect(compressor)
     .connect(pan)
     .connect(gain)
     .connect(auto)
     .connect(dest);
-  compressor.knee.value = 12;
-  compressor.attack.value = 0.012;
-  compressor.release.value = 0.18;
+  let compressor = c.createDynamicsCompressor();
   const convolver = c.createConvolver(),
     wet = c.createGain(),
     delay = c.createDelay(1),
@@ -289,28 +323,37 @@ function channel(c: BaseAudioContext, t: MixerTrack, dest: AudioNode) {
   feedback.gain.value = 0.28;
   delay.connect(feedback).connect(delay);
   delay.connect(echo).connect(dest);
-  const update = (next: MixerTrack, solo = false) => {
-    eqs.forEach((e, i) =>
-      e.gain.setTargetAtTime(
-        [next.low, next.mid, next.high][i] || 0,
-        c.currentTime,
-        0.015,
-      ),
-    );
-    pan.pan.setTargetAtTime(next.pan, c.currentTime, 0.015);
-    gain.gain.setTargetAtTime(
-      next.muted || (solo && !next.solo) ? 0 : next.volume,
-      c.currentTime,
-      0.015,
-    );
+  let compressionEnabled = false;
+  const update = (next: MixerTrack, solo = false, initial = false) => {
+    const set = (param: AudioParam, value: number, smoothing = 0.015) => {
+      if (initial) param.setValueAtTime(value, c.currentTime);
+      else param.setTargetAtTime(value, c.currentTime, smoothing);
+    };
+    eqs.forEach((e, i) => set(e.gain, [next.low, next.mid, next.high][i] || 0));
+    set(pan.pan, next.pan);
+    set(gain.gain, next.muted || (solo && !next.solo) ? 0 : next.volume);
+    const enableCompression = Boolean(next.compression);
+    if (enableCompression !== compressionEnabled) {
+      eqs[2].disconnect();
+      compressor.disconnect();
+      if (enableCompression) {
+        // A disconnected compressor can retain old lookahead audio. Re-enable with fresh state.
+        compressor = c.createDynamicsCompressor();
+        compressor.knee.value = 12;
+        compressor.attack.value = 0.012;
+        compressor.release.value = 0.18;
+        eqs[2].connect(compressor).connect(pan);
+      } else eqs[2].connect(pan);
+      compressionEnabled = enableCompression;
+    }
     compressor.threshold.value = next.compression
       ? -12 - (next.compression || 0) * 24
       : 0;
     compressor.ratio.value = next.compression ? 2 + next.compression * 8 : 1;
-    wet.gain.setTargetAtTime(next.reverb || 0, c.currentTime, 0.02);
-    echo.gain.setTargetAtTime(next.delay || 0, c.currentTime, 0.02);
+    set(wet.gain, next.reverb || 0, 0.02);
+    set(echo.gain, next.delay || 0, 0.02);
   };
-  update(t);
+  update(t, false, true);
   return {
     input,
     auto,
@@ -358,58 +401,67 @@ export function mixDuration(data: Arrangement) {
     ),
   );
 }
-function scheduleClip(
+export function scheduleClip(
   c: BaseAudioContext,
   t: MixerTrack,
   b: AudioBuffer,
-  ch: ReturnType<typeof channel>,
+  ch: { input: AudioNode; auto: GainNode },
   when: number,
   from: number,
   to: number,
+  automationDelay = 0,
 ) {
   const end = t.offset + b.duration - t.trimStart - t.trimEnd,
     first = Math.max(from, t.offset),
     last = Math.min(to, end);
   if (last <= first) return null;
   const source = c.createBufferSource(),
-    fade = c.createGain();
+    fade = c.createGain(),
+    fadeOut = c.createGain();
   source.buffer = b;
-  source.connect(fade).connect(ch.input);
+  source.connect(fade).connect(fadeOut).connect(ch.input);
   const at = when + first - from,
     dur = last - first,
     relative = first - t.offset;
   fade.gain.setValueAtTime(t.fadeIn ? Math.min(1, relative / t.fadeIn) : 1, at);
   if (t.fadeIn && relative < t.fadeIn)
     fade.gain.linearRampToValueAtTime(
-      1,
+      Math.min(1, (last - t.offset) / t.fadeIn),
       Math.min(at + dur, at + t.fadeIn - relative),
     );
   if (t.fadeOut) {
     const start = end - t.fadeOut;
     if (start < last) {
-      fade.gain.setValueAtTime(
+      fadeOut.gain.setValueAtTime(
         Math.min(1, Math.max(0, (end - first) / t.fadeOut)),
         Math.max(at, when + start - from),
       );
-      fade.gain.linearRampToValueAtTime(
+      fadeOut.gain.linearRampToValueAtTime(
         Math.max(0, (end - last) / t.fadeOut),
         at + dur,
       );
     }
   }
   const points = (t.automation || []).slice().sort((a, b) => a.time - b.time);
-  ch.auto.gain.setValueAtTime(automationAt(points, from), when);
+  ch.auto.gain.setValueAtTime(
+    automationAt(points, from),
+    when + automationDelay,
+  );
   for (const p of points)
     if (p.time > from && p.time <= to)
-      ch.auto.gain.linearRampToValueAtTime(p.value, when + p.time - from);
+      ch.auto.gain.linearRampToValueAtTime(
+        p.value,
+        when + automationDelay + p.time - from,
+      );
   ch.auto.gain.linearRampToValueAtTime(
     automationAt(points, to),
-    when + to - from,
+    when + automationDelay + to - from,
   );
   source.start(at, t.trimStart + relative, dur);
   source.onended = () => {
     source.disconnect();
     fade.disconnect();
+    fadeOut.disconnect();
   };
   return source;
 }
@@ -454,7 +506,17 @@ export async function playMix(
   analyser.fftSize = 256;
   master.connect(analyser);
   const channels = new Map(
-    loaded.map(({ t }) => [t.id, channel(c, t, master)]),
+    loaded.map(({ t }) => [
+      t.id,
+      channel(
+        c,
+        {
+          ...t,
+          muted: t.muted || (data.tracks.some((x) => x.solo) && !t.solo),
+        },
+        master,
+      ),
+    ]),
   );
   channels.forEach((ch, id) =>
     ch.update(

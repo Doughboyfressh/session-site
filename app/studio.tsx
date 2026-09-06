@@ -32,14 +32,13 @@ import {
   bufferFor,
   peaks,
   playMix,
-  renderMix,
-  download,
   type MixerTrack,
   type Arrangement,
 } from '@/lib/audio';
 import { action, upload, Range, Confirm } from './helpers';
 import { useProjectSync } from './use-project-sync';
 import ConflictValues from './conflict-values';
+import ExportAudio from './export-audio';
 export default function Studio({
   initial,
   onDraft,
@@ -75,7 +74,11 @@ export default function Studio({
     [autosave, setAutosave] = useState(false),
     [saveLabel, setSaveLabel] = useState(''),
     [versions, setVersions] = useState<any[] | null>(null),
-    [historyTick, setHistoryTick] = useState(0);
+    [historyTick, setHistoryTick] = useState(0),
+    [exportSnapshot, setExportSnapshot] = useState<{
+      title: string;
+      data: Arrangement;
+    } | null>(null);
   const past = useRef<Arrangement[]>([]),
     future = useRef<Arrangement[]>([]),
     generation = useRef(0),
@@ -94,7 +97,7 @@ export default function Studio({
     initial,
     id,
     snapshot: { title, data },
-    paused: recording || playing || !!busy,
+    paused: recording || playing || !!busy || !!exportSnapshot,
     apply: (p, changed, resetHistory = true) => {
       setTitle(p.title);
       setData(p.data);
@@ -501,19 +504,9 @@ export default function Studio({
       if (alive.current) setBusy('');
     }
   }
-  async function bounce() {
-    setBusy('Rendering WAV');
-    try {
-      download(
-        await renderMix(data),
-        title.replace(/[^a-z0-9 _-]/gi, '') + '.wav',
-      );
-      notify('Your stereo WAV is ready.');
-    } catch (e: any) {
-      notify(e.message);
-    } finally {
-      setBusy('');
-    }
+  function bounce() {
+    stop();
+    setExportSnapshot(structuredClone({ title, data }));
   }
   async function addSequence() {
     if (data.tracks.length >= 32)
@@ -593,9 +586,9 @@ export default function Studio({
           <button
             className="button secondary"
             onClick={bounce}
-            disabled={!!busy || !data.tracks.length}
+            disabled={!!busy || recording || !data.tracks.length}
           >
-            <Download size={16} /> Export WAV
+            <Download size={16} /> Export audio
           </button>
           <button
             className="button primary"
@@ -1271,12 +1264,12 @@ export default function Studio({
       <div className="studio-footnote">
         <HeadphoneNote />
         <p>
-          Use headphones while recording. Recording is limited to 2 minutes;
-          stereo export to 5 minutes. Volume, pan, EQ, compression, reverb, and
-          delay respond during playback. Note edits, fades, automation, and
-          timing changes apply on the next playback. Tempo changes affect
-          generated instruments and drums; imported audio keeps its original
-          speed.
+          Use headphones while recording. Recording is limited to 2 minutes; the
+          arrangement to 5 minutes. Exports can include extra time for effect
+          tails. Volume, pan, EQ, compression, reverb, and delay respond during
+          playback. Note edits, fades, automation, and timing changes apply on
+          the next playback. Tempo changes affect generated instruments and
+          drums; imported audio keeps its original speed.
         </p>
       </div>
       <Dialog
@@ -1313,6 +1306,12 @@ export default function Studio({
           )}
         </DialogContent>
       </Dialog>
+      {exportSnapshot && (
+        <ExportAudio
+          {...exportSnapshot}
+          onClose={() => setExportSnapshot(null)}
+        />
+      )}
       <Confirm
         open={!!remove}
         onClose={() => setRemove('')}
