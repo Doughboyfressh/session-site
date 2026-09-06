@@ -232,34 +232,28 @@ export default function Diagnostics() {
       const config = { iceServers: [] };
       const graph = () =>
         JSON.stringify({
-          source: stream
-            ?.getTracks()
-            .map((t) => ({
-              id: t.id,
-              kind: t.kind,
-              enabled: t.enabled,
-              ready: t.readyState,
-            })),
-          a: a?.pc
-            .getTransceivers()
-            .map((t) => ({
-              mid: t.mid,
-              d: t.direction,
-              cd: t.currentDirection,
-              send: t.sender.track?.id,
-              recv: t.receiver.track.id,
-              muted: t.receiver.track.muted,
-            })),
-          b: b?.pc
-            .getTransceivers()
-            .map((t) => ({
-              mid: t.mid,
-              d: t.direction,
-              cd: t.currentDirection,
-              send: t.sender.track?.id,
-              recv: t.receiver.track.id,
-              muted: t.receiver.track.muted,
-            })),
+          source: stream?.getTracks().map((t) => ({
+            id: t.id,
+            kind: t.kind,
+            enabled: t.enabled,
+            ready: t.readyState,
+          })),
+          a: a?.pc.getTransceivers().map((t) => ({
+            mid: t.mid,
+            d: t.direction,
+            cd: t.currentDirection,
+            send: t.sender.track?.id,
+            recv: t.receiver.track.id,
+            muted: t.receiver.track.muted,
+          })),
+          b: b?.pc.getTransceivers().map((t) => ({
+            mid: t.mid,
+            d: t.direction,
+            cd: t.currentDirection,
+            send: t.sender.track?.id,
+            recv: t.receiver.track.id,
+            muted: t.receiver.track.muted,
+          })),
         });
       a = new PeerLink('diagnostic-a', 'diagnostic-b', config, {
         send: async (body) => {
@@ -438,7 +432,7 @@ export default function Diagnostics() {
       report(
         'Cloudflare relay across separate networks',
         'pending',
-        'Requires Cloudflare TURN credentials and a test between separate devices/networks. The local test does not use a relay.',
+        'The local test does not use a relay. Relay-only media and connections between separate devices and networks still require testing.',
       );
       report(
         'Real microphone, camera, and screen capture',

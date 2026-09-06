@@ -6,7 +6,7 @@ Prepared September 5, 2026
 
 This package contains proposed Terms of Service, a Privacy Notice, a Copyright Policy, and Collaboration Permissions and Credits. It is a drafting document for review, not legal advice or a certification of compliance. Supporting primary sources appear at the end. Operational decisions and remaining launch work are listed in the separate SESSION Launch Checklist.
 
-The current development build provides authenticated account-data export as JSON, an uploaded-file list, and permanent erasure of a member's own uploaded files and their links across hosted projects. Deleting a track listing is separate from erasing its source upload. Downloaded copies cannot be recalled. Account deletion is not implemented. Rooms use Cloudflare STUN; optional Cloudflare TURN relay connectivity remains inactive until credentials are connected.
+The current development build provides authenticated account-data export as JSON, an uploaded-file list, and permanent erasure of a member's own uploaded files and their links across hosted projects. Deleting a track listing is separate from erasing its source upload. Downloaded copies cannot be recalled. Account deletion is not implemented. Rooms use Cloudflare STUN and have Cloudflare TURN configured. Temporary relay credential generation has been verified; cross-network media reliability remains unverified.
 
 ---
 
@@ -128,7 +128,7 @@ Please keep unnecessary sensitive information out of profiles, filenames, chat, 
 
 Private projects are limited through SESSION to their owner and people the owner authorizes. Sharing with a room grants the access described beside that control; it does not make the source public. Public audio and public profile fields can be viewed by the audience described at publication, and recipients may make copies outside SESSION. Making an item private later cannot retrieve those copies.
 
-Live media uses browser WebRTC connections. Cloudflare STUN helps devices establish direct connections. The connection service receives network information needed for setup, and direct connections may reveal your public network address to other participants. Cloudflare has also been selected as an optional TURN relay provider. That relay is not currently active because its credentials have not been connected. When enabled and used, it will relay media packets and process network and connection information, using temporary access credentials issued through SESSION. Direct connections may not work on every network while relay connectivity is unavailable.
+Live media uses browser WebRTC connections. Cloudflare STUN helps devices establish direct connections. The connection service receives network information needed for setup, and direct connections may reveal your public network address to other participants. Cloudflare TURN is configured to support connections that need a relay. When used, it relays media packets and processes network and connection information, using temporary access credentials issued through SESSION. Connection quality and availability vary by network.
 
 SESSION does not record live room audio or video in the initial release. Room text chat and connection-signaling data are stored separately. Live transport protections do not make stored projects or chat end-to-end encrypted. We cannot prevent a participant from making an outside recording. Browser camera and microphone permissions and the room's device controls let you control future capture and transmission.
 
