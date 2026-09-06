@@ -26,20 +26,20 @@ export async function GET(
       since = Math.max(0, Number(url.searchParams.get('since')) || 0);
     const now = Date.now();
     await run(
-      'UPDATE members SET seen=? WHERE room=? AND user=?',
+      'UPDATE members SET seen=MAX(seen,?) WHERE room=? AND user=?',
       now,
       id,
       u.userId,
     );
     if (session)
       await run(
-        'UPDATE media_sessions SET seen=? WHERE room=? AND user=? AND session=?',
+        'UPDATE media_sessions SET seen=MAX(seen,?) WHERE room=? AND user=? AND session=?',
         now,
         id,
         u.userId,
         session,
       );
-    const [members, sessions, events] = await Promise.all([
+    const [members, sessions, events, active] = await Promise.all([
       all(
         "SELECT m.user,m.seen,COALESCE(p.name,'Creator') AS name,p.avatar FROM members m LEFT JOIN profiles p ON p.id=m.user WHERE m.room=?",
         id,
@@ -56,20 +56,25 @@ export async function GET(
         u.userId,
         now - 86400000,
       ),
+      session
+        ? one(
+            'SELECT session FROM media_sessions WHERE room=? AND user=?',
+            id,
+            u.userId,
+          )
+        : null,
     ]);
-    const active = sessions.find((s) => s.user === u.userId),
-      safeEvents = events
-        .map((e) => ({ ...e, body: JSON.parse(e.body) }))
-        .filter(
-          (e) =>
-            e.kind !== 'signal' ||
-            (session &&
-              e.body.recipientSession === session &&
-              sessions.some(
-                (s) =>
-                  s.user === e.sender && s.session === e.body.senderSession,
-              )),
-        );
+    const safeEvents = events
+      .map((e) => ({ ...e, body: JSON.parse(e.body) }))
+      .filter(
+        (e) =>
+          e.kind !== 'signal' ||
+          (session &&
+            e.body.recipientSession === session &&
+            sessions.some(
+              (s) => s.user === e.sender && s.session === e.body.senderSession,
+            )),
+      );
     return Response.json(
       {
         room: {
@@ -78,7 +83,8 @@ export async function GET(
         },
         members,
         sessions,
-        mediaReplaced: !!session && active?.session !== session,
+        mediaReplaced: !!session && !!active && active.session !== session,
+        mediaMissing: !!session && !active,
         events: safeEvents,
         cursor: events.length ? events.at(-1)!.id : since,
         more: events.length === 200,

@@ -58,6 +58,7 @@ export default function Room({
 }) {
   const [state, setState] = useState<any>(null),
     [error, setError] = useState(''),
+    [callNotice, setCallNotice] = useState(''),
     [chat, setChat] = useState<any[]>([]),
     [message, setMessage] = useState(''),
     [local, setLocal] = useState<MediaStream | null>(null),
@@ -195,6 +196,7 @@ export default function Room({
     alive.current = true;
     controller.current = new AbortController();
     cursor.current = 0;
+    setCallNotice('');
     setChat([]);
     setRemote({});
     async function poll() {
@@ -226,10 +228,16 @@ export default function Room({
         stateRef.current = j;
         setState(j);
         setError('');
-        if (active && session.current === active && j.mediaReplaced) {
+        if (
+          active &&
+          session.current === active &&
+          (j.mediaReplaced || j.mediaMissing)
+        ) {
           disconnect(false);
-          setError(
-            'Your call was opened in another tab or device. Join here to move it back.',
+          setCallNotice(
+            j.mediaReplaced
+              ? 'This account joined the call in another tab or device. Each participant needs a different account. Join here to move this account’s call back.'
+              : 'Your call session ended. Your camera and microphone are off. Join again to reconnect.',
           );
         }
         if (session.current) syncPeers(j);
@@ -349,6 +357,7 @@ export default function Room({
       setMic(true);
       setCam(video);
       setError('');
+      setCallNotice('');
       syncPeers(stateRef.current || { sessions: [] });
     } catch (e: any) {
       stream?.getTracks().forEach((t) => t.stop());
@@ -503,6 +512,11 @@ export default function Room({
           {error}
         </div>
       )}
+      {callNotice && (
+        <div role="status" className="error-banner">
+          {callNotice}
+        </div>
+      )}
       <div className="relay-status">
         <Activity size={16} />
         {relay === true
@@ -511,8 +525,9 @@ export default function Room({
             ? 'Direct connections only · Cloudflare TURN credentials pending'
             : 'Check your relay connection before joining'}
         <span>
-          Your camera and microphone start only when you join. A new call in
-          another tab replaces this one.
+          Your camera and microphone start only when you join. Each participant
+          needs a different account. Joining elsewhere with the same account
+          moves your call there.
         </span>
         <button
           className="button secondary"

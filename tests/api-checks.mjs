@@ -40,19 +40,34 @@ const rtc=await call(B,'/api/rtc?room='+room.id);assert.equal(rtc.relay,false);a
 await call(D,'/api/rtc?room='+room.id,undefined,403);await call(null,'/api/rtc',undefined,401);
 const sB=crypto.randomUUID(),sC=crypto.randomUUID(),sC2=crypto.randomUUID();
 await call(B,'/api/room/'+room.id,{kind:'startMedia',session:sB});await call(C,'/api/room/'+room.id,{kind:'startMedia',session:sC});
+for(const [id,session]of[[B,sB],[C,sC]]){
+  const own=await call(id,'/api/room/'+room.id+'?session='+session);
+  assert.equal(own.mediaReplaced,false);assert.equal(own.mediaMissing,false);
+  assert(own.sessions.some(s=>s.user===B&&s.session===sB));assert(own.sessions.some(s=>s.user===C&&s.session===sC));checks+=4;
+}
 const event={kind:'signal',clientId:crypto.randomUUID(),recipient:C,body:{senderSession:sB,recipientSession:sC,description:{type:'offer',sdp:'v=0'}}};
 await call(B,'/api/room/'+room.id,event);await call(B,'/api/room/'+room.id,event);
 const delivered=await call(C,'/api/room/'+room.id+'?session='+sC);assert.equal(delivered.events.filter(e=>e.clientId===event.clientId).length,1);checks++;
 const observer=await call(C,'/api/room/'+room.id);assert(!observer.events.some(e=>e.kind==='signal'));checks++;
+assert.equal(observer.mediaReplaced,false);assert.equal(observer.mediaMissing,false);checks+=2;
 await call(C,'/api/room/'+room.id,{kind:'startMedia',session:sC2});
 const stale=await call(C,'/api/room/'+room.id+'?session='+sC);assert.equal(stale.mediaReplaced,true);checks++;
+assert.equal(stale.mediaMissing,false);checks++;
 await call(B,'/api/room/'+room.id,{...event,clientId:crypto.randomUUID()},409);
 await call(C,'/api/room/'+room.id,{kind:'stopMedia',session:sC});
 const stillActive=await call(C,'/api/room/'+room.id+'?session='+sC2);assert(stillActive.sessions.some(s=>s.user===C&&s.session===sC2));checks++;
+assert.equal(stillActive.mediaReplaced,false);assert.equal(stillActive.mediaMissing,false);checks+=2;
 const currentEvent={...event,clientId:crypto.randomUUID(),body:{...event.body,recipientSession:sC2}};await call(B,'/api/room/'+room.id,currentEvent);
 const restart={kind:'signal',clientId:crypto.randomUUID(),recipient:C,body:{senderSession:sB,recipientSession:sC2,restart:true}};
 await call(B,'/api/room/'+room.id,restart);const recoveryMessages=await call(C,'/api/room/'+room.id+'?session='+sC2);assert(recoveryMessages.events.some(e=>e.clientId===restart.clientId&&e.body.restart===true));checks++;
 await call(C,'/api/room/'+room.id,{kind:'stopMedia',session:sC2});await call(B,'/api/room/'+room.id,{...currentEvent,clientId:crypto.randomUUID()},409);
+for(const session of [sC2,crypto.randomUUID()]){
+  const ended=await call(C,'/api/room/'+room.id+'?session='+session);
+  assert.equal(ended.mediaReplaced,false);assert.equal(ended.mediaMissing,true);
+  assert(!ended.sessions.some(s=>s.user===C));checks+=3;
+}
+const otherStillActive=await call(B,'/api/room/'+room.id+'?session='+sB);
+assert.equal(otherStillActive.mediaReplaced,false);assert.equal(otherStillActive.mediaMissing,false);checks+=2;
 await call(C,'/api/room/'+room.id,{kind:'chat',body:{text:'missing identity'}},400);
 const myFiles=await act(A,{action:'myFiles'});assert(myFiles.some(f=>f.id===file.id));checks++;
 const exported=await act(A,{action:'exportData'});assert(exported.files.some(f=>f.id===file.id));assert(!exported.projects.some(p=>p.owner===B));checks+=2;
