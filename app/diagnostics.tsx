@@ -16,17 +16,28 @@ type Result = {
   detail: string;
 };
 const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-async function until(fn: () => boolean, ms = 14000) {
+async function waitUntil(
+  fn: () => boolean | Promise<boolean>,
+  ms: number,
+  active: () => void,
+) {
   const end = Date.now() + ms;
-  while (!fn()) {
+  for (;;) {
+    active();
+    if (await fn()) return;
     if (Date.now() > end) throw new Error('Timed out waiting for media.');
     await pause(100);
   }
 }
-export default function Diagnostics() {
+export default function Diagnostics({
+  roomId,
+  onRelay,
+}: { roomId?: string; onRelay?: (ready: boolean) => void } = {}) {
   const [running, setRunning] = useState(false),
     [results, setResults] = useState<Result[]>([]),
-    [progress, setProgress] = useState('Ready for a local check'),
+    [progress, setProgress] = useState(
+      roomId ? 'Ready to test Cloudflare relay' : 'Ready for a local check',
+    ),
     [completed, setCompleted] = useState('');
   const videoA = useRef<HTMLVideoElement>(null),
     videoB = useRef<HTMLVideoElement>(null),
@@ -60,6 +71,10 @@ export default function Diagnostics() {
     const active = () => {
       if (epoch !== generation.current) throw new Error('Check canceled.');
     };
+    const until = (fn: () => boolean | Promise<boolean>, ms = 20000) =>
+      waitUntil(fn, ms, active);
+    const abort = new AbortController();
+    let config: RTCConfiguration = { iceServers: [] };
     const step = async (name: string, fn: () => Promise<string>) => {
       active();
       setProgress(name);
@@ -80,6 +95,7 @@ export default function Diagnostics() {
       extra: MediaStream | null = null,
       timer: any;
     const resources: MediaStream[] = [];
+    const tones: OscillatorNode[] = [];
     const seen = new Map<string, MediaStream>();
     const meters = new Map<string, AnalyserNode>();
     const inputs = new Map<
@@ -98,17 +114,76 @@ export default function Diagnostics() {
       m.getFloatTimeDomainData(d);
       return Math.sqrt(d.reduce((sum, v) => sum + v * v, 0) / d.length);
     };
+    let disposed = false;
     const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      abort.abort();
       clearInterval(timer);
       a?.close();
       b?.close();
       for (const s of resources) s.getTracks().forEach((t) => t.stop());
+      for (const tone of tones) {
+        try {
+          tone.stop();
+        } catch {}
+        tone.disconnect();
+      }
+      for (const input of inputs.values()) {
+        input.source.disconnect();
+        input.gain.disconnect();
+      }
+      for (const meter of meters.values()) meter.disconnect();
+      inputs.clear();
+      meters.clear();
       c?.close().catch(() => {});
       for (const v of [videoA.current, videoB.current])
         if (v) v.srcObject = null;
     };
     cleanup.current = dispose;
     try {
+      // Resume from the button gesture, before any network or rendering wait.
+      c = new AudioContext();
+      void c.resume().catch(() => {});
+      await until(() => c!.state === 'running', 4000);
+      if (roomId)
+        await step('Private room relay access', async () => {
+          const response = await fetch(
+            '/api/rtc?room=' + encodeURIComponent(roomId),
+            { signal: abort.signal },
+          );
+          const issued = (await response.json()) as {
+            error?: string;
+            iceServers?: RTCIceServer[];
+            relay?: boolean;
+            expires?: number;
+          };
+          active();
+          if (!response.ok)
+            throw new Error(
+              issued.error || 'Relay access could not be checked.',
+            );
+          const servers = Array.isArray(issued.iceServers)
+            ? issued.iceServers
+            : [];
+          if (
+            !issued.relay ||
+            !servers.some(
+              (server: RTCIceServer) =>
+                Boolean(server.username && server.credential) &&
+                [server.urls].flat().some((url) => /^turns?:/.test(url)),
+            ) ||
+            !((issued.expires || 0) > Date.now())
+          ) {
+            onRelay?.(false);
+            throw new Error(
+              'Temporary Cloudflare relay access is unavailable.',
+            );
+          }
+          config = { iceServers: servers, iceTransportPolicy: 'relay' };
+          onRelay?.(true);
+          return 'The live site issued temporary relay access for this room. Both test connections require a relay.';
+        });
       await step('Studio render, automation, and export', async () => {
         const track = {
           ...defaults('Diagnostic keys'),
@@ -158,13 +233,12 @@ export default function Diagnostics() {
           throw new Error('Audio or MIDI export header is invalid.');
         return `Stereo 44.1 kHz WAV and MIDI generated. Silent RMS ${silent.toFixed(6)}; audible RMS ${audible.toFixed(4)}.`;
       });
-      c = new AudioContext();
-      await c.resume();
       active();
       const audio = c.createMediaStreamDestination(),
         tone = c.createOscillator(),
         gain = c.createGain();
       tone.frequency.value = 330;
+      tones.push(tone);
       gain.gain.value = 0.12;
       tone.connect(gain).connect(audio);
       tone.start();
@@ -229,7 +303,6 @@ export default function Diagnostics() {
           }
         };
       const trace: string[] = [];
-      const config = { iceServers: [] };
       const graph = () =>
         JSON.stringify({
           source: stream?.getTracks().map((t) => ({
@@ -310,10 +383,15 @@ export default function Diagnostics() {
             receivedRms(stream!.id) > 0.005 && receivedRms(trackB.id) > 0.005,
           8000,
         );
-        await pause(700);
+        const baseline = await Promise.all([a!.stats(), b!.stats()]);
+        await pause(1000);
         const first = await a!.stats(),
           second = await b!.stats();
+        if (roomId && (first.route !== 'relay' || second.route !== 'relay'))
+          throw new Error('The selected connections did not both use a relay.');
         if (
+          first.bytes <= baseline[0].bytes ||
+          second.bytes <= baseline[1].bytes ||
           first.frames < 2 ||
           second.frames < 2 ||
           receivedRms(stream!.id) < 0.005 ||
@@ -325,7 +403,7 @@ export default function Diagnostics() {
               ' B ' +
               JSON.stringify(second),
           );
-        return `Both peers connected; decoded ${first.frames}/${second.frames} frames. Received audio RMS ${receivedRms(stream!.id).toFixed(4)}/${receivedRms(trackB.id).toFixed(4)} measured before silent speaker output.`;
+        return `${roomId ? 'Both selected connections used Cloudflare relay. ' : ''}Received ${first.bytes - baseline[0].bytes}/${second.bytes - baseline[1].bytes} additional bytes; decoded ${first.frames}/${second.frames} frames. Audio RMS ${receivedRms(stream!.id).toFixed(4)}/${receivedRms(trackB.id).toFixed(4)}, with speakers silenced.`;
       });
       await step('Mute and unmute preserve the call', async () => {
         stream!.getAudioTracks()[0].enabled = false;
@@ -339,22 +417,33 @@ export default function Diagnostics() {
         return `Received audio RMS while muted ${silent.toFixed(6)}; after unmute ${sound.toFixed(5)}.`;
       });
       await step('Simultaneous ICE restart recovers media', async () => {
-        const old = a!.pc.localDescription?.sdp;
+        const ufrag = (peer: PeerLink) =>
+          peer.pc.localDescription?.sdp.match(/a=ice-ufrag:([^\r\n]+)/)?.[1];
+        const oldA = ufrag(a!),
+          oldB = ufrag(b!);
         a!.restart();
         b!.restart();
         await until(
           () =>
-            a!.pc.localDescription?.sdp !== old &&
+            Boolean(ufrag(a!) && ufrag(b!)) &&
+            ufrag(a!) !== oldA &&
+            ufrag(b!) !== oldB &&
             a!.pc.connectionState === 'connected' &&
             b!.pc.connectionState === 'connected' &&
             a!.pc.signalingState === 'stable' &&
             b!.pc.signalingState === 'stable',
         );
-        const before = await b!.stats();
-        await pause(900);
-        const after = await b!.stats();
-        if (after.bytes <= before.bytes || after.frames <= before.frames)
-          throw new Error('Media did not resume after ICE restart.');
+        const before = await Promise.all([a!.stats(), b!.stats()]);
+        await until(async () => {
+          const after = await Promise.all([a!.stats(), b!.stats()]);
+          return after.every(
+            (value, index) =>
+              value.state === 'connected' &&
+              value.bytes > before[index].bytes &&
+              value.frames > before[index].frames &&
+              (!roomId || value.route === 'relay'),
+          );
+        });
         await until(
           () =>
             receivedRms(stream!.id) > 0.005 && receivedRms(trackB.id) > 0.005,
@@ -362,12 +451,14 @@ export default function Diagnostics() {
         ).catch(() => {
           throw new Error('Audio missing after ICE restart. ' + graph());
         });
-        return `Simultaneous restart requests coordinated by one peer. Received ${after.bytes - before.bytes} bytes, ${after.frames - before.frames} new frames, and nonzero audio from both peers.`;
+        const after = await Promise.all([a!.stats(), b!.stats()]);
+        return `Both ICE identities changed. Received ${after[0].bytes - before[0].bytes}/${after[1].bytes - before[1].bytes} new bytes, new video frames, and nonzero audio in both directions.${roomId ? ' Both selected routes remained relay connections.' : ''}`;
       });
       await step('Add and stop a second shared stream', async () => {
         const dest = c!.createMediaStreamDestination(),
           osc = c!.createOscillator();
         osc.frequency.value = 550;
+        tones.push(osc);
         osc.connect(dest);
         osc.start();
         extra = dest.stream;
@@ -430,16 +521,18 @@ export default function Diagnostics() {
         return 'Late offers, restart requests, and stream changes did not revive either connection.';
       });
       report(
-        'Cloudflare relay across separate networks',
+        'Separate devices and networks',
         'pending',
-        'The local test does not use a relay. Relay-only media and connections between separate devices and networks still require testing.',
+        roomId
+          ? 'This test uses two connections in one browser. A real call between separate devices and networks, including room signaling and long sessions, still needs testing.'
+          : 'The local test does not use a relay. Open a studio room to run its relay check. Separate devices and networks still require testing.',
       );
       report(
         'Real microphone, camera, and screen capture',
         'pending',
         'Generated media was used. Permission prompts, hardware capture, and long sessions still need device testing.',
       );
-      setProgress('Local checks complete');
+      setProgress(roomId ? 'Relay checks complete' : 'Local checks complete');
       setCompleted(new Date().toISOString());
     } catch (e: any) {
       if (epoch === generation.current)
@@ -454,17 +547,23 @@ export default function Diagnostics() {
       <div className="diagnostic-intro">
         <Activity size={34} />
         <div>
-          <h2>Sound check. Connection check.</h2>
+          <h2>
+            {roomId
+              ? 'Check your relay connection.'
+              : 'Sound check. Connection check.'}
+          </h2>
           <p>
             Run the real studio renderer and room connection engine using
             generated sound and video. Your camera and microphone stay off. No
             test media is saved or sent to another person.
+            {roomId &&
+              ' Generated media will travel through Cloudflare’s relay and use a small amount of data. This checks your current browser and network.'}
           </p>
         </div>
       </div>
       <div className="actions">
         <button className="button primary" disabled={running} onClick={run}>
-          <Play size={16} /> Run local checks
+          <Play size={16} /> {roomId ? 'Run relay checks' : 'Run local checks'}
         </button>
         {running && (
           <button className="button secondary" onClick={stop}>
@@ -482,8 +581,9 @@ export default function Diagnostics() {
                       {
                         completed,
                         browser: navigator.userAgent,
-                        scope:
-                          'same-browser generated media; no TURN or hardware validation',
+                        scope: roomId
+                          ? 'same-browser generated media forced through Cloudflare TURN; no separate-device, real hardware, or room-signaling validation'
+                          : 'same-browser generated media; no TURN or hardware validation',
                         results,
                       },
                       null,
@@ -545,9 +645,12 @@ export default function Diagnostics() {
         ))}
       </div>
       <p className="small-note">
-        A successful local check confirms this browser can render audio and
-        exchange media internally. It does not establish compatibility with
-        every device, cross-network reliability, or a latency guarantee.
+        {roomId
+          ? 'A successful relay check confirms generated audio and video can travel through Cloudflare from this browser and recover after reconnecting. '
+          : 'A successful local check confirms this browser can render audio and exchange media internally. '}
+        Separate-device calls, real microphones and cameras, long sessions, and
+        restrictive-network fallback still need testing. This is not a latency
+        guarantee.
       </p>
     </div>
   );

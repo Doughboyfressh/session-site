@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { action, Avatar, Confirm } from './helpers';
 import { PeerLink } from '@/lib/peer';
+import Diagnostics from './diagnostics';
 function MediaTile({
   stream,
   muted,
@@ -67,6 +68,7 @@ export default function Room({
     [cam, setCam] = useState(true),
     [sharing, setSharing] = useState<MediaStream | null>(null),
     [joining, setJoining] = useState(false),
+    [checking, setChecking] = useState(false),
     [close, setClose] = useState(false),
     [connected, setConnected] = useState(false),
     [relay, setRelay] = useState<boolean | null>(null),
@@ -507,12 +509,24 @@ export default function Room({
           ? 'Cloudflare relay available'
           : relay === false
             ? 'Direct connections only · Cloudflare TURN credentials pending'
-            : 'Join the call to check relay availability'}
+            : 'Check your relay connection before joining'}
         <span>
-          Audio/video only start when you join. A new call in another tab
-          replaces this one.
+          Your camera and microphone start only when you join. A new call in
+          another tab replaces this one.
         </span>
+        <button
+          className="button secondary"
+          disabled={joining || connected}
+          onClick={() => setChecking(!checking)}
+        >
+          {checking ? 'Close connection check' : 'Check relay connection'}
+        </button>
       </div>
+      {checking && (
+        <section className="room-relay-check" aria-label="Room relay check">
+          <Diagnostics key={id} roomId={id} onRelay={setRelay} />
+        </section>
+      )}
       <div className="room-layout">
         <div>
           <div className="video-grid">
@@ -526,7 +540,7 @@ export default function Room({
                 <div className="actions">
                   <button
                     className="button primary"
-                    disabled={joining}
+                    disabled={joining || checking}
                     onClick={() => connect(true)}
                   >
                     <Video size={16} />
@@ -534,7 +548,7 @@ export default function Room({
                   </button>
                   <button
                     className="button secondary"
-                    disabled={joining}
+                    disabled={joining || checking}
                     onClick={() => connect(false)}
                   >
                     Audio only
