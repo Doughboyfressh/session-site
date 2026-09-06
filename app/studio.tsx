@@ -25,9 +25,10 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { defaultPattern } from '@/lib/catalog';
+import { defaultPattern, type Track } from '@/lib/catalog';
 import {
   context,
+  trackFrom,
   defaults,
   bufferFor,
   peaks,
@@ -41,19 +42,30 @@ import ConflictValues from './conflict-values';
 import ExportAudio from './export-audio';
 import RecordTake from './record-take';
 import type { RecordedTake } from '@/lib/recording';
+import type { RoomAudio } from '@/lib/room-audio';
 export default function Studio({
   initial,
   onDraft,
   onSaved,
   onBrowse,
   notify,
+  roomAudio,
+  roomAllowed = true,
+  onActivity,
+  catalog,
 }: {
   initial: any;
   onDraft: (p: any) => void;
   onSaved: (p: any) => void;
   onBrowse: () => void;
   notify: (s: string) => void;
+  roomAudio?: RoomAudio;
+  roomAllowed?: boolean;
+  onActivity?: (busy: boolean) => void;
+  catalog?: Track[];
 }) {
+  const [library, setLibrary] = useState(false);
+  const browse = () => (catalog ? setLibrary(true) : onBrowse());
   const [title, setTitle] = useState(initial?.title || 'Untitled session'),
     [id, setId] = useState(initial?.id || ''),
     [data, setData] = useState<Arrangement>(
@@ -122,9 +134,25 @@ export default function Studio({
       editEpoch.current++;
     },
   });
-  const { canEdit, canManage, revision } = sync;
+  const { revision } = sync;
+  const canEdit = sync.canEdit && roomAllowed;
+  const canManage = sync.canManage && roomAllowed;
+  useEffect(() => {
+    if (!roomAllowed || sync.accessEnded) setExportSnapshot(null);
+  }, [roomAllowed, sync.accessEnded]);
   const editAllowed = useRef(canEdit);
   editAllowed.current = canEdit;
+  useEffect(() => {
+    if (!roomAllowed) {
+      setAutosave(false);
+      stop();
+      editEpoch.current++;
+    }
+  }, [roomAllowed]);
+  useEffect(() => {
+    onActivity?.(recording || !!busy || !!exportSnapshot || library);
+  }, [recording, busy, exportSnapshot, library]);
+  useEffect(() => () => onActivity?.(false), []);
   useEffect(() => {
     onDraft({
       id,
@@ -321,7 +349,14 @@ export default function Studio({
           setPlaying(false);
           setPosition(0);
         },
-        { from: position, loop, loopStart, loopEnd, metronome },
+        {
+          from: position,
+          loop,
+          loopStart,
+          loopEnd,
+          metronome,
+          output: roomAudio?.output,
+        },
       );
       if (request !== generation.current || !alive.current) {
         p.stop();
@@ -412,7 +447,7 @@ export default function Studio({
     }
   }
   function record() {
-    if (!canEdit || busy) return;
+    if (!canEdit || busy || recording) return;
     if (data.tracks.length >= 32)
       return notify('This session has reached 32 tracks.');
     const offset = Math.min(299, Math.max(0, position));
@@ -510,14 +545,76 @@ export default function Studio({
       canEdit={canEdit && !sync.accessEnded}
       onKeep={keepTake}
       onClose={() => setRecordSnapshot(null)}
+      roomAudio={roomAudio}
     />
   );
   return (
     <>
       {recordDialog}
-      {sync.accessEnded ? (
+      <Dialog open={library} onOpenChange={setLibrary}>
+        <DialogContent className="form-dialog">
+          <DialogTitle>Add a beat to this room project</DialogTitle>
+          <DialogDescription>
+            Your call stays open. Choose a track available for collaboration.
+          </DialogDescription>
+          <div className="room-beat-picker">
+            {(catalog || []).map((track) => (
+              <button
+                className="button secondary"
+                key={track.id}
+                disabled={!canEdit || !!busy}
+                onClick={async () => {
+                  if (
+                    !editAllowed.current ||
+                    tracksRef.current.tracks.length >= 32
+                  )
+                    return notify('This project cannot accept another track.');
+                  const epoch = editEpoch.current;
+                  setBusy('Loading beat');
+                  try {
+                    const added = await enrich(trackFrom(track));
+                    if (
+                      !alive.current ||
+                      !editAllowed.current ||
+                      epoch !== editEpoch.current
+                    )
+                      return;
+                    mutate((d) => ({ ...d, tracks: [...d.tracks, added] }));
+                    setSelected(added.id);
+                    setLibrary(false);
+                  } catch (e: any) {
+                    notify(e.message);
+                  } finally {
+                    setBusy('');
+                  }
+                }}
+              >
+                <Disc3 size={18} />
+                <span>
+                  {track.title}
+                  <small>
+                    {track.creator} · {track.bpm} BPM
+                  </small>
+                </span>
+                <Plus size={16} />
+              </button>
+            ))}
+            {!catalog?.length && (
+              <p>
+                No collaborative beats are available yet. You can import your
+                own audio.
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+      {sync.accessEnded || !roomAllowed ? (
         <div className="studio-access-note" role="alert">
-          <h2>Project access has ended</h2>
+          <h2>
+            {!roomAllowed
+              ? 'This editor is paused'
+              : 'Project access has ended'}
+          </h2>
           <p>
             The room owner may have removed you or changed the shared project.
             Your unsaved draft is kept in this tab. Return to the room to check
@@ -967,7 +1064,7 @@ export default function Studio({
                     </p>
                     <button
                       className="button primary"
-                      onClick={onBrowse}
+                      onClick={browse}
                       disabled={!canEdit}
                     >
                       <Disc3 size={17} /> Find a beat
@@ -981,7 +1078,7 @@ export default function Studio({
                   >
                     <Plus size={16} /> Import audio
                   </button>
-                  <button onClick={onBrowse} disabled={!canEdit}>
+                  <button onClick={browse} disabled={!canEdit}>
                     <Disc3 size={16} /> Add from beat library
                   </button>
                 </div>
@@ -1224,6 +1321,7 @@ export default function Studio({
                           ],
                         },
                         () => setPlaying(false),
+                        { output: roomAudio?.output },
                       );
                       if (epoch !== generation.current || !alive.current) {
                         engine.stop();

@@ -106,6 +106,8 @@ export default function SessionApp({
     [deleteProject, setDeleteProject] = useState(''),
     [studioKey, setStudioKey] = useState(0);
   const playback = useRef<any>(null),
+    roomDrafts = useRef(new Map<string, any>()),
+    roomWorkspaceBusy = useRef(false),
     previewSeq = useRef(0),
     noticeTimer = useRef<any>(null),
     draft = useRef<any>({
@@ -143,7 +145,12 @@ export default function SessionApp({
   }
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
-      if (draft.current.dirty) {
+      const currentDraft =
+        roomDrafts.current.get(draft.current.id) || draft.current;
+      if (
+        currentDraft.dirty ||
+        [...roomDrafts.current.values()].some((p) => p.dirty)
+      ) {
         e.preventDefault();
         e.returnValue = '';
       }
@@ -152,6 +159,12 @@ export default function SessionApp({
     return () => window.removeEventListener('beforeunload', warn);
   }, []);
   function go(next: string) {
+    if (view === 'Room' && roomWorkspaceBusy.current) {
+      notify(
+        'Finish or close the studio dialog before leaving the room. Your call is still open.',
+      );
+      return;
+    }
     if (next === 'Studio' || next === 'Room') stopPreview();
     setView(next);
     const url = new URL(window.location.href);
@@ -298,7 +311,10 @@ export default function SessionApp({
     go('Studio');
   }
   function openProject(p: any) {
-    draft.current = p;
+    const roomDraft = roomDrafts.current.get(p.id);
+    draft.current = roomDraft?.dirty
+      ? { ...roomDraft, canEdit: p.canEdit, canManage: p.canManage }
+      : p;
     setStudioKey((k) => k + 1);
     go('Studio');
   }
@@ -1034,7 +1050,10 @@ export default function SessionApp({
             <Studio
               key={studioKey}
               initial={draft.current}
-              onDraft={(p) => (draft.current = p)}
+              onDraft={(p) => {
+                draft.current = p;
+                if (p.id) roomDrafts.current.set(p.id, p);
+              }}
               onSaved={(p) => {
                 refresh();
               }}
@@ -1057,13 +1076,29 @@ export default function SessionApp({
                 }}
                 projects={state.projects}
                 onProjectsChanged={refresh}
+                drafts={roomDrafts.current}
+                onDraft={(p) => {
+                  roomDrafts.current.set(p.id, p);
+                  if (draft.current.id === p.id) draft.current = p;
+                }}
+                onWorkspaceBusy={(busy) => {
+                  roomWorkspaceBusy.current = busy;
+                }}
+                catalog={allTracks.filter(
+                  (track) =>
+                    track.permission === 'collaborate' ||
+                    track.owner === user.id,
+                )}
               />
             ) : (
               signin
             )
           ) : null}
         </main>
-        <footer className="player">
+        <footer
+          className="player"
+          style={view === 'Room' ? { display: 'none' } : undefined}
+        >
           <div className="now-playing">
             <img src="/chrome-loop.png" alt="Current track artwork" />
             <button

@@ -1,6 +1,6 @@
 export type PeerCallbacks = {
   send: (body: any) => Promise<void>;
-  stream: (stream: MediaStream, remove: boolean) => void;
+  stream: (stream: MediaStream, remove: boolean, role?: string) => void;
   state: (state: string) => void;
 };
 export class PeerLink {
@@ -14,6 +14,8 @@ export class PeerLink {
   queue: Promise<void> = Promise.resolve();
   outgoing: Promise<void> = Promise.resolve();
   streams = new Map<string, MediaStream>();
+  private localRoles = new Map<string, string>();
+  private remoteRoles: Record<string, string> = {};
   restarts = 0;
   recovery: ReturnType<typeof setTimeout> | null = null;
   constructor(
@@ -49,7 +51,7 @@ export class PeerLink {
       this.streams.set(stream.id, stream);
       const show = () => {
         if (!this.closed && this.streams.get(stream.id) === stream)
-          this.callbacks.stream(stream, false);
+          this.callbacks.stream(stream, false, this.remoteRoles[stream.id]);
       };
       e.track.onunmute = show;
       show();
@@ -84,6 +86,24 @@ export class PeerLink {
     };
   }
   send(body: any) {
+    if (body.description) {
+      const ids = new Set(
+        [...body.description.sdp.matchAll(/^a=msid:([^\s]+) /gm)].map(
+          (match: RegExpMatchArray) => match[1],
+        ),
+      );
+      const streamRoles = Object.fromEntries(
+        [...this.localRoles].filter(([id]) => ids.has(id)),
+      );
+      // Snapshot the roles described by this SDP before retries are queued.
+      body = {
+        ...body,
+        streamRoles,
+        shareStreamId:
+          Object.keys(streamRoles).find((id) => streamRoles[id] === 'screen') ||
+          null,
+      };
+    }
     this.outgoing = this.outgoing.then(async () => {
       for (let attempt = 0; attempt < 3 && !this.closed; attempt++) {
         try {
@@ -119,7 +139,28 @@ export class PeerLink {
           }
           this.settingAnswer = d.type === 'answer';
           try {
+            this.remoteRoles = Object.fromEntries(
+              Object.entries(body.streamRoles || {}).filter(
+                ([id, role]) =>
+                  id.length <= 100 &&
+                  ['music', 'screen'].includes(String(role)),
+              ),
+            ) as Record<string, string>;
             await this.pc.setRemoteDescription(d);
+            // Removing an RTP sender may mute a remote track without removing
+            // it from its MediaStream. Prune streams from the accepted SDP so
+            // stopped studio/screen shares cannot leave stale audio players.
+            const activeStreams = new Set(
+              [...d.sdp.matchAll(/^a=msid:([^\s]+) /gm)].map(
+                (match: RegExpMatchArray) => match[1],
+              ),
+            );
+            for (const [id, stream] of this.streams) {
+              if (!activeStreams.has(id)) {
+                this.callbacks.stream(stream, true);
+                this.streams.delete(id);
+              }
+            }
           } finally {
             this.settingAnswer = false;
           }
@@ -163,8 +204,12 @@ export class PeerLink {
       });
     return this.queue;
   }
-  setStreams(streams: MediaStream[]) {
+  setStreams(streams: MediaStream[], roles: Record<string, string> = {}) {
     if (this.closed) return;
+    for (const [id, role] of Object.entries(roles))
+      this.localRoles.set(id, role);
+    while (this.localRoles.size > 64)
+      this.localRoles.delete(this.localRoles.keys().next().value!);
     const wanted = streams.flatMap((s) => s.getTracks());
     for (const sender of this.pc.getSenders())
       if (sender.track && !wanted.includes(sender.track))

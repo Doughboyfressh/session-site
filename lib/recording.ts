@@ -1,4 +1,5 @@
-import { playMix, type Arrangement } from './audio';
+import { playMix, type Arrangement, type StudioOutput } from './audio';
+import type { MicrophoneLease } from './room-audio';
 import { encodeWave } from './audio-files';
 
 export type CapturePhase =
@@ -29,12 +30,16 @@ export type CaptureHooks = {
 export type CaptureDependencies = {
   media: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
   context: () => AudioContext;
+  acquire?: () => MicrophoneLease;
+  output?: StudioOutput;
 };
 export class TakeCapture {
   private epoch = 0;
   private phase: CapturePhase = 'idle';
   private c: AudioContext | null = null;
   private stream: MediaStream | null = null;
+  private lease: MicrophoneLease | null = null;
+  private releaseListener: (() => void) | null = null;
   private input: MediaStreamAudioSourceNode | null = null;
   private node: AudioWorkletNode | null = null;
   private backing: Awaited<ReturnType<typeof playMix>> | null = null;
@@ -63,6 +68,10 @@ export class TakeCapture {
     return token === this.epoch && !this.control.signal.aborted;
   }
   private release() {
+    this.releaseListener?.();
+    this.releaseListener = null;
+    this.lease?.release();
+    this.lease = null;
     this.backing?.stop();
     this.backing = null;
     for (const o of this.clicks) {
@@ -127,21 +136,41 @@ export class TakeCapture {
         );
       await c.resume();
       if (!this.valid(token)) return;
-      const stream = await this.deps.media({
-        audio: {
-          deviceId: deviceId ? { exact: deviceId } : undefined,
-          channelCount: { ideal: 1 },
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-        },
-        video: false,
-      });
+      const lease = this.deps.acquire?.();
+      const stream =
+        lease?.stream ||
+        (await this.deps.media({
+          audio: {
+            deviceId: deviceId ? { exact: deviceId } : undefined,
+            channelCount: { ideal: 1 },
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          },
+          video: false,
+        }));
       if (!this.valid(token)) {
+        lease?.release();
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
       this.stream = stream;
+      if (lease) {
+        this.lease = lease;
+        const ended = () => {
+          if (this.valid(token))
+            this.fail(
+              'The room microphone disconnected. Rejoin the call before recording another take.',
+            );
+        };
+        lease.signal.addEventListener('abort', ended, { once: true });
+        this.releaseListener = () =>
+          lease.signal.removeEventListener('abort', ended);
+        if (lease.signal.aborted) {
+          ended();
+          return;
+        }
+      }
       await c.audioWorklet.addModule('/recording-worklet.js?v=1');
       if (!this.valid(token)) return;
       const track = stream.getAudioTracks()[0];
@@ -239,6 +268,7 @@ export class TakeCapture {
           allowPastEnd: true,
           startDelay: lead,
           signal: this.control.signal,
+          output: this.deps.output,
         });
         if (!this.valid(token)) {
           backing.stop();

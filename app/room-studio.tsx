@@ -13,6 +13,10 @@ export default function RoomStudio({
   editors,
   onChanged,
   notify,
+  onOpen,
+  opened,
+  opening,
+  available,
 }: {
   room: { id: string; owner: string; project: string | null };
   projectInfo: { title: string } | null;
@@ -22,6 +26,10 @@ export default function RoomStudio({
   editors: string[];
   onChanged: () => unknown;
   notify: (message: string) => void;
+  onOpen: () => void;
+  opened: boolean;
+  opening: boolean;
+  available: boolean;
 }) {
   const [editing, setEditing] = useState(false),
     [selected, setSelected] = useState(''),
@@ -89,14 +97,18 @@ export default function RoomStudio({
         </div>
         <div className="actions">
           {room.project && (
-            <a
+            <button
               className="button primary"
-              href={'/?project=' + encodeURIComponent(room.project)}
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={onOpen}
+              disabled={!available || opening}
             >
-              Open room studio <ArrowUpRight size={16} />
-            </a>
+              {opening
+                ? 'Opening studio…'
+                : opened
+                  ? 'Go to room studio'
+                  : 'Open room studio'}{' '}
+              <Music2 size={16} />
+            </button>
           )}
           <a
             className="button secondary"
@@ -110,7 +122,7 @@ export default function RoomStudio({
             <button
               className="button secondary"
               onClick={() => setEditing(!editing)}
-              disabled={busy}
+              disabled={busy || !available}
             >
               {editing ? 'Cancel' : 'Change room project'}
             </button>
@@ -118,9 +130,9 @@ export default function RoomStudio({
         </div>
       </div>
       <p className="room-studio-note">
-        The studio opens in a new tab. Keep this room tab open for your call.{' '}
-        Use Share screen &amp; audio and select the studio tab with tab audio
-        enabled so everyone can hear your work.
+        Open the room studio here to keep your call and music together. Use
+        Share studio audio to let the room hear your arrangement and backing
+        tracks.
         {room.project &&
           ' Room members can open the project. Saved changes arrive automatically when studio playback or recording stops.'}
         {!room.project &&
@@ -150,7 +162,7 @@ export default function RoomStudio({
                   <span className="inline-switch">
                     <Switch
                       checked={editors.includes(member.user)}
-                      disabled={busy}
+                      disabled={busy || !available}
                       onCheckedChange={(value) =>
                         allowEditing(member.user, value)
                       }
@@ -167,7 +179,7 @@ export default function RoomStudio({
           )}
         </div>
       )}
-      {host && (editing || !room.project) && (
+      {host && available && (editing || !room.project) && (
         <div className="room-studio-setup">
           {!room.project && (
             <button

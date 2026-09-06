@@ -35,6 +35,7 @@ export type MixerTrack = {
   automation?: AutomationPoint[];
 };
 export type Arrangement = { bpm: number; tracks: MixerTrack[] };
+export type StudioOutput = (node: AudioNode) => () => void;
 export type TransportOptions = {
   from?: number;
   loop?: boolean;
@@ -45,6 +46,7 @@ export type TransportOptions = {
   startDelay?: number;
   allowPastEnd?: boolean;
   signal?: AbortSignal;
+  output?: StudioOutput;
 };
 let audio: AudioContext | null = null;
 const cache = new Map<string, AudioBuffer>();
@@ -519,6 +521,7 @@ export async function playMix(
   const analyser = c.createAnalyser();
   analyser.fftSize = 256;
   master.connect(analyser);
+  const releaseOutput = options.output?.(master);
   const channels = new Map(
     loaded.map(({ t }) => [
       t.id,
@@ -627,6 +630,7 @@ export async function playMix(
     clicks.clear();
     options.signal?.removeEventListener('abort', stop);
     channels.forEach((ch) => ch.dispose());
+    releaseOutput?.();
     master.disconnect();
     analyser.disconnect();
   }

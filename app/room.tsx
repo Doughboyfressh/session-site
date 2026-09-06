@@ -21,6 +21,9 @@ import { action, Avatar, Confirm } from './helpers';
 import { PeerLink } from '@/lib/peer';
 import Diagnostics from './diagnostics';
 import RoomStudio from './room-studio';
+import Studio from './studio';
+import { StudioBroadcast, RoomMicrophones } from '@/lib/room-audio';
+import type { Track } from '@/lib/catalog';
 function MediaTile({
   stream,
   muted,
@@ -31,16 +34,44 @@ function MediaTile({
   label: string;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
+  const [blocked, setBlocked] = useState(false);
   useEffect(() => {
     if (ref.current) {
       ref.current.srcObject = stream;
-      ref.current.play().catch(() => {});
+      ref.current.play().catch(() => setBlocked(true));
     }
+    const element = ref.current;
+    return () => {
+      if (element) {
+        element.pause();
+        element.srcObject = null;
+      }
+    };
   }, [stream]);
   return (
-    <div className="video-tile">
+    <div
+      className={
+        'video-tile' + (!stream.getVideoTracks().length ? ' audio-tile' : '')
+      }
+    >
       <video ref={ref} autoPlay playsInline muted={muted} controls={!muted} />
+      {!stream.getVideoTracks().length && (
+        <Headphones className="audio-tile-icon" size={30} />
+      )}
       <span>{label}</span>
+      {blocked && !muted && (
+        <button
+          className="button secondary media-play"
+          onClick={() =>
+            ref.current
+              ?.play()
+              .then(() => setBlocked(false))
+              .catch(() => setBlocked(true))
+          }
+        >
+          Play collaborator audio
+        </button>
+      )}
     </div>
   );
 }
@@ -51,6 +82,10 @@ export default function Room({
   projects,
   onProjectsChanged,
   notify,
+  drafts,
+  onDraft,
+  onWorkspaceBusy,
+  catalog,
 }: {
   id: string;
   user: any;
@@ -58,7 +93,36 @@ export default function Room({
   projects: { id: string; title: string }[];
   onProjectsChanged: () => unknown;
   notify: (m: string) => void;
+  drafts: Map<string, any>;
+  onDraft: (draft: any) => void;
+  onWorkspaceBusy: (busy: boolean) => void;
+  catalog: Track[];
 }) {
+  const [opened, setOpened] = useState<any>(null);
+  const [opening, setOpening] = useState(false);
+  const [showChat, setShowChat] = useState(true);
+  const [available, setAvailable] = useState(true);
+  const [music, setMusic] = useState<MediaStream | null>(null);
+  const [musicBusy, setMusicBusy] = useState(false);
+  const studioBusy = useRef(false);
+  const openingRef = useRef(false);
+  const studioElement = useRef<HTMLElement | null>(null);
+  const musicRef = useRef<MediaStream | null>(null);
+  const musicRequest = useRef(0);
+  const [broadcast] = useState(
+    () =>
+      new StudioBroadcast(undefined, () => {
+        stopMusic();
+        notify(
+          'Studio audio sharing was interrupted. Press Share studio audio to resume it. Your call controls are unchanged.',
+        );
+      }),
+  );
+  const [microphones] = useState(() => new RoomMicrophones());
+  const [roomAudio] = useState(() => ({
+    output: broadcast.output,
+    acquire: microphones.acquire,
+  }));
   const [state, setState] = useState<any>(null),
     [error, setError] = useState(''),
     [callNotice, setCallNotice] = useState(''),
@@ -66,7 +130,7 @@ export default function Room({
     [message, setMessage] = useState(''),
     [local, setLocal] = useState<MediaStream | null>(null),
     [remote, setRemote] = useState<
-      Record<string, { stream: MediaStream; peer: string }>
+      Record<string, { stream: MediaStream; peer: string; role?: string }>
     >({}),
     [mic, setMic] = useState(true),
     [cam, setCam] = useState(true),
@@ -77,7 +141,6 @@ export default function Room({
     [connected, setConnected] = useState(false),
     [relay, setRelay] = useState<boolean | null>(null),
     [stats, setStats] = useState<Record<string, any>>({});
-  const remoteShares = useRef(new Map<string, string>());
   const peers = useRef(new Map<string, PeerLink>()),
     localRef = useRef<MediaStream | null>(null),
     shareRef = useRef<MediaStream | null>(null),
@@ -100,11 +163,104 @@ export default function Room({
     if (!r.ok) throw new Error(j.error || 'Connection interrupted.');
     return j;
   }
+  function outgoingStreams() {
+    return [localRef.current, shareRef.current, musicRef.current].filter(
+      Boolean,
+    ) as MediaStream[];
+  }
+  function updateStreams() {
+    for (const peer of peers.current.values())
+      peer.setStreams(outgoingStreams(), outgoingRoles());
+  }
+  function outgoingRoles() {
+    return Object.fromEntries([
+      ...(shareRef.current ? [[shareRef.current.id, 'screen']] : []),
+      ...(musicRef.current ? [[musicRef.current.id, 'music']] : []),
+    ]);
+  }
+  function stopMusic() {
+    musicRequest.current++;
+    musicRef.current = null;
+    broadcast.disable();
+    setMusic(null);
+    setMusicBusy(false);
+    updateStreams();
+  }
+  async function shareMusic() {
+    if (musicRef.current) {
+      stopMusic();
+      return;
+    }
+    if (
+      !session.current ||
+      !available ||
+      !opened ||
+      opened.id !== stateRef.current?.room.project
+    )
+      return notify('Join the call and open its current studio project first.');
+    const token = ++musicRequest.current;
+    setMusicBusy(true);
+    try {
+      const stream = await broadcast.enable();
+      if (token !== musicRequest.current) return;
+      if (!session.current || !alive.current) {
+        broadcast.disable();
+        return;
+      }
+      musicRef.current = stream;
+      setMusic(stream);
+      updateStreams();
+    } catch (e: any) {
+      if (token === musicRequest.current && e.name !== 'AbortError')
+        notify(e.message || 'Studio audio could not be shared.');
+    } finally {
+      if (token === musicRequest.current) setMusicBusy(false);
+    }
+  }
+  async function openStudio() {
+    const project = stateRef.current?.room.project;
+    if (!available || !project || openingRef.current) return;
+    if (studioBusy.current)
+      return notify(
+        'Finish or close the current studio dialog before switching projects.',
+      );
+    if (opened?.id === project) {
+      studioElement.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+      return;
+    }
+    openingRef.current = true;
+    setOpening(true);
+    try {
+      const fresh = await action({ action: 'projectRead', id: project });
+      if (!alive.current || stateRef.current?.room.project !== project) return;
+      const draft = drafts.get(project);
+      setOpened(
+        draft
+          ? {
+              ...draft,
+              canEdit: fresh.canEdit,
+              canManage: fresh.canManage,
+              owner: fresh.owner,
+            }
+          : fresh,
+      );
+    } catch (e: any) {
+      if (alive.current) notify(e.message);
+    } finally {
+      openingRef.current = false;
+      if (alive.current) setOpening(false);
+    }
+  }
+  useEffect(() => {
+    stopMusic();
+  }, [state?.room.project, available]);
   function closePeer(key: string) {
     const p = peers.current.get(key);
     p?.close();
     peers.current.delete(key);
-    remoteShares.current.delete(key);
     setRemote((r) =>
       Object.fromEntries(Object.entries(r).filter(([_, v]) => v.peer !== key)),
     );
@@ -116,6 +272,8 @@ export default function Room({
   }
   function disconnect(announce = true) {
     generation.current++;
+    microphones.end();
+    stopMusic();
     const previous = session.current;
     session.current = '';
     if (announce && previous)
@@ -167,19 +325,16 @@ export default function Room({
                 clientId,
                 body: {
                   ...body,
-                  ...(body.description
-                    ? { shareStreamId: shareRef.current?.id || null }
-                    : {}),
                   senderSession: ownSession,
                   recipientSession: target.session,
                 },
               });
             },
-            stream: (stream, remove) =>
+            stream: (stream, remove, role) =>
               setRemote((r) => {
                 const n = { ...r };
                 if (remove) delete n[stream.id];
-                else n[stream.id] = { stream, peer: key };
+                else n[stream.id] = { stream, peer: key, role };
                 return n;
               }),
             state: (v) =>
@@ -187,9 +342,7 @@ export default function Room({
           },
         );
         peers.current.set(key, link);
-        link.setStreams(
-          [localRef.current, shareRef.current].filter(Boolean) as MediaStream[],
-        );
+        link.setStreams(outgoingStreams(), outgoingRoles());
       }
     }
   }
@@ -215,8 +368,9 @@ export default function Room({
           ),
           j = (await r.json()) as any;
         if (!r.ok) {
-          if (r.status === 403) {
+          if (r.status === 401 || r.status === 403) {
             disconnect(false);
+            setAvailable(false);
             throw new Error(
               'Room access ended. Your microphone, camera, and media connections are off.',
             );
@@ -229,6 +383,7 @@ export default function Room({
           return;
         }
         stateRef.current = j;
+        setAvailable(true);
         setState(j);
         setError('');
         if (
@@ -259,20 +414,6 @@ export default function Room({
                   p.user === e.sender && p.session === e.body.senderSession,
               )
             ) {
-              if (e.body.description) {
-                const previous = remoteShares.current.get(key),
-                  next =
-                    typeof e.body.shareStreamId === 'string'
-                      ? e.body.shareStreamId
-                      : '';
-                if (previous && previous !== next)
-                  setRemote((r) => {
-                    const n = { ...r };
-                    delete n[previous];
-                    return n;
-                  });
-                remoteShares.current.set(key, next);
-              }
               await peers.current.get(key)?.receive(e.body);
             }
           }
@@ -321,10 +462,16 @@ export default function Room({
       peers.current.clear();
       localRef.current?.getTracks().forEach((t) => t.stop());
       shareRef.current?.getTracks().forEach((t) => t.stop());
+      microphones.end();
+      broadcast.dispose();
+      musicRequest.current++;
+      onWorkspaceBusy(false);
     };
   }, [id]);
   async function connect(video = true) {
-    if (joining) return;
+    if (joining || !available) return;
+    if (studioBusy.current)
+      return notify('Finish the studio dialog before joining the call.');
     setJoining(true);
     const epoch = ++generation.current;
     let stream: MediaStream | null = null;
@@ -355,6 +502,7 @@ export default function Room({
       session.current = token;
       cursor.current = result.cursor;
       localRef.current = stream;
+      microphones.set(stream);
       setLocal(stream);
       setConnected(true);
       setMic(true);
@@ -382,8 +530,7 @@ export default function Room({
       t.stop();
     });
     setSharing(null);
-    for (const p of peers.current.values())
-      p.setStreams(localRef.current ? [localRef.current] : []);
+    updateStreams();
     post({ kind: 'sharing', session: session.current, value: false }).catch(
       () => {},
     );
@@ -399,7 +546,7 @@ export default function Room({
     try {
       const s = await navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: 15 },
-        audio: true,
+        audio: false,
       });
       if (epoch !== generation.current || !session.current || !alive.current) {
         s.getTracks().forEach((t) => t.stop());
@@ -408,13 +555,15 @@ export default function Room({
       shareRef.current = s;
       setSharing(s);
       s.getVideoTracks()[0].onended = stopShare;
-      for (const p of peers.current.values())
-        p.setStreams([localRef.current, s].filter(Boolean) as MediaStream[]);
+      // Some browsers can still supply an audio track; never relay the room
+      // tab's received voices back to its participants.
+      for (const track of s.getAudioTracks()) {
+        s.removeTrack(track);
+        track.stop();
+      }
+      updateStreams();
       await post({ kind: 'sharing', session: session.current, value: true });
-      if (!s.getAudioTracks().length)
-        notify(
-          'Your screen is shared without audio. Choose a browser tab and enable Share tab audio to include music.',
-        );
+      notify('Your screen is shared. Use Share studio audio for the music.');
     } catch (e: any) {
       notify(
         e.name === 'NotAllowedError'
@@ -484,7 +633,7 @@ export default function Room({
     }
   }
   return (
-    <div className="room-page">
+    <div className={'room-page' + (opened ? ' studio-open' : '')}>
       <div className="studio-heading">
         <div>
           <span className="eyebrow">PRIVATE STUDIO ROOM</span>
@@ -497,13 +646,12 @@ export default function Room({
           <button
             className="button secondary"
             onClick={() => {
-              disconnect();
               onExit();
             }}
           >
             Back to rooms
           </button>
-          {state?.room.owner === user.id && (
+          {available && state?.room.owner === user.id && (
             <button className="button primary" onClick={copy}>
               <Copy size={16} /> Copy invite
             </button>
@@ -555,9 +703,15 @@ export default function Room({
           editors={state.editors || []}
           onChanged={onProjectsChanged}
           notify={notify}
+          onOpen={openStudio}
+          opening={opening}
+          opened={opened?.id === state.room.project}
+          available={available}
         />
       )}
-      <div className="room-layout">
+      <div
+        className={'room-layout' + (opened && !showChat ? ' chat-hidden' : '')}
+      >
         <div>
           <div className="video-grid">
             {local ? (
@@ -570,7 +724,7 @@ export default function Room({
                 <div className="actions">
                   <button
                     className="button primary"
-                    disabled={joining || checking}
+                    disabled={joining || checking || !available}
                     onClick={() => connect(true)}
                   >
                     <Video size={16} />
@@ -578,7 +732,7 @@ export default function Room({
                   </button>
                   <button
                     className="button secondary"
-                    disabled={joining || checking}
+                    disabled={joining || checking || !available}
                     onClick={() => connect(false)}
                   >
                     Audio only
@@ -586,13 +740,19 @@ export default function Room({
                 </div>
               </div>
             )}
-            {Object.values(remote).map(({ stream, peer }) => (
+            {Object.values(remote).map(({ stream, peer, role }) => (
               <MediaTile
                 key={stream.id}
                 stream={stream}
                 label={
-                  state?.members.find((m: any) => peer.startsWith(m.user + ':'))
-                    ?.name || 'Collaborator'
+                  (state?.members.find((m: any) =>
+                    peer.startsWith(m.user + ':'),
+                  )?.name || 'Collaborator') +
+                  (role === 'music'
+                    ? ' · studio audio'
+                    : role === 'screen'
+                      ? ' · screen'
+                      : '')
                 }
               />
             ))}
@@ -612,6 +772,14 @@ export default function Room({
             )}
           </div>
           <div className="call-controls">
+            {opened && (
+              <button
+                onClick={() => setShowChat(!showChat)}
+                aria-expanded={showChat}
+              >
+                <Send size={16} /> {showChat ? 'Hide chat' : 'Show chat'}
+              </button>
+            )}
             <button
               className={!mic ? 'off' : ''}
               disabled={!local}
@@ -644,7 +812,26 @@ export default function Room({
               onClick={share}
             >
               <MonitorUp size={18} />
-              {sharing ? 'Stop sharing' : 'Share screen & audio'}
+              {sharing ? 'Stop sharing screen' : 'Share screen'}
+            </button>
+            <button
+              className={music ? 'active' : ''}
+              disabled={
+                !connected ||
+                musicBusy ||
+                !available ||
+                !opened ||
+                opened.id !== state?.room.project
+              }
+              aria-pressed={!!music}
+              onClick={shareMusic}
+            >
+              <Music2 size={18} />{' '}
+              {musicBusy
+                ? 'Starting audio…'
+                : music
+                  ? 'Stop studio audio'
+                  : 'Share studio audio'}
             </button>
             <button onClick={reconnect} disabled={joining || !connected}>
               <RefreshCw size={16} /> Reconnect
@@ -658,6 +845,12 @@ export default function Room({
               <PhoneOff size={18} />
             </button>
           </div>
+          {music && (
+            <p className="music-sharing-status" role="status">
+              Studio audio is shared · playback, drums and recording backing
+              tracks. Call mute only mutes your voice.
+            </p>
+          )}
           <div className="connection-stats">
             {Object.entries(stats).map(([key, s]) => (
               <div key={key}>
@@ -680,9 +873,11 @@ export default function Room({
             <div>
               <h3>Hear the same thing. Build on the same idea.</h3>
               <p>
-                Open your studio in another tab, then share that browser tab
-                with audio enabled. One person drives the session while everyone
-                listens and talks. Headphones help prevent echo.
+                Open the room studio and turn on Share studio audio. One person
+                plays the music while everyone listens and talks. Screen sharing
+                shows your work without sending the call’s voices back into the
+                room. Use headphones to keep speaker sound out of your
+                microphone.
               </p>
             </div>
           </div>
@@ -790,7 +985,47 @@ export default function Room({
           </form>
         </aside>
       </div>
-      {state?.room.owner === user.id && (
+      {opened && (
+        <section
+          ref={studioElement}
+          className="embedded-studio"
+          aria-label="Live room music studio"
+        >
+          <div className="embedded-studio-heading">
+            <Music2 size={20} />
+            <div>
+              <h2>Your music. Your room.</h2>
+              <p>
+                Your call stays above the editor. Share studio audio when you
+                want the room to hear playback. Take review stays local to this
+                tab.
+              </p>
+            </div>
+          </div>
+          {opened.id !== state?.room.project && (
+            <p className="error-banner" role="status">
+              The room project changed. This draft stays in this tab. Open the
+              current room studio above when ready.
+            </p>
+          )}
+          <Studio
+            key={opened.id}
+            initial={opened}
+            roomAudio={roomAudio}
+            roomAllowed={available && opened.id === state?.room.project}
+            onDraft={onDraft}
+            onActivity={(busy) => {
+              studioBusy.current = busy;
+              onWorkspaceBusy(busy);
+            }}
+            onSaved={() => onProjectsChanged()}
+            onBrowse={() => {}}
+            catalog={catalog}
+            notify={notify}
+          />
+        </section>
+      )}
+      {available && state?.room.owner === user.id && (
         <div className="room-admin">
           <button
             onClick={async () => {
@@ -806,7 +1041,16 @@ export default function Room({
           >
             Replace invitation
           </button>
-          <button className="danger-text" onClick={() => setClose(true)}>
+          <button
+            className="danger-text"
+            onClick={() => {
+              if (studioBusy.current)
+                return notify(
+                  'Finish the studio dialog before closing the room.',
+                );
+              setClose(true);
+            }}
+          >
             Close room permanently
           </button>
         </div>

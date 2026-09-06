@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Mic, Square, Loader2, Download } from 'lucide-react';
 import {
   Dialog,
@@ -15,6 +15,65 @@ import {
   type RecordedTake,
 } from '@/lib/recording';
 import type { Arrangement } from '@/lib/audio';
+import type { RoomAudio } from '@/lib/room-audio';
+
+function TakePanel({
+  inline,
+  uploading,
+  onClose,
+  children,
+}: {
+  inline: boolean;
+  uploading: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const panel = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (inline)
+      panel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+  if (inline)
+    return (
+      <section
+        ref={panel}
+        className="embedded-record-panel"
+        aria-label="Record a take"
+      >
+        <div className="section-title">
+          <h2>Record a take</h2>
+          <button
+            className="button secondary"
+            disabled={uploading}
+            onClick={onClose}
+          >
+            Close recorder
+          </button>
+        </div>
+        <p className="record-note">
+          Check your microphone, get a count-in, then review your performance.
+          Your call controls stay available above.
+        </p>
+        {children}
+      </section>
+    );
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !uploading) onClose();
+      }}
+    >
+      <DialogContent className="form-dialog record-dialog">
+        <DialogTitle>Record a take</DialogTitle>
+        <DialogDescription>
+          Check your microphone, get a count-in, then review your performance.
+        </DialogDescription>
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default function RecordTake({
   data,
@@ -23,6 +82,7 @@ export default function RecordTake({
   onKeep,
   onClose,
   createCapture,
+  roomAudio,
 }: {
   data: Arrangement;
   offset: number;
@@ -30,6 +90,7 @@ export default function RecordTake({
   onKeep: (take: RecordedTake, signal: AbortSignal) => Promise<void>;
   onClose: () => void;
   createCapture?: (hooks: CaptureHooks) => TakeCapture;
+  roomAudio?: RoomAudio;
 }) {
   const [phase, setPhase] = useState<CapturePhase>('idle'),
     [level, setLevel] = useState(0),
@@ -78,7 +139,23 @@ export default function RecordTake({
     };
     capture.current = createCapture
       ? createCapture(hooks)
-      : new TakeCapture(hooks);
+      : new TakeCapture(
+          hooks,
+          roomAudio
+            ? {
+                context: () =>
+                  new AudioContext({
+                    sampleRate: 48000,
+                    latencyHint: 'interactive',
+                  }),
+                media: async () => {
+                  throw new Error('Join the room call before recording.');
+                },
+                acquire: roomAudio.acquire,
+                output: roomAudio.output,
+              }
+            : undefined,
+        );
     return () => {
       alive.current = false;
       attempt.current++;
@@ -191,30 +268,24 @@ export default function RecordTake({
   ].includes(phase);
   return (
     <>
-      <Dialog
-        open
-        onOpenChange={(open) => {
-          if (!open && !uploading) close();
-        }}
-      >
-        <DialogContent className="form-dialog record-dialog">
-          <DialogTitle>Record a take</DialogTitle>
-          <DialogDescription>
-            Check your microphone, get a count-in, then review your performance.
-          </DialogDescription>
-          <div className="record-position">
-            <span>
-              Starts at <strong>{offset.toFixed(2)}s</strong>
-            </span>
-            <span>{data.bpm} BPM · 4/4</span>
-            <span>Up to {Math.min(120, 300 - offset).toFixed(0)} seconds</span>
-          </div>
-          {!take && (
-            <>
-              <fieldset
-                disabled={active || !canEdit}
-                className="record-settings"
-              >
+      <TakePanel inline={!!roomAudio} uploading={uploading} onClose={close}>
+        <div className="record-position">
+          <span>
+            Starts at <strong>{offset.toFixed(2)}s</strong>
+          </span>
+          <span>{data.bpm} BPM · 4/4</span>
+          <span>Up to {Math.min(120, 300 - offset).toFixed(0)} seconds</span>
+        </div>
+        {!take && (
+          <>
+            <fieldset disabled={active || !canEdit} className="record-settings">
+              {roomAudio ? (
+                <p className="record-note">
+                  Using your room microphone. Call mute does not mute this
+                  recording. The call’s echo and noise processing also applies
+                  to the take.
+                </p>
+              ) : (
                 <Pick
                   label="Microphone"
                   value={device}
@@ -232,210 +303,211 @@ export default function RecordTake({
                       })),
                   ]}
                 />
-                <Pick
-                  label="Count-in"
-                  value={bars}
-                  onChange={setBars}
-                  options={[
-                    { value: '0', label: 'None' },
-                    { value: '1', label: '1 bar · 4 beats' },
-                    { value: '2', label: '2 bars · 8 beats' },
-                  ]}
-                />
-              </fieldset>
-              <div className="record-input">
-                <div>
-                  <Mic size={18} />
-                  <strong>
-                    {['ready', 'preparing', 'counting', 'recording'].includes(
-                      phase,
-                    )
-                      ? 'Microphone is on'
-                      : 'Microphone is off'}
-                  </strong>
-                  <span>
-                    {level > 0
-                      ? Math.max(-60, 20 * Math.log10(level)).toFixed(1) +
-                        ' dBFS'
-                      : 'No input'}
-                  </span>
-                </div>
-                <meter
-                  min={0}
-                  max={1}
-                  value={Math.min(1, level)}
-                  aria-label="Microphone input level"
-                />
-                <p>
-                  {clipped
-                    ? 'Input is near clipping. Lower the gain on your microphone or audio interface.'
-                    : 'Speak or sing at your performance level. Leave space below the top of the meter.'}
-                </p>
-              </div>
-              {active && (
-                <div className="record-progress" role="status">
-                  {phase === 'counting' ? (
-                    <>
-                      <strong className="record-count">
-                        {beats || 'Ready'}
-                      </strong>
-                      <span>
-                        Count-in · recording begins after the final beat
-                      </span>
-                    </>
-                  ) : phase === 'recording' ? (
-                    <>
-                      <span className="record-dot" />
-                      <strong>{seconds.toFixed(1)}s</strong>
-                      <span>Recording your microphone</span>
-                    </>
-                  ) : (
-                    <>
-                      <Loader2 className="spin" size={20} />
-                      <span>
-                        {phase === 'opening'
-                          ? 'Waiting for microphone access…'
-                          : phase === 'preparing'
-                            ? 'Preparing your backing tracks…'
-                            : 'Preparing your take…'}
-                      </span>
-                    </>
-                  )}
-                </div>
               )}
-              <p className="record-note">
-                Use headphones. Your microphone is measured without playing it
-                through the speakers. The count-in and backing tracks are
-                excluded from the recorded file; speaker sound can still bleed
-                into the microphone.
-              </p>
-              <p className="record-note">
-                Keep this tab open while recording. On some phones, starting the
-                microphone here can interrupt a call in another tab.
-              </p>
-            </>
-          )}
-          {take && (
-            <section className="take-review" aria-label="Review your take">
-              <strong>Your take is ready to review</strong>
-              <p>
-                {take.seconds.toFixed(2)} seconds · Mono {take.depth}-bit{' '}
-                {take.depth === 32 ? 'float ' : ''}WAV ·{' '}
-                {take.sampleRate / 1000} kHz ·{' '}
-                {(take.blob.size / 1024 / 1024).toFixed(1)} MB
-              </p>
-              <audio
-                ref={preview}
-                src={take.url}
-                controls
-                preload="metadata"
-                aria-label="Listen to your recorded take"
+              <Pick
+                label="Count-in"
+                value={bars}
+                onChange={setBars}
+                options={[
+                  { value: '0', label: 'None' },
+                  { value: '1', label: '1 bar · 4 beats' },
+                  { value: '2', label: '2 bars · 8 beats' },
+                ]}
+              />
+            </fieldset>
+            <div className="record-input">
+              <div>
+                <Mic size={18} />
+                <strong>
+                  {['ready', 'preparing', 'counting', 'recording'].includes(
+                    phase,
+                  )
+                    ? roomAudio
+                      ? 'Recording input is on'
+                      : 'Microphone is on'
+                    : roomAudio
+                      ? 'Recording input is off'
+                      : 'Microphone is off'}
+                </strong>
+                <span>
+                  {level > 0
+                    ? Math.max(-60, 20 * Math.log10(level)).toFixed(1) + ' dBFS'
+                    : 'No input'}
+                </span>
+              </div>
+              <meter
+                min={0}
+                max={1}
+                value={Math.min(1, level)}
+                aria-label="Microphone input level"
               />
               <p>
-                {take.peak >= 0.98
-                  ? 'This take reached the top of the input range. Listen for distortion before keeping it.'
-                  : 'Listen to the take before adding it to your arrangement.'}
+                {clipped
+                  ? 'Input is near clipping. Lower the gain on your microphone or audio interface.'
+                  : 'Speak or sing at your performance level. Leave space below the top of the meter.'}
               </p>
-              <p>
-                {uploadAttempted
-                  ? 'A previous upload attempt may have saved a copy in your files. '
-                  : 'This take has not been uploaded. '}
-                Add take uploads it to your files; saving the project shares it
-                with authorized project collaborators. Preview playback may be
-                heard if you are sharing this tab’s audio.
-              </p>
-              <a
-                className="button secondary"
-                href={take.url}
-                download="SESSION vocal take.wav"
-              >
-                <Download size={16} />
-                Download take
-              </a>
-            </section>
-          )}
-          {error && (
-            <p className="record-error" role="alert">
-              {error}
-            </p>
-          )}
-          <div className="actions record-actions">
-            {take ? (
-              <>
-                <button
-                  className="button secondary"
-                  disabled={uploading}
-                  onClick={discard}
-                >
-                  Discard take
-                </button>
-                <button
-                  className="button primary"
-                  disabled={uploading || !canEdit}
-                  onClick={() => void keep()}
-                >
-                  {uploading ? 'Adding take…' : 'Add take to project'}
-                </button>
-                {uploading && (
-                  <button className="button secondary" onClick={cancelUpload}>
-                    Cancel upload
-                  </button>
-                )}
-              </>
-            ) : (
-              <>
-                <button className="button secondary" onClick={onClose}>
-                  Cancel
-                </button>
-                {phase === 'ready' ? (
+            </div>
+            {active && (
+              <div className="record-progress" role="status">
+                {phase === 'counting' ? (
                   <>
-                    <button
-                      className="button secondary"
-                      onClick={() => capture.current?.cancel()}
-                    >
-                      Turn microphone off
-                    </button>
-                    <button
-                      className="button primary"
-                      disabled={!canEdit}
-                      onClick={() => {
-                        setClipped(false);
-                        setError('');
-                        void capture.current?.start(data, offset, Number(bars));
-                      }}
-                    >
-                      Start recording
-                    </button>
+                    <strong className="record-count">{beats || 'Ready'}</strong>
+                    <span>
+                      Count-in · recording begins after the final beat
+                    </span>
                   </>
                 ) : phase === 'recording' ? (
+                  <>
+                    <span className="record-dot" />
+                    <strong>{seconds.toFixed(1)}s</strong>
+                    <span>Recording your microphone</span>
+                  </>
+                ) : (
+                  <>
+                    <Loader2 className="spin" size={20} />
+                    <span>
+                      {phase === 'opening'
+                        ? 'Waiting for microphone access…'
+                        : phase === 'preparing'
+                          ? 'Preparing your backing tracks…'
+                          : 'Preparing your take…'}
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
+            <p className="record-note">
+              Use headphones. Your microphone is measured without playing it
+              through the speakers. The count-in and backing tracks are excluded
+              from the recorded file; speaker sound can still bleed into the
+              microphone.
+            </p>
+            <p className="record-note">
+              {roomAudio
+                ? 'Keep the room open and use headphones. Disconnecting the call stops an unfinished take. Your count-in and review playback are not sent through Share studio audio; your live voice still follows the call’s microphone control.'
+                : 'Keep this tab open while recording. On some phones, starting the microphone here can interrupt a call in another tab.'}
+            </p>
+          </>
+        )}
+        {take && (
+          <section className="take-review" aria-label="Review your take">
+            <strong>Your take is ready to review</strong>
+            <p>
+              {take.seconds.toFixed(2)} seconds · Mono {take.depth}-bit{' '}
+              {take.depth === 32 ? 'float ' : ''}WAV · {take.sampleRate / 1000}{' '}
+              kHz · {(take.blob.size / 1024 / 1024).toFixed(1)} MB
+            </p>
+            <audio
+              ref={preview}
+              src={take.url}
+              controls
+              preload="metadata"
+              aria-label="Listen to your recorded take"
+            />
+            <p>
+              {take.peak >= 0.98
+                ? 'This take reached the top of the input range. Listen for distortion before keeping it.'
+                : 'Listen to the take before adding it to your arrangement.'}
+            </p>
+            <p>
+              {uploadAttempted
+                ? 'A previous upload attempt may have saved a copy in your files. '
+                : 'This take has not been uploaded. '}
+              Add take uploads it to your files; saving the project shares it
+              with authorized project collaborators. Preview playback may be
+              heard if you are sharing this tab’s audio.
+            </p>
+            <a
+              className="button secondary"
+              href={take.url}
+              download="SESSION vocal take.wav"
+            >
+              <Download size={16} />
+              Download take
+            </a>
+          </section>
+        )}
+        {error && (
+          <p className="record-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="actions record-actions">
+          {take ? (
+            <>
+              <button
+                className="button secondary"
+                disabled={uploading}
+                onClick={discard}
+              >
+                Discard take
+              </button>
+              <button
+                className="button primary"
+                disabled={uploading || !canEdit}
+                onClick={() => void keep()}
+              >
+                {uploading ? 'Adding take…' : 'Add take to project'}
+              </button>
+              {uploading && (
+                <button className="button secondary" onClick={cancelUpload}>
+                  Cancel upload
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <button className="button secondary" onClick={onClose}>
+                Cancel
+              </button>
+              {phase === 'ready' ? (
+                <>
+                  <button
+                    className="button secondary"
+                    onClick={() => capture.current?.cancel()}
+                  >
+                    Turn microphone off
+                  </button>
                   <button
                     className="button primary"
-                    onClick={() => capture.current?.finish()}
+                    disabled={!canEdit}
+                    onClick={() => {
+                      setClipped(false);
+                      setError('');
+                      void capture.current?.start(data, offset, Number(bars));
+                    }}
                   >
-                    <Square size={16} />
-                    Stop and review
+                    Start recording
                   </button>
-                ) : (
-                  !active && (
-                    <button
-                      className="button primary"
-                      disabled={!canEdit}
-                      onClick={() => connect()}
-                    >
-                      <Mic size={16} />
-                      Enable microphone
-                    </button>
-                  )
-                )}
-              </>
-            )}
-          </div>
-          <p className="record-note">
-            Device latency can affect where a performance lands. Check the take
-            against your backing and adjust its clip position if needed.
-          </p>
-        </DialogContent>
-      </Dialog>
+                </>
+              ) : phase === 'recording' ? (
+                <button
+                  className="button primary"
+                  onClick={() => capture.current?.finish()}
+                >
+                  <Square size={16} />
+                  Stop and review
+                </button>
+              ) : (
+                !active && (
+                  <button
+                    className="button primary"
+                    disabled={!canEdit}
+                    onClick={() => connect()}
+                  >
+                    <Mic size={16} />
+                    Enable microphone
+                  </button>
+                )
+              )}
+            </>
+          )}
+        </div>
+        <p className="record-note">
+          Device latency can affect where a performance lands. Check the take
+          against your backing and adjust its clip position if needed.
+        </p>
+      </TakePanel>
       <Confirm
         open={confirmClose}
         onClose={() => setConfirmClose(false)}
