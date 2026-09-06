@@ -19,6 +19,7 @@ export type RecordedTake = {
   peak: number;
   sampleRate: number;
   depth: 24 | 32;
+  kind?: 'comp';
 };
 export type CaptureHooks = {
   state: (phase: CapturePhase) => void;
@@ -243,7 +244,12 @@ export class TakeCapture {
         );
     }
   }
-  async start(arrangement: Arrangement, offset: number, bars: number) {
+  async start(
+    arrangement: Arrangement,
+    offset: number,
+    bars: number,
+    maxSeconds = 120,
+  ) {
     if (this.phase !== 'ready' || !this.c || !this.node) return;
     const token = this.epoch,
       c = this.c;
@@ -255,7 +261,10 @@ export class TakeCapture {
         offset < 0 ||
         offset >= 300 ||
         arrangement.bpm < 40 ||
-        arrangement.bpm > 240
+        arrangement.bpm > 240 ||
+        !Number.isFinite(maxSeconds) ||
+        maxSeconds < 0.1 ||
+        maxSeconds > 120
       )
         throw new Error('Choose a valid recording position and tempo.');
       this.offset = offset;
@@ -284,7 +293,7 @@ export class TakeCapture {
       this.node!.port.postMessage({
         type: 'arm',
         start: firstFrame,
-        limit: Math.floor(Math.min(120, 300 - offset) * c.sampleRate),
+        limit: Math.floor(Math.min(maxSeconds, 300 - offset) * c.sampleRate),
       });
       for (let n = 0; n < bars * 4; n++) {
         const when = this.startTime - (bars * 4 - n) * this.beat;

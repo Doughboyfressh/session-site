@@ -608,7 +608,9 @@ export default function Studio({
     const f = await upload(
       new File(
         [take.blob],
-        'Vocal take ' + (tracksRef.current.tracks.length + 1) + '.wav',
+        (take.kind === 'comp' ? 'Vocal comp ' : 'Vocal take ') +
+          (tracksRef.current.tracks.length + 1) +
+          '.wav',
         { type: 'audio/wav' },
       ),
       'audio',
@@ -616,7 +618,10 @@ export default function Studio({
     );
     check();
     const t: MixerTrack = {
-      ...defaults('Vocal take ' + (tracksRef.current.tracks.length + 1)),
+      ...defaults(
+        (take.kind === 'comp' ? 'Vocal comp ' : 'Vocal take ') +
+          (tracksRef.current.tracks.length + 1),
+      ),
       fileId: f.id,
       offset: take.offset,
       duration: decoded.duration,

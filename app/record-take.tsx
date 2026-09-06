@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Mic, Square, Loader2, Download } from 'lucide-react';
+import { Mic, Square, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -16,6 +16,18 @@ import {
 } from '@/lib/recording';
 import type { Arrangement } from '@/lib/audio';
 import type { RoomAudio } from '@/lib/room-audio';
+import {
+  takeBudget,
+  MAX_TAKES,
+  MAX_TAKE_SECONDS,
+  MAX_TAKE_BYTES,
+  fullTake,
+  replaceCompRange,
+  renderComp,
+  type LocalTake,
+  type CompRegion,
+} from '@/lib/take-comp';
+import TakeWorkbench from './take-workbench';
 
 function TakePanel({
   inline,
@@ -101,7 +113,18 @@ export default function RecordTake({
     [device, setDevice] = useState(''),
     [devices, setDevices] = useState<MediaDeviceInfo[]>([]),
     [error, setError] = useState(''),
-    [take, setTake] = useState<(RecordedTake & { url: string }) | null>(null),
+    [takes, setTakes] = useState<LocalTake[]>([]),
+    [selected, setSelected] = useState(''),
+    [taking, setTaking] = useState(true),
+    [regions, setRegions] = useState<CompRegion[]>([]),
+    [past, setPast] = useState<CompRegion[][]>([]),
+    [future, setFuture] = useState<CompRegion[][]>([]),
+    [prepared, setPrepared] = useState<(RecordedTake & { url: string }) | null>(
+      null,
+    ),
+    [preparing, setPreparing] = useState(false),
+    [added, setAdded] = useState(false),
+    [confirmDiscard, setConfirmDiscard] = useState(false),
     [uploading, setUploading] = useState(false),
     [uploadAttempted, setUploadAttempted] = useState(false),
     [confirmClose, setConfirmClose] = useState(false);
@@ -110,8 +133,45 @@ export default function RecordTake({
     upload = useRef<AbortController | null>(null),
     attempt = useRef(0),
     preview = useRef<HTMLAudioElement | null>(null),
+    compPreview = useRef<HTMLAudioElement | null>(null),
+    bank = useRef<LocalTake[]>([]),
+    plan = useRef<CompRegion[]>([]),
+    urls = useRef(new Set<string>()),
+    renderJob = useRef<AbortController | null>(null),
+    busyRef = useRef(false),
+    takeNumber = useRef(0),
     allowed = useRef(canEdit);
   allowed.current = canEdit;
+  plan.current = regions;
+  const take = takes.find((t) => t.id === selected) || takes.at(-1);
+  const { limit: takeLimit, available: hasSpace } = takeBudget(takes, offset);
+  function stopPreview() {
+    preview.current?.pause();
+    compPreview.current?.pause();
+  }
+  function releaseURL(url: string) {
+    URL.revokeObjectURL(url);
+    urls.current.delete(url);
+  }
+  function rememberURL(blob: Blob) {
+    const url = URL.createObjectURL(blob);
+    urls.current.add(url);
+    return url;
+  }
+  function invalidate() {
+    stopPreview();
+    renderJob.current?.abort();
+    if (prepared) releaseURL(prepared.url);
+    setPrepared(null);
+    setError('');
+  }
+  function changePlan(next: CompRegion[]) {
+    if (busyRef.current || added) return;
+    invalidate();
+    setPast((p) => [...p, regions].slice(-20));
+    setFuture([]);
+    setRegions(next);
+  }
   useEffect(() => {
     alive.current = true;
     const hooks: CaptureHooks = {
@@ -134,7 +194,35 @@ export default function RecordTake({
         if (alive.current) setError(message);
       },
       take: (t) => {
-        if (alive.current) setTake({ ...t, url: URL.createObjectURL(t.blob) });
+        if (!alive.current || !allowed.current) return;
+        if (
+          bank.current.length >= MAX_TAKES ||
+          bank.current.reduce((n, t) => n + t.blob.size, 0) + t.blob.size >
+            MAX_TAKE_BYTES ||
+          bank.current.reduce((n, t) => n + t.seconds, 0) + t.seconds >
+            MAX_TAKE_SECONDS + 1 / 44100
+        ) {
+          setError(
+            'The take bank is full. Download or discard a take before recording again.',
+          );
+          setTaking(false);
+          return;
+        }
+        const entry = {
+          ...t,
+          id: crypto.randomUUID(),
+          name: 'Take ' + ++takeNumber.current,
+          url: rememberURL(t.blob),
+        };
+        bank.current = [...bank.current, entry];
+        setTakes(bank.current);
+        setSelected(entry.id);
+        setTaking(false);
+        if (!plan.current.length) {
+          const next = fullTake(entry);
+          plan.current = next;
+          setRegions(next);
+        }
       },
     };
     capture.current = createCapture
@@ -160,22 +248,22 @@ export default function RecordTake({
       alive.current = false;
       attempt.current++;
       upload.current?.abort();
+      renderJob.current?.abort();
       capture.current?.dispose();
-      preview.current?.pause();
+      stopPreview();
+      for (const url of urls.current) URL.revokeObjectURL(url);
+      urls.current.clear();
     };
   }, []);
-  useEffect(
-    () => () => {
-      if (take) URL.revokeObjectURL(take.url);
-    },
-    [take],
-  );
   useEffect(() => {
     if (!canEdit) {
       attempt.current++;
       upload.current?.abort();
+      renderJob.current?.abort();
       capture.current?.cancel();
-      preview.current?.pause();
+      stopPreview();
+      busyRef.current = false;
+      setPreparing(false);
       setUploading(false);
       setError(
         'Editing access has ended. A completed take can still be downloaded from this tab.',
@@ -202,14 +290,25 @@ export default function RecordTake({
     };
   }, [phase === 'ready']);
   function connect(id = device) {
-    if (!allowed.current) return;
+    if (!allowed.current || !hasSpace || busyRef.current || added) return;
+    stopPreview();
     setError('');
     setClipped(false);
     void capture.current?.connect(id);
   }
   function discard() {
-    preview.current?.pause();
-    setTake(null);
+    if (!take || busyRef.current) return;
+    invalidate();
+    releaseURL(take.url);
+    const remaining = bank.current.filter((t) => t.id !== take.id);
+    bank.current = remaining;
+    setTakes(remaining);
+    setSelected(remaining[0]?.id || '');
+    setPast([]);
+    setFuture([]);
+    if (regions.some((r) => r.takeId === take.id))
+      setRegions(remaining.length ? fullTake(remaining[0]) : []);
+    setTaking(!remaining.length);
     setUploadAttempted(false);
     setError('');
     capture.current?.cancel();
@@ -217,29 +316,49 @@ export default function RecordTake({
     setClipped(false);
   }
   function close() {
-    if (take) {
+    if (bank.current.length) {
       setConfirmClose(true);
       return;
     }
     onClose();
   }
   async function keep() {
-    if (!take || uploading || !allowed.current) return;
+    if (!takes.length || busyRef.current || added || !allowed.current) return;
     const token = ++attempt.current,
       controller = new AbortController();
     upload.current = controller;
-    preview.current?.pause();
+    busyRef.current = true;
+    stopPreview();
     setUploading(true);
-    setUploadAttempted(true);
     setError('');
     try {
-      await onKeep(take, controller.signal);
+      let finalTake: RecordedTake = prepared!;
+      if (!finalTake) {
+        setPreparing(true);
+        finalTake = await renderComp(regions, takes, controller.signal);
+        if (
+          !alive.current ||
+          controller.signal.aborted ||
+          token !== attempt.current
+        )
+          return;
+        setPrepared({ ...finalTake, url: rememberURL(finalTake.blob) });
+        setPreparing(false);
+      }
+      if (
+        !allowed.current ||
+        controller.signal.aborted ||
+        token !== attempt.current
+      )
+        return;
+      setUploadAttempted(true);
+      await onKeep(finalTake, controller.signal);
       if (
         alive.current &&
         token === attempt.current &&
         !controller.signal.aborted
       )
-        onClose();
+        setAdded(true);
     } catch (e) {
       if (alive.current && token === attempt.current)
         setError(
@@ -248,16 +367,60 @@ export default function RecordTake({
             : 'The take could not be added. Your local recording is still here.',
         );
     } finally {
-      if (alive.current && token === attempt.current) setUploading(false);
+      if (alive.current && token === attempt.current) {
+        setUploading(false);
+        setPreparing(false);
+        busyRef.current = false;
+      }
     }
   }
   function cancelUpload() {
     attempt.current++;
     upload.current?.abort();
+    busyRef.current = false;
+    setPreparing(false);
     setUploading(false);
     setError(
       'Upload cancelled. Your local take is still available. An upload already accepted by the server may remain in your files.',
     );
+  }
+  async function buildPreview() {
+    if (busyRef.current || !takes.length) return;
+    const controller = new AbortController();
+    renderJob.current = controller;
+    busyRef.current = true;
+    setPreparing(true);
+    setError('');
+    stopPreview();
+    try {
+      const result = await renderComp(regions, takes, controller.signal);
+      if (
+        alive.current &&
+        !controller.signal.aborted &&
+        renderJob.current === controller
+      )
+        setPrepared({ ...result, url: rememberURL(result.blob) });
+    } catch (e) {
+      if (alive.current && !controller.signal.aborted)
+        setError(
+          e instanceof Error ? e.message : 'The comp could not be prepared.',
+        );
+    } finally {
+      if (alive.current && renderJob.current === controller) {
+        renderJob.current = null;
+        busyRef.current = false;
+        setPreparing(false);
+      }
+    }
+  }
+  function another() {
+    if (!allowed.current || !hasSpace || busyRef.current || added) return;
+    stopPreview();
+    capture.current?.cancel();
+    setTaking(true);
+    setError('');
+    setSeconds(0);
+    setClipped(false);
   }
   const active = [
     'opening',
@@ -268,15 +431,21 @@ export default function RecordTake({
   ].includes(phase);
   return (
     <>
-      <TakePanel inline={!!roomAudio} uploading={uploading} onClose={close}>
+      <TakePanel
+        inline={!!roomAudio}
+        uploading={uploading || preparing}
+        onClose={close}
+      >
         <div className="record-position">
           <span>
             Starts at <strong>{offset.toFixed(2)}s</strong>
           </span>
           <span>{data.bpm} BPM · 4/4</span>
-          <span>Up to {Math.min(120, 300 - offset).toFixed(0)} seconds</span>
+          <span>
+            Up to {Math.max(0, takeLimit).toFixed(1)} seconds per next take
+          </span>
         </div>
-        {!take && (
+        {taking && (
           <>
             <fieldset disabled={active || !canEdit} className="record-settings">
               {roomAudio ? (
@@ -389,43 +558,70 @@ export default function RecordTake({
             </p>
           </>
         )}
-        {take && (
-          <section className="take-review" aria-label="Review your take">
-            <strong>Your take is ready to review</strong>
-            <p>
-              {take.seconds.toFixed(2)} seconds · Mono {take.depth}-bit{' '}
-              {take.depth === 32 ? 'float ' : ''}WAV · {take.sampleRate / 1000}{' '}
-              kHz · {(take.blob.size / 1024 / 1024).toFixed(1)} MB
-            </p>
-            <audio
-              ref={preview}
-              src={take.url}
-              controls
-              preload="metadata"
-              aria-label="Listen to your recorded take"
-            />
-            <p>
-              {take.peak >= 0.98
-                ? 'This take reached the top of the input range. Listen for distortion before keeping it.'
-                : 'Listen to the take before adding it to your arrangement.'}
-            </p>
-            <p>
-              {uploadAttempted
-                ? 'A previous upload attempt may have saved a copy in your files. '
-                : 'This take has not been uploaded. '}
-              Add take uploads it to your files; saving the project shares it
-              with authorized project collaborators. Preview playback may be
-              heard if you are sharing this tab’s audio.
-            </p>
-            <a
-              className="button secondary"
-              href={take.url}
-              download="SESSION vocal take.wav"
-            >
-              <Download size={16} />
-              Download take
-            </a>
-          </section>
+        {!taking && take && (
+          <TakeWorkbench
+            takes={takes}
+            selected={take}
+            onSelect={(id) => {
+              stopPreview();
+              setSelected(id);
+            }}
+            regions={regions}
+            onWhole={() => changePlan(fullTake(take))}
+            onReplace={(from, to) => {
+              try {
+                changePlan(replaceCompRange(regions, takes, take.id, from, to));
+              } catch (e) {
+                setError(
+                  e instanceof Error ? e.message : 'Choose a valid section.',
+                );
+              }
+            }}
+            onUndo={() => {
+              const previous = past.at(-1);
+              if (!previous || busyRef.current) return;
+              invalidate();
+              setPast(past.slice(0, -1));
+              setFuture([regions, ...future].slice(0, 20));
+              setRegions(previous);
+            }}
+            onRedo={() => {
+              const next = future[0];
+              if (!next || busyRef.current) return;
+              invalidate();
+              setFuture(future.slice(1));
+              setPast([...past, regions].slice(-20));
+              setRegions(next);
+            }}
+            undo={!!past.length}
+            redo={!!future.length}
+            locked={uploading || preparing || added || !canEdit}
+            prepared={prepared}
+            preview={preview}
+            compPreview={compPreview}
+            onPreview={() => void buildPreview()}
+            preparing={preparing || uploading}
+            added={added}
+          />
+        )}
+        <p className="record-note">
+          Up to 8 takes and 4 minutes of recorded audio are kept in this
+          recorder only. Browser recovery does not include these takes or your
+          comp edits. Download any originals you want to keep before closing.
+          Adding a comp uploads only the finished vocal; save the project to
+          share it with authorized collaborators.
+        </p>
+        {uploadAttempted && !added && (
+          <p className="record-note">
+            A previous upload attempt may have saved the finished vocal in your
+            files. Your original takes are still here.
+          </p>
+        )}
+        {added && (
+          <p className="record-progress" role="status">
+            Comp added. Your original takes are still here to download. Close
+            the recorder, then save your project.
+          </p>
         )}
         {error && (
           <p className="record-error" role="alert">
@@ -433,32 +629,53 @@ export default function RecordTake({
           </p>
         )}
         <div className="actions record-actions">
-          {take ? (
+          {!taking && take ? (
             <>
-              <button
-                className="button secondary"
-                disabled={uploading}
-                onClick={discard}
-              >
-                Discard take
-              </button>
-              <button
-                className="button primary"
-                disabled={uploading || !canEdit}
-                onClick={() => void keep()}
-              >
-                {uploading ? 'Adding take…' : 'Add take to project'}
-              </button>
-              {uploading && (
-                <button className="button secondary" onClick={cancelUpload}>
-                  Cancel upload
+              {added ? (
+                <button className="button primary" onClick={close}>
+                  Done with takes
                 </button>
+              ) : (
+                <>
+                  <button
+                    className="button secondary"
+                    disabled={uploading || preparing}
+                    onClick={() => setConfirmDiscard(true)}
+                  >
+                    Discard selected take
+                  </button>
+                  <button
+                    className="button secondary"
+                    disabled={uploading || preparing || !canEdit || !hasSpace}
+                    onClick={another}
+                  >
+                    Record another take
+                  </button>
+                  <button
+                    className="button primary"
+                    disabled={uploading || preparing || !canEdit}
+                    onClick={() => void keep()}
+                  >
+                    {uploading
+                      ? preparing
+                        ? 'Preparing comp…'
+                        : 'Adding comp…'
+                      : 'Add comp to project'}
+                  </button>
+                </>
               )}
             </>
           ) : (
             <>
-              <button className="button secondary" onClick={onClose}>
-                Cancel
+              <button
+                className="button secondary"
+                onClick={() => {
+                  capture.current?.cancel();
+                  if (takes.length) setTaking(false);
+                  else onClose();
+                }}
+              >
+                {takes.length ? 'Back to takes' : 'Cancel'}
               </button>
               {phase === 'ready' ? (
                 <>
@@ -470,11 +687,16 @@ export default function RecordTake({
                   </button>
                   <button
                     className="button primary"
-                    disabled={!canEdit}
+                    disabled={!canEdit || !hasSpace}
                     onClick={() => {
                       setClipped(false);
                       setError('');
-                      void capture.current?.start(data, offset, Number(bars));
+                      void capture.current?.start(
+                        data,
+                        offset,
+                        Number(bars),
+                        takeLimit,
+                      );
                     }}
                   >
                     Start recording
@@ -492,7 +714,7 @@ export default function RecordTake({
                 !active && (
                   <button
                     className="button primary"
-                    disabled={!canEdit}
+                    disabled={!canEdit || !hasSpace}
                     onClick={() => connect()}
                   >
                     <Mic size={16} />
@@ -502,23 +724,58 @@ export default function RecordTake({
               )}
             </>
           )}
+          {uploading && (
+            <button className="button secondary" onClick={cancelUpload}>
+              Cancel upload
+            </button>
+          )}
+          {preparing && !uploading && (
+            <button
+              className="button secondary"
+              onClick={() => {
+                renderJob.current?.abort();
+                renderJob.current = null;
+                busyRef.current = false;
+                setPreparing(false);
+              }}
+            >
+              Cancel preparation
+            </button>
+          )}
         </div>
+        {!hasSpace && !added && (
+          <p className="record-note">
+            This take bank has reached its limit. Existing takes and comp edits
+            are kept; download or discard a take to make room.
+          </p>
+        )}
         <p className="record-note">
           Device latency can affect where a performance lands. Check the take
           against your backing and adjust its clip position if needed.
         </p>
       </TakePanel>
       <Confirm
+        open={confirmDiscard}
+        onClose={() => setConfirmDiscard(false)}
+        onConfirm={() => {
+          discard();
+          setConfirmDiscard(false);
+        }}
+        title="Discard selected take?"
+        description="Download it first if you want to keep it. If this take is used in your comp, the comp resets to the first remaining take. Comp undo history will be cleared."
+        confirmLabel="Discard take"
+      />
+      <Confirm
         open={confirmClose}
         onClose={() => setConfirmClose(false)}
         onConfirm={onClose}
-        title="Discard this local take?"
+        title="Close and discard local originals?"
         description={
-          uploadAttempted
-            ? 'Download the local take before leaving if you need it. An earlier upload attempt may also have saved a copy in your files.'
-            : 'Download or add the take before leaving if you want to keep it. This recording has not been uploaded.'
+          added
+            ? 'The finished comp is in your arrangement. Original takes and comp edit choices have not been uploaded. Download any originals you need before closing.'
+            : 'Download your takes or add the finished comp before leaving. Closing discards all local takes and comp edit choices. An earlier upload attempt may have saved a finished vocal in your files.'
         }
-        confirmLabel="Discard take"
+        confirmLabel="Close recorder"
       />
     </>
   );

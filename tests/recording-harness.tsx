@@ -260,6 +260,28 @@ function App() {
       log(
         'Cancel, device interruption, late microphone permission, recording past backing end and automatic timeline limit passed.',
       );
+      for (const rate of [44100, 48000]) {
+        take = null;
+        error = '';
+        const limited = new TakeCapture(hooks, {
+          ...deps,
+          context: () => new AudioContext({ sampleRate: rate }),
+        });
+        try {
+          await limited.connect();
+          await limited.start(arrangement, 0, 0, 0.1);
+          await wait(() => !!take || !!error);
+          check(!error, error);
+          const short = take as unknown as RecordedTake;
+          check(short.sampleRate === rate, 'Take-bank limit changed rate');
+          check(
+            short.offset === 0 && Math.abs(short.seconds - 0.1) <= 1 / rate,
+            'Take-bank automatic limit inaccurate',
+          );
+        } finally {
+          limited.dispose();
+        }
+      }
       log(`PASS: ${count} browser recording assertions.`);
     } catch (e) {
       log('FAIL: ' + (e instanceof Error ? e.message : String(e)));
