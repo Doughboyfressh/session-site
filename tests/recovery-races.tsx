@@ -195,6 +195,47 @@ export function HookRaceChecks({
       );
       await waitFor(() => !current.current.error);
       check(!current.current.error, 'Retry did not clear storage error');
+      const creation = { key: crypto.randomUUID(), checkpoint: true };
+      const prepared = {
+        ...make('first-save', ''),
+        title: 'Prepared A',
+        creation,
+        baseline: {
+          title: 'Prepared A',
+          data: make('first-save', '').data,
+          revision: 0,
+        },
+      };
+      const preparationRead = store.hold('list:qa-B');
+      const preparation = current.current.prepareCreation(prepared);
+      await waitFor(() => preparationRead.entered);
+      current.current.capture({ ...prepared, title: 'Newer B' });
+      preparationRead.release();
+      check(await preparation, 'First-save preparation did not persist');
+      const savedPreparation = await current.current.current('first-save');
+      check(
+        savedPreparation.title === 'Newer B',
+        'Delayed preparation overwrote newer edits',
+      );
+      check(
+        savedPreparation.creation?.key === creation.key &&
+          savedPreparation.baseline.title === 'Prepared A',
+        'Preparation lost its stable key or submitted snapshot',
+      );
+      store.failNext = true;
+      let prepareRejected = false;
+      try {
+        await current.current.prepareCreation({
+          ...prepared,
+          recoveryId: 'failed-preparation',
+        });
+      } catch {
+        prepareRejected = true;
+      }
+      check(
+        prepareRejected,
+        'First save could proceed without its required recovery write',
+      );
       setLog(
         'PASS: ' +
           checks +

@@ -73,6 +73,23 @@ export const projectFiles = sqliteTable(
     index('idx_project_files_file').on(t.file),
   ],
 );
+// Kept after project deletion to prevent an ambiguous first-save retry from recreating it.
+export const projectCreations = sqliteTable(
+  'project_creations',
+  {
+    owner: text().notNull(),
+    creationKey: text().notNull(),
+    project: text().notNull(),
+    requestHash: text().notNull(),
+    revision: integer().notNull(),
+    created: integer().notNull(),
+    deletedAt: integer(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.owner, t.creationKey] }),
+    uniqueIndex('idx_project_creations_project').on(t.project),
+  ],
+);
 export const rooms = sqliteTable('rooms', {
   id: text().primaryKey(),
   owner: text().notNull(),

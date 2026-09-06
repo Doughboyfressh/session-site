@@ -29,6 +29,8 @@ export async function privacyAction(b: any, uid: string) {
       tracks: 'SELECT * FROM tracks WHERE owner=?',
       projects: 'SELECT * FROM projects WHERE owner=?',
       versions: 'SELECT * FROM project_versions WHERE owner=?',
+      firstSaveReceipts:
+        'SELECT creationKey,project,revision,created,deletedAt FROM project_creations WHERE owner=?',
       saved: 'SELECT * FROM saved WHERE user=?',
       following: 'SELECT * FROM follows WHERE user=?',
       comments: 'SELECT * FROM comments WHERE user=?',

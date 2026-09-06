@@ -1,5 +1,6 @@
 import type { Arrangement } from './audio';
 import { validateArrangement } from './arrangement-validation';
+import { validCreation, type ProjectCreation } from './project-creation';
 
 export const MAX_DRAFTS = 20;
 export const MAX_DRAFT_BYTES = 600 * 1024;
@@ -13,6 +14,8 @@ export type RecoveryDraft = DraftSnapshot & {
   stamp: string;
   updated: number;
   baseline: DraftSnapshot & { revision: number };
+  creation?: ProjectCreation;
+  reviewFirstSave?: boolean;
 };
 export type RecoverySettings = {
   account: string;
@@ -153,6 +156,18 @@ export function recoveryRecord(
     updated: now,
     baseline: { ...recoverySnapshot(baseline), revision: baseline.revision },
   };
+  if (draft.creation !== undefined) {
+    if (draft.id || baseline.revision !== 0 || !validCreation(draft.creation))
+      throw new Error('Invalid first-save recovery details.');
+    record.creation = {
+      key: draft.creation.key,
+      checkpoint: draft.creation.checkpoint,
+      ...(draft.creation.retryCurrent === undefined
+        ? {}
+        : { retryCurrent: draft.creation.retryCurrent }),
+    };
+  }
+  if (draft.reviewFirstSave === true) record.reviewFirstSave = true;
   if (bytes(record) > MAX_DRAFT_BYTES)
     throw new Error(
       'This arrangement is too large for browser recovery. Save the project to keep it.',
@@ -484,6 +499,8 @@ export function recoveredProject(record: RecoveryDraft, fresh?: any) {
     revision: record.baseline.revision,
     dirty: true,
     recoveryId: record.key,
+    creation: record.creation,
+    reviewFirstSave: record.reviewFirstSave,
     canEdit: record.projectId ? fresh.canEdit : true,
     canManage: record.projectId ? fresh.canManage : true,
     owner: record.projectId ? fresh.owner : undefined,

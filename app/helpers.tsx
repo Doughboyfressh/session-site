@@ -15,11 +15,15 @@ import {
   AlertDialogFooter,
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
-export async function action(body: any) {
+export async function action(
+  body: any,
+  options: { signal?: AbortSignal } = {},
+) {
   const r = await fetch('/api/action', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: options.signal,
   });
   const j = (await r.json()) as any;
   if (!r.ok)

@@ -57,6 +57,7 @@ import Room from './room';
 import { useDraftRecovery } from './use-draft-recovery';
 import RecoveryPanel from './recovery-panel';
 import { recoveredProject, type RecoveryDraft } from '@/lib/draft-recovery';
+import { creationHash } from '@/lib/project-creation';
 const empty = {
   profile: null,
   tracks: [],
@@ -202,10 +203,35 @@ export default function SessionApp({
       if (request !== workspaceRequest.current)
         throw new Error('The workspace changed. Reopen recovery to continue.');
     };
-    const current = await recovery.current(record.key);
+    let current = await recovery.current(record.key);
     checkRequest();
     let fresh;
-    if (current.projectId) {
+    if (!current.projectId && current.creation) {
+      const resolved = await action({
+        action: 'projectCreation',
+        key: current.creation.key,
+      });
+      checkRequest();
+      if (resolved.found) {
+        const matches =
+          resolved.receipt.requestHash ===
+          (await creationHash(current.baseline, current.creation.checkpoint));
+        fresh = resolved.project;
+        current = {
+          ...current,
+          projectId: fresh.id,
+          baseline: {
+            ...(matches
+              ? current.baseline
+              : { title: fresh.title, data: fresh.data }),
+            revision: matches ? resolved.receipt.revision : fresh.revision,
+          },
+          creation: undefined,
+          reviewFirstSave: !matches,
+        };
+      }
+    }
+    if (current.projectId && !fresh) {
       try {
         fresh = await action({ action: 'projectRead', id: current.projectId });
       } catch (error: any) {
@@ -222,7 +248,16 @@ export default function SessionApp({
     checkRequest();
     const claimed = await recovery.fork(current);
     checkRequest();
-    const p = recoveredProject(claimed, fresh);
+    const p = recoveredProject(
+      {
+        ...claimed,
+        projectId: current.projectId,
+        baseline: current.baseline,
+        creation: current.creation,
+        reviewFirstSave: current.reviewFirstSave,
+      },
+      fresh,
+    );
     draft.current = p;
     if (p.id) roomDrafts.current.set(p.id, p);
     setStudioKey((k) => k + 1);
@@ -1156,6 +1191,7 @@ export default function SessionApp({
               onActivity={(busy) => {
                 studioWorkspaceBusy.current = busy;
               }}
+              onPrepareSave={recovery.prepareCreation}
               onSaved={(p) => {
                 refresh();
               }}

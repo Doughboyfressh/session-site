@@ -63,6 +63,7 @@ export default function Studio({
   roomAudio,
   roomAllowed = true,
   onActivity,
+  onPrepareSave,
   catalog,
 }: {
   initial: any;
@@ -73,6 +74,7 @@ export default function Studio({
   roomAudio?: RoomAudio;
   roomAllowed?: boolean;
   onActivity?: (busy: boolean) => void;
+  onPrepareSave?: (draft: any) => Promise<boolean>;
   catalog?: Track[];
 }) {
   const [library, setLibrary] = useState(false);
@@ -161,6 +163,23 @@ export default function Studio({
       editEpoch.current++;
       endGesture();
     },
+    prepareCreation: async (creation, baseline) => {
+      const p = {
+        recoveryId: recoveryId.current,
+        id: '',
+        title: titleRef.current,
+        data: tracksRef.current,
+        dirty: true,
+        baseline,
+        creation,
+        revision: 0,
+        canEdit: true,
+        canManage: true,
+      };
+      onDraft(p);
+      return onPrepareSave ? onPrepareSave(p) : false;
+    },
+    adoptProject: setId,
   });
   const { revision } = sync;
   const canEdit = sync.canEdit && roomAllowed;
@@ -191,13 +210,25 @@ export default function Studio({
       title,
       data,
       revision,
-      dirty,
+      dirty: dirty || !!sync.creation,
       canEdit,
       canManage,
       baseline: sync.baseline.current,
+      creation: sync.creation,
+      reviewFirstSave: sync.reviewFirstSave,
       owner: initial?.owner,
     });
-  }, [id, title, data, revision, dirty, canEdit, canManage]);
+  }, [
+    id,
+    title,
+    data,
+    revision,
+    dirty,
+    canEdit,
+    canManage,
+    sync.creation,
+    sync.reviewFirstSave,
+  ]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -478,7 +509,11 @@ export default function Studio({
         revision: r.revision,
       });
       setSaveLabel(
-        'Saved ' +
+        (r.needsReview
+          ? 'Review the earlier save · '
+          : r.remainingChanges
+            ? 'Earlier save confirmed · newer edits unsaved · '
+            : 'Saved ') +
           new Date().toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit',
@@ -486,7 +521,11 @@ export default function Studio({
       );
       if (!automatic)
         notify(
-          'Project saved. Room members with access will receive your changes.',
+          r.needsReview
+            ? 'An earlier save already created this project. Review it before saving your current edits.'
+            : r.remainingChanges
+              ? 'The earlier save is confirmed. Your newer edits are kept here; save again to share them.'
+              : 'Project saved. Room members with access will receive your changes.',
         );
     } catch (e: any) {
       setSaveLabel('Save needs attention');
@@ -780,8 +819,14 @@ export default function Studio({
             >
               <h3>Choose how to combine these changes</h3>
               <p>
-                Saving is paused. Independent changes will be kept. Choose which
-                version to use for: {sync.conflict.labels.join(', ')}.
+                {sync.conflict.whole ? (
+                  'An earlier first save contains different edits. Saving is paused. Choose your entire current draft or the saved project; this choice does not combine them automatically.'
+                ) : (
+                  <>
+                    Saving is paused. Independent changes will be kept. Choose
+                    which version to use for: {sync.conflict.labels.join(', ')}.
+                  </>
+                )}
               </p>
               <ConflictValues details={sync.conflict.details} />
               <div className="actions">
@@ -792,7 +837,9 @@ export default function Studio({
                   }
                   onClick={() => sync.resolve('local')}
                 >
-                  Use my competing changes
+                  {sync.conflict.whole
+                    ? 'Keep my current draft'
+                    : 'Use my competing changes'}
                 </button>
                 <button
                   className="button primary"
@@ -801,7 +848,9 @@ export default function Studio({
                   }
                   onClick={() => sync.resolve('remote')}
                 >
-                  Use saved competing changes
+                  {sync.conflict.whole
+                    ? 'Load the saved project'
+                    : 'Use saved competing changes'}
                 </button>
                 {sync.conflict.overflow && (
                   <button

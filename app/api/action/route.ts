@@ -1,4 +1,4 @@
-import { saveProject } from '@/lib/project-save';
+import { saveProject, resolveProjectCreation } from '@/lib/project-save';
 import { setRoomEditor } from '@/lib/room-editors';
 import { privacyAction } from '@/lib/privacy';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
@@ -201,6 +201,11 @@ export async function POST(req: Request) {
         );
         if (!p) fail('Project unavailable.', 404);
         await database().batch([
+          database()
+            .prepare(
+              'UPDATE project_creations SET deletedAt=? WHERE project=? AND owner=?',
+            )
+            .bind(now, b.id, uid),
           database()
             .prepare('DELETE FROM room_editors WHERE project=?')
             .bind(b.id),
@@ -420,6 +425,10 @@ export async function POST(req: Request) {
       }
       case 'projectRead': {
         result = await readProject(b.id, uid);
+        break;
+      }
+      case 'projectCreation': {
+        result = await resolveProjectCreation(b.key, uid);
         break;
       }
       case 'roomEditor': {

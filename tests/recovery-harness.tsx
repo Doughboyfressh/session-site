@@ -10,6 +10,7 @@ import { defaults } from '../lib/audio';
 import { mergeProject } from '../lib/project-merge';
 import { useDraftRecovery } from '../app/use-draft-recovery';
 import { HookRaceChecks } from './recovery-races';
+import { creationHash } from '../lib/project-creation';
 import '../app/globals.css';
 import '../app/advanced.css';
 
@@ -238,6 +239,48 @@ function App() {
       });
       check(conflict.conflicts.length > 0, 'Recovery bypassed competing edits');
       const local = recoveryRecord('A', make('new', ''));
+      const creation = {
+        key: crypto.randomUUID(),
+        checkpoint: true,
+        retryCurrent: true,
+      };
+      const pending = recoveryRecord('A', {
+        ...make('pending', ''),
+        creation,
+        baseline: { ...baseline, revision: 0 },
+      });
+      await a.put(pending, 0);
+      const claimed = await a.fork(pending, 0);
+      check(
+        claimed.key !== pending.key && claimed.creation?.key === creation.key,
+        'Recovery changed the first-save key',
+      );
+      check(
+        claimed.creation?.retryCurrent === true &&
+          claimed.baseline.revision === 0,
+        'Recovery lost retry state',
+      );
+      check(
+        (await creationHash(pending.baseline, true)) ===
+          (await creationHash(claimed.baseline, true)),
+        'Recovery changed submitted snapshot hash',
+      );
+      check(
+        recoveredProject(claimed).creation?.key === creation.key,
+        'Restored editor lost first-save key',
+      );
+      const review = recoveryRecord('A', {
+        ...make('review'),
+        reviewFirstSave: true,
+      });
+      check(
+        recoveredProject(review, { id: 'project', revision: 4, canEdit: true })
+          .reviewFirstSave,
+        'Earlier-save review was lost',
+      );
+      await fails(() => recoveryRecord('A', { ...make(), creation }));
+      await fails(() => recoveryRecord('A', { ...make('bad', ''), creation }));
+      await a.remove('A', claimed.key);
       check(
         recoveredProject(local).id === '' && recoveredProject(local).dirty,
         'New draft could not recover',

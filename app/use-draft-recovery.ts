@@ -289,6 +289,28 @@ export function useDraftRecovery(
     if (!record) throw new Error('This recovery copy is no longer available.');
     return record;
   }
+  async function prepareCreation(draft: any) {
+    requireActive();
+    capture(draft);
+    await read();
+    requireActive();
+    if (state.settings?.enabled === false) return false;
+    await settle();
+    const current = await state.store.list(account!);
+    requireActive();
+    const expected = recoveryRecord(account!, draft);
+    const actual = current.drafts.find((d) => d.key === expected.key);
+    if (
+      state.failed.has(expected.key) ||
+      !actual ||
+      JSON.stringify(actual.creation) !== JSON.stringify(expected.creation) ||
+      JSON.stringify(actual.baseline) !== JSON.stringify(expected.baseline)
+    )
+      throw new Error(
+        'Browser recovery could not keep the first-save details. Free space in Browser recovery, or turn it off to save without reload protection.',
+      );
+    return true;
+  }
   async function fork(record: RecoveryDraft) {
     requireActive();
     if (!account || record.account !== account || !state.settings)
@@ -328,6 +350,7 @@ export function useDraftRecovery(
     remove,
     removeUnreadable,
     current,
+    prepareCreation,
     fork,
     deleteProject,
   };
