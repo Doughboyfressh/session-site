@@ -54,6 +54,9 @@ import LegalCenter from './legal-center';
 import Diagnostics from './diagnostics';
 import Studio from './studio';
 import Room from './room';
+import { useDraftRecovery } from './use-draft-recovery';
+import RecoveryPanel from './recovery-panel';
+import { recoveredProject, type RecoveryDraft } from '@/lib/draft-recovery';
 const empty = {
   profile: null,
   tracks: [],
@@ -105,6 +108,10 @@ export default function SessionApp({
     [selectedProfile, setSelectedProfile] = useState<any>(null),
     [deleteProject, setDeleteProject] = useState(''),
     [studioKey, setStudioKey] = useState(0);
+  const recovery = useDraftRecovery(user?.id);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const studioWorkspaceBusy = useRef(false);
+  const workspaceRequest = useRef(0);
   const playback = useRef<any>(null),
     roomDrafts = useRef(new Map<string, any>()),
     roomWorkspaceBusy = useRef(false),
@@ -159,13 +166,17 @@ export default function SessionApp({
     return () => window.removeEventListener('beforeunload', warn);
   }, []);
   function go(next: string) {
-    if (view === 'Room' && roomWorkspaceBusy.current) {
+    if (
+      (view === 'Room' && roomWorkspaceBusy.current) ||
+      (view === 'Studio' && studioWorkspaceBusy.current)
+    ) {
       notify(
-        'Finish or close the studio dialog before leaving the room. Your call is still open.',
+        'Finish or close the studio dialog before leaving this workspace.',
       );
       return;
     }
     if (next === 'Studio' || next === 'Room') stopPreview();
+    workspaceRequest.current++;
     setView(next);
     const url = new URL(window.location.href);
     url.search = next === 'Discover' ? '' : '?view=' + encodeURIComponent(next);
@@ -173,10 +184,60 @@ export default function SessionApp({
     window.history.replaceState(null, '', url);
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
+  function showRecovery() {
+    if (
+      (view === 'Room' && roomWorkspaceBusy.current) ||
+      (view === 'Studio' && studioWorkspaceBusy.current)
+    )
+      return notify(
+        'Finish or close the studio dialog before reviewing recovery copies.',
+      );
+    workspaceRequest.current++;
+    setRecoveryOpen(true);
+    void recovery.refresh();
+  }
+  async function restoreDraft(record: RecoveryDraft) {
+    const request = ++workspaceRequest.current;
+    const checkRequest = () => {
+      if (request !== workspaceRequest.current)
+        throw new Error('The workspace changed. Reopen recovery to continue.');
+    };
+    const current = await recovery.current(record.key);
+    checkRequest();
+    let fresh;
+    if (current.projectId) {
+      try {
+        fresh = await action({ action: 'projectRead', id: current.projectId });
+      } catch (error: any) {
+        if ([401, 403, 404].includes(error.status))
+          throw new Error(
+            'This project is unavailable or your access has ended. The recovery copy is kept here; ask the owner to restore access.',
+          );
+        throw new Error(
+          'Connect to SESSION so we can check project access before recovering. Your copy is kept here.',
+        );
+      }
+    }
+    recoveredProject(current, fresh);
+    checkRequest();
+    const claimed = await recovery.fork(current);
+    checkRequest();
+    const p = recoveredProject(claimed, fresh);
+    draft.current = p;
+    if (p.id) roomDrafts.current.set(p.id, p);
+    setStudioKey((k) => k + 1);
+    appendMode.current = false;
+    go('Studio');
+    notify(
+      'Working copy recovered. Review any newer collaborator changes, then save when ready.',
+    );
+  }
   useEffect(() => {
     if (init.current) return;
     init.current = true;
+    const request = workspaceRequest.current;
     refresh().then(async (j) => {
+      if (request !== workspaceRequest.current) return;
       const params = new URLSearchParams(window.location.search);
       const name = params.get('view');
       if (name && [...Object.keys(captions), 'Studio'].includes(name))
@@ -189,6 +250,7 @@ export default function SessionApp({
         try {
           if (invite) {
             await action({ action: 'joinRoom', id: rid, invite });
+            if (request !== workspaceRequest.current) return;
             window.history.replaceState(null, '', '?room=' + rid);
           }
           setRoomId(rid);
@@ -201,6 +263,7 @@ export default function SessionApp({
       if (pid) {
         try {
           const p = await action({ action: 'projectRead', id: pid });
+          if (request !== workspaceRequest.current) return;
           draft.current = p;
           setStudioKey((x) => x + 1);
           setView('Studio');
@@ -210,6 +273,7 @@ export default function SessionApp({
       }
     });
     return () => {
+      workspaceRequest.current++;
       playback.current?.stop();
       clearTimeout(noticeTimer.current);
     };
@@ -576,6 +640,31 @@ export default function SessionApp({
           </div>
         )}
         <main>
+          {user && (recovery.error || recovery.drafts.length > 0) && (
+            <div
+              className={
+                'recovery-bar' + (recovery.error ? ' recovery-warning' : '')
+              }
+              role="status"
+            >
+              <div>
+                <strong>
+                  {recovery.error
+                    ? 'Browser recovery needs attention'
+                    : view === 'Studio' || view === 'Room'
+                      ? recovery.status || 'Recovery copies available'
+                      : 'Unsaved work on this browser'}
+                </strong>
+                <p>
+                  {recovery.error ||
+                    `${recovery.drafts.length} recovery ${recovery.drafts.length === 1 ? 'copy' : 'copies'} · arrangement edits only`}
+                </p>
+              </div>
+              <button className="button secondary" onClick={showRecovery}>
+                Review drafts
+              </button>
+            </div>
+          )}
           {!['Studio', 'Room'].includes(view) && (
             <div className="page-heading">
               <div>
@@ -864,9 +953,18 @@ export default function SessionApp({
                   Your sessions{' '}
                   <span className="tiny-label">PRIVATE BY DEFAULT</span>
                 </h2>
-                <button className="button primary" onClick={blankProject}>
-                  <Plus size={16} /> New project
-                </button>
+                <div className="actions">
+                  <button
+                    className="button secondary"
+                    onClick={showRecovery}
+                    disabled={!user}
+                  >
+                    Browser recovery
+                  </button>
+                  <button className="button primary" onClick={blankProject}>
+                    <Plus size={16} /> New project
+                  </button>
+                </div>
               </div>
               {loading ? (
                 <p>Loading your projects…</p>
@@ -1053,6 +1151,10 @@ export default function SessionApp({
               onDraft={(p) => {
                 draft.current = p;
                 if (p.id) roomDrafts.current.set(p.id, p);
+                recovery.capture(p);
+              }}
+              onActivity={(busy) => {
+                studioWorkspaceBusy.current = busy;
               }}
               onSaved={(p) => {
                 refresh();
@@ -1080,6 +1182,7 @@ export default function SessionApp({
                 onDraft={(p) => {
                   roomDrafts.current.set(p.id, p);
                   if (draft.current.id === p.id) draft.current = p;
+                  recovery.capture(p);
                 }}
                 onWorkspaceBusy={(busy) => {
                   roomWorkspaceBusy.current = busy;
@@ -1290,16 +1393,37 @@ export default function SessionApp({
         open={!!deleteProject}
         onClose={() => setDeleteProject('')}
         title="Delete this project?"
-        description="Your arrangement will be removed and detached from its studio rooms. Original media remains in storage."
+        description="Your arrangement will be removed and detached from its studio rooms. Recovery copies of this project for your account on this browser will also be removed. Original media remains in storage."
         onConfirm={async () => {
           try {
             await action({ action: 'deleteProject', id: deleteProject });
+            roomDrafts.current.delete(deleteProject);
+            if (draft.current.id === deleteProject)
+              draft.current = {
+                title: 'Untitled session',
+                data: { bpm: 92, tracks: [] },
+              };
+            try {
+              await recovery.deleteProject(deleteProject);
+            } catch {
+              notify(
+                'Project deleted. Browser recovery cleanup failed; remove its local copies in Browser recovery.',
+              );
+              await refresh();
+              return;
+            }
             await refresh();
             notify('Project deleted.');
           } catch (e: any) {
             notify(e.message);
           }
         }}
+      />
+      <RecoveryPanel
+        open={recoveryOpen}
+        onClose={() => setRecoveryOpen(false)}
+        recovery={recovery}
+        onRecover={restoreDraft}
       />
     </SidebarProvider>
   );

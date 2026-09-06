@@ -213,3 +213,109 @@
 .take-review p {font-size:14px;line-height:1.65;color:#bdd0ad;margin:14px 0}
 .take-review audio {width:100%;margin:8px 0}
 @media(max-width:540px){.record-settings{grid-template-columns:1fr}.record-actions .button{flex-grow:1}}
+
+.recovery-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid #536d3e;
+  background: #25351b;
+  padding: 16px 20px;
+  margin: 0 0 22px;
+  border-radius: 9px;
+}
+.recovery-bar strong {
+  font-size: 14px;
+  color: #d2e8bd;
+}
+.recovery-bar p {
+  font-size: 12px;
+  margin-top: 5px;
+  color: #aac195;
+}
+.recovery-warning {
+  border-color: #8d7049;
+  background: #322a1c;
+}
+.recovery-dialog {
+  max-width: 760px !important;
+}
+.recovery-dialog [data-slot='dialog-title'] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.recovery-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 0;
+  font-size: 14px;
+}
+.recovery-dialog .small-note {
+  font-size: 13px;
+  line-height: 1.65;
+  margin-bottom: 12px;
+  color: #afc19f;
+}
+.recovery-list {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0;
+  max-height: 340px;
+  overflow: auto;
+}
+.recovery-list article {
+  border: 1px solid #455d34;
+  border-radius: 8px;
+  background: #182412;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.recovery-list h3 {
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+.recovery-list p,
+.recovery-list time {
+  font-size: 12px;
+  color: #a9c194;
+  margin-top: 8px;
+  display: block;
+}
+.recovery-list .actions {
+  flex-shrink: 0;
+}
+.recovery-dialog > .actions {
+  justify-content: flex-end;
+}
+.recovery-dialog > .actions > span {
+  font-size: 12px;
+  color: #b1c799;
+  margin-right: auto;
+}
+@media (max-width: 540px) {
+  .recovery-bar {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 15px;
+  }
+  .recovery-bar .button {
+    width: 100%;
+  }
+  .recovery-list article {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .recovery-list .actions {
+    width: 100%;
+  }
+  .recovery-list .actions > .primary {
+    flex: 1;
+  }
+}

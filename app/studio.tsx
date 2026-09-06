@@ -76,6 +76,7 @@ export default function Studio({
   catalog?: Track[];
 }) {
   const [library, setLibrary] = useState(false);
+  const recoveryId = useRef(initial?.recoveryId || crypto.randomUUID());
   const [grid, setGrid] = useState<ClipGrid>('quarter');
   const [zoom, setZoom] = useState(1);
   const [levels, setLevels] = useState<Record<string, number>>({});
@@ -185,6 +186,7 @@ export default function Studio({
   useEffect(() => () => onActivity?.(false), []);
   useEffect(() => {
     onDraft({
+      recoveryId: recoveryId.current,
       id,
       title,
       data,
@@ -1440,6 +1442,8 @@ export default function Studio({
           <div className="studio-footnote">
             <HeadphoneNote />
             <p>
+              Browser recovery keeps arrangement edits, not takes waiting to be
+              added. Keep or download each recording before closing the page.
               Use headphones while recording. Recording is limited to 2 minutes;
               the arrangement to 5 minutes. Exports can include extra time for
               effect tails. Volume, pan, EQ, compression, reverb, and delay
