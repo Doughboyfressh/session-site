@@ -42,6 +42,8 @@ import ConflictValues from './conflict-values';
 import ExportAudio from './export-audio';
 import RecordTake from './record-take';
 import RecordMidi from './record-midi';
+import ImportMidi from './import-midi';
+import { appendMidi } from '@/lib/midi-import';
 import { keepMidi, midiPlan } from '@/lib/midi-notes';
 import type { RestoredBank } from '@/lib/take-bank';
 import type { RecordedTake } from '@/lib/recording';
@@ -165,7 +167,12 @@ export default function Studio({
     target: MixerTrack;
     start: number;
   } | null>(null);
-  const recording = !!recordSnapshot || !!midiSnapshot;
+  const [importSnapshot, setImportSnapshot] = useState<{
+    data: Arrangement;
+    start: number;
+    projectId: string;
+  } | null>(null);
+  const recording = !!recordSnapshot || !!midiSnapshot || !!importSnapshot;
   const seedJob = useRef<AbortController | null>(null);
   const projectIdRef = useRef(id);
   projectIdRef.current = id;
@@ -811,6 +818,40 @@ export default function Studio({
   return (
     <>
       {recordDialog}
+      {importSnapshot && (
+        <ImportMidi
+          data={importSnapshot.data}
+          start={importSnapshot.start}
+          canEdit={canEdit && !sync.accessEnded}
+          onClose={() => setImportSnapshot(null)}
+          onAdd={(document, choices, offset, useFileTempo) => {
+            if (
+              !alive.current ||
+              !editAllowed.current ||
+              sync.accessEnded ||
+              projectIdRef.current !== importSnapshot.projectId
+            )
+              throw Error(
+                'Editing access or the project changed. Reopen MIDI import from the current project.',
+              );
+            const next = appendMidi(
+              tracksRef.current,
+              importSnapshot.data.bpm,
+              document,
+              choices,
+              offset,
+              useFileTempo,
+              context().sampleRate,
+            );
+            mutate(() => next);
+            setSelected(choices[0].id);
+            setImportSnapshot(null);
+            notify(
+              'MIDI parts added. Save the project to keep these instruments.',
+            );
+          }}
+        />
+      )}
       {midiSnapshot && (
         <RecordMidi
           data={midiSnapshot.data}
@@ -1365,6 +1406,19 @@ export default function Studio({
                   </div>
                 ) : null}
                 <div className="add-track">
+                  <button
+                    disabled={!canEdit || structuralLocked}
+                    onClick={() => {
+                      if (!editAllowed.current || structuralLocked) return;
+                      setImportSnapshot({
+                        data: structuredClone(tracksRef.current),
+                        start: position,
+                        projectId: projectIdRef.current,
+                      });
+                    }}
+                  >
+                    <Plus size={16} /> Import MIDI file
+                  </button>
                   <button
                     onClick={() => input.current?.click()}
                     disabled={!canEdit || !!busy}

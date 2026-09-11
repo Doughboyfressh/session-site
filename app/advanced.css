@@ -359,3 +359,62 @@
 .shared-returns meter{width:100%;margin-top:15px}
 @media(max-width:540px){.shared-returns{grid-template-columns:1fr}}
 .midi-record-dialog p{font-size:14px;line-height:1.6}.midi-record-dialog fieldset,.piano-editor>fieldset{border:0;padding:0;margin-inline:0;min-width:0}.midi-record-dialog .actions{display:flex;gap:10px;flex-wrap:wrap}.midi-live-status{padding:14px;border:1px solid #4b6538;border-radius:7px;background:#23331a;color:#d2f29d}.midi-review-list{max-height:250px;overflow:auto;margin:18px 0;border:1px solid #405632;border-radius:7px}.midi-review-list table{width:100%;border-collapse:collapse;font-size:14px}.midi-review-list th,.midi-review-list td{text-align:left;padding:10px;border-bottom:1px solid #354a29}.midi-review-list th{position:sticky;top:0;background:#26391b}.midi-record-dialog .field{min-width:150px}.midi-record-dialog .small-note{font-size:14px}@media(max-width:600px){.midi-record-dialog .actions .button{flex:1 1 100%}.midi-record-dialog .piano-tools .field{max-width:none;flex-basis:100%}.piano-editor .section-title{flex-wrap:wrap}}
+/* MIDI import keeps part names and controls usable on narrow studio screens. */
+.midi-import-dialog {
+  max-height: 90dvh;
+  overflow-y: auto;
+}
+.midi-import-filename {
+  overflow-wrap: anywhere;
+}
+.midi-import-parts,
+.midi-import-settings {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+}
+.midi-import-part {
+  border: 1px solid #34303f;
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+.midi-import-part > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.midi-import-part strong {
+  overflow-wrap: anywhere;
+}
+.midi-import-part small {
+  display: block;
+  opacity: 0.7;
+  margin-top: 4px;
+}
+.midi-import-part p {
+  margin: 0;
+  font-size: 13px;
+}
+.midi-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.midi-import-dialog input[type='file'] {
+  width: 100%;
+  min-width: 0;
+}
+.midi-import-dialog input[type='checkbox'] {
+  accent-color: #c1f65d;
+  margin-top: 4px;
+}
+.midi-import-dialog details {
+  font-size: 13px;
+}
+.midi-import-dialog details li {
+  margin-bottom: 8px;
+}
