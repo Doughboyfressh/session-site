@@ -1,5 +1,11 @@
 'use client';
 import { useState } from 'react';
+import {
+  checkNotes,
+  editNotes,
+  repeatSpan,
+  type NoteEdit,
+} from '@/lib/note-edit';
 import { Plus, Download, Trash2, Music2, Play } from 'lucide-react';
 import { Pick, Range } from './helpers';
 import {
@@ -29,7 +35,14 @@ export default function PianoRoll({
   onRecord?: () => void;
   disabled?: boolean;
 }) {
-  const [selected, setSelected] = useState(''),
+  const [selection, setSelection] = useState<{ track: string; ids: string[] }>({
+      track: '',
+      ids: [],
+    }),
+    [multiple, setMultiple] = useState(false),
+    [error, setError] = useState(''),
+    [groupLength, setGroupLength] = useState('1'),
+    [groupVelocity, setGroupVelocity] = useState('75'),
     [grid, setGrid] = useState('0.25'),
     [pitch, setPitch] = useState('60'),
     [start, setStart] = useState(0),
@@ -50,7 +63,14 @@ export default function PianoRoll({
       </div>
     );
   const notes = track.notes,
-    focus = notes.find((n) => n.id === selected),
+    selected =
+      selection.track === track.id
+        ? selection.ids.filter((id) => notes.some((n) => n.id === id))
+        : [],
+    focus =
+      selected.length === 1
+        ? notes.find((n) => n.id === selected[0])
+        : undefined,
     beats = Math.max(
       8,
       Math.ceil(Math.max(0, ...notes.map((n) => n.start + n.length)) / 4) * 4,
@@ -58,6 +78,42 @@ export default function PianoRoll({
     bottom = Number(keyboardRange),
     top = bottom + 24,
     rows = Array.from({ length: 25 }, (_, i) => top - i);
+  function select(ids: string[]) {
+    setSelection({ track: track!.id, ids });
+    setError('');
+  }
+  function commit(next: Note[]) {
+    if (disabled) return false;
+    try {
+      checkNotes(track!, bpm, next);
+      if (JSON.stringify(next) !== JSON.stringify(notes))
+        onChange({ notes: next, peaks: undefined, duration: undefined });
+      setError('');
+      return true;
+    } catch (e: any) {
+      setError(e.message || 'Could not edit these notes.');
+      return false;
+    }
+  }
+  function apply(operation: NoteEdit, ids = selected) {
+    if (disabled) return;
+    try {
+      const result = editNotes(track!, bpm, ids, operation);
+      if (commit(result.notes)) select(result.selected);
+    } catch (e: any) {
+      setError(e.message || 'Could not edit these notes.');
+    }
+  }
+  function repeat() {
+    try {
+      apply({
+        kind: 'duplicate',
+        beats: repeatSpan(track!, selected, Number(grid)),
+      });
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
   function add(p: number, at: number) {
     if (disabled) return;
     const n = {
@@ -70,9 +126,8 @@ export default function PianoRoll({
       length: Number(length),
       velocity: 0.75,
     };
-    if (notes.length >= 256) return;
-    onChange({ notes: [...notes, n], peaks: undefined, duration: undefined });
-    setSelected(n.id);
+    if (!commit([...notes, n])) return;
+    select([n.id]);
     context()
       .resume()
       .then(() =>
@@ -88,21 +143,75 @@ export default function PianoRoll({
       );
   }
   function edit(p: Partial<Note>) {
-    onChange({
-      notes: notes.map((n) => (n.id === selected ? { ...n, ...p } : n)),
-      peaks: undefined,
-      duration: undefined,
-    });
+    commit(notes.map((n) => (n.id === selected[0] ? { ...n, ...p } : n)));
   }
   return (
-    <section className="piano-editor">
+    <section
+      className="piano-editor"
+      tabIndex={0}
+      aria-label="Piano roll editor"
+      onKeyDown={(e) => {
+        const target = e.target as HTMLElement;
+        if (
+          disabled ||
+          (target !== e.currentTarget && !target.closest('.midi-note')) ||
+          e.altKey
+        )
+          return;
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+          e.preventDefault();
+          select(notes.map((n) => n.id));
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          select([]);
+          return;
+        }
+        if (!selected.length) return;
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+          e.preventDefault();
+          e.currentTarget.focus({ preventScroll: true });
+          repeat();
+          return;
+        }
+        if (e.ctrlKey || e.metaKey) return;
+        if (
+          [
+            'Delete',
+            'Backspace',
+            'ArrowLeft',
+            'ArrowRight',
+            'ArrowUp',
+            'ArrowDown',
+          ].includes(e.key)
+        ) {
+          e.preventDefault();
+          e.currentTarget.focus({ preventScroll: true });
+        }
+        if (e.key === 'Delete' || e.key === 'Backspace')
+          apply({ kind: 'delete' });
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+          apply({
+            kind: 'move',
+            beats:
+              (e.key === 'ArrowLeft' ? -1 : 1) *
+              (e.shiftKey ? 1 : Number(grid)),
+          });
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown')
+          apply({
+            kind: 'transpose',
+            semitones: (e.key === 'ArrowDown' ? -1 : 1) * (e.shiftKey ? 12 : 1),
+          });
+      }}
+    >
       <fieldset disabled={disabled}>
         <div className="section-title">
           <div>
             <h2>{track.name}</h2>
             <p>
-              Click the grid to place a note. Select a note to edit its timing,
-              length, or velocity.
+              Click the grid to place a note. Select several notes to shape a
+              chord or melody together.
             </p>
           </div>
           <div className="actions">
@@ -134,13 +243,19 @@ export default function PianoRoll({
           <Pick
             label="Instrument"
             value={track.sound || 'keys'}
-            onChange={(v) =>
-              onChange({
-                sound: v as any,
-                peaks: undefined,
-                duration: undefined,
-              })
-            }
+            onChange={(v) => {
+              if (disabled) return;
+              try {
+                onChange({
+                  sound: v as any,
+                  peaks: undefined,
+                  duration: undefined,
+                });
+                setError('');
+              } catch (e: any) {
+                setError(e.message || 'Could not change this instrument.');
+              }
+            }}
             options={[
               { value: 'keys', label: 'Soft keys' },
               { value: 'bass', label: 'Analog bass' },
@@ -166,6 +281,166 @@ export default function PianoRoll({
           <button className="button secondary" onClick={onAdd}>
             <Plus size={15} /> New instrument
           </button>
+        </div>
+        <div className="note-selection">
+          <div className="actions">
+            <button
+              className="button secondary"
+              aria-pressed={multiple}
+              onClick={() => {
+                setMultiple((v) => !v);
+                setError('');
+              }}
+            >
+              Select multiple notes
+            </button>
+            <button
+              className="button secondary"
+              disabled={!notes.length}
+              onClick={() => select(notes.map((n) => n.id))}
+            >
+              Select all notes
+            </button>
+            <button
+              className="button secondary"
+              disabled={!selected.length}
+              onClick={() => select([])}
+            >
+              Clear selection
+            </button>
+          </div>
+          <p role="status" aria-label="Note selection">
+            {selected.length} selected ·{' '}
+            {
+              notes.filter(
+                (n) =>
+                  selected.includes(n.id) &&
+                  (n.pitch < bottom || n.pitch > top),
+              ).length
+            }{' '}
+            selected outside this keyboard range
+          </p>
+          <details className="note-edit-help">
+            <summary>Editing tips and shortcuts</summary>
+            <p>
+              Shift-click or turn on Select multiple notes to toggle notes. With
+              the piano roll focused: arrows move notes; Shift adds an octave or
+              moves one beat. Ctrl/⌘A selects all, Ctrl/⌘D repeats, Delete
+              removes, and Escape clears the selection.
+            </p>
+            <p>
+              Moves use the chosen grid. Repeat starts after the selection’s
+              full length, rounded up to that grid. Fades follow a changed
+              instrument length; volume automation stays at its project times.
+            </p>
+          </details>
+          {(track.trimStart || track.trimEnd || track.splitFrom) && (
+            <p>
+              This clip is trimmed or split. Pitch and velocity edits are
+              available; use an untrimmed, unsplit instrument for timing edits.
+            </p>
+          )}
+          {selected.length > 0 && (
+            <div className="note-bulk-tools">
+              <div className="actions">
+                <button
+                  className="button secondary"
+                  onClick={() => apply({ kind: 'move', beats: -Number(grid) })}
+                >
+                  Move earlier
+                </button>
+                <button
+                  className="button secondary"
+                  onClick={() => apply({ kind: 'move', beats: Number(grid) })}
+                >
+                  Move later
+                </button>
+                <button
+                  className="button secondary"
+                  onClick={() => apply({ kind: 'transpose', semitones: -1 })}
+                >
+                  Pitch down
+                </button>
+                <button
+                  className="button secondary"
+                  onClick={() => apply({ kind: 'transpose', semitones: 1 })}
+                >
+                  Pitch up
+                </button>
+                <button className="button secondary" onClick={repeat}>
+                  Repeat selection
+                </button>
+                <button
+                  className="button secondary"
+                  onClick={() =>
+                    apply({ kind: 'quantize', grid: Number(grid) })
+                  }
+                >
+                  Quantize selected
+                </button>
+                <button
+                  className="button secondary"
+                  onClick={() => apply({ kind: 'delete' })}
+                >
+                  Delete selected
+                </button>
+              </div>
+              <details className="note-edit-properties">
+                <summary>Set length or velocity</summary>
+                <div className="piano-tools">
+                  <label className="field">
+                    <span>Selected note length (beats)</span>
+                    <input
+                      aria-label="Selected note length (beats)"
+                      type="number"
+                      min="0.01"
+                      max="32"
+                      step="0.01"
+                      value={groupLength}
+                      onChange={(e) => setGroupLength(e.target.value)}
+                    />
+                  </label>
+                  <button
+                    className="button secondary"
+                    onClick={() =>
+                      apply({
+                        kind: 'length',
+                        beats: groupLength.trim() ? Number(groupLength) : NaN,
+                      })
+                    }
+                  >
+                    Apply length
+                  </button>
+                  <label className="field">
+                    <span>Selected velocity (%)</span>
+                    <input
+                      aria-label="Selected velocity (%)"
+                      type="number"
+                      min="1"
+                      max="100"
+                      step="1"
+                      value={groupVelocity}
+                      onChange={(e) => setGroupVelocity(e.target.value)}
+                    />
+                  </label>
+                  <button
+                    className="button secondary"
+                    onClick={() =>
+                      apply({
+                        kind: 'velocity',
+                        value: groupVelocity.trim()
+                          ? Number(groupVelocity) / 100
+                          : NaN,
+                      })
+                    }
+                  >
+                    Apply velocity
+                  </button>
+                </div>
+              </details>
+            </div>
+          )}
+          {error && <p role="alert">{error}</p>}
         </div>
         <div className="piano-scroll">
           <div className="piano-ruler">
@@ -207,6 +482,11 @@ export default function PianoRoll({
                 backgroundSize: `${100 / (beats / Number(grid))}% 24px`,
               }}
               onClick={(e) => {
+                if (disabled) return;
+                if (multiple || e.shiftKey || e.ctrlKey || e.metaKey) {
+                  select([]);
+                  return;
+                }
                 const r = e.currentTarget.getBoundingClientRect();
                 const p = top - Math.floor((e.clientY - r.top) / 24),
                   at = ((e.clientX - r.left) / r.width) * beats;
@@ -219,7 +499,7 @@ export default function PianoRoll({
                   <button
                     key={n.id}
                     className={
-                      'midi-note ' + (selected === n.id ? 'chosen' : '')
+                      'midi-note ' + (selected.includes(n.id) ? 'chosen' : '')
                     }
                     style={{
                       left: (n.start / beats) * 100 + '%',
@@ -229,8 +509,16 @@ export default function PianoRoll({
                     }}
                     onClick={(e) => {
                       e.stopPropagation();
-                      setSelected(n.id);
+                      if (disabled) return;
+                      select(
+                        multiple || e.shiftKey || e.ctrlKey || e.metaKey
+                          ? selected.includes(n.id)
+                            ? selected.filter((id) => id !== n.id)
+                            : [...selected, n.id]
+                          : [n.id],
+                      );
                     }}
+                    aria-pressed={selected.includes(n.id)}
                     aria-label={noteName(n.pitch) + ' at beat ' + (n.start + 1)}
                   >
                     {noteName(n.pitch)}
@@ -239,98 +527,91 @@ export default function PianoRoll({
             </div>
           </div>
         </div>
-        <div className="piano-tools">
-          <Pick
-            label="Pitch"
-            value={String(focus?.pitch ?? pitch)}
-            onChange={(v) => (focus ? edit({ pitch: +v }) : setPitch(v))}
-            options={Array.from({ length: 128 }, (_, i) => ({
-              value: String(i),
-              label: noteName(i),
-            }))}
-          />
-          <label className="field">
-            <span>Start beat (from 1)</span>
-            <input
-              type="number"
-              min={1}
-              max={257}
-              step={Number(grid)}
-              value={(focus?.start ?? start) + 1}
-              onChange={(e) =>
-                focus
-                  ? edit({
-                      start: Math.min(256, Math.max(0, +e.target.value - 1)),
-                    })
-                  : setStart(Math.min(256, Math.max(0, +e.target.value - 1)))
-              }
+        {selected.length < 2 && (
+          <div className="piano-tools">
+            <Pick
+              label="Pitch"
+              value={String(focus?.pitch ?? pitch)}
+              onChange={(v) => (focus ? edit({ pitch: +v }) : setPitch(v))}
+              options={Array.from({ length: 128 }, (_, i) => ({
+                value: String(i),
+                label: noteName(i),
+              }))}
             />
-          </label>
-          {focus ? (
-            <>
-              <label className="field">
-                <span>Length in beats</span>
-                <input
-                  type="number"
-                  min={0.01}
-                  max={32}
-                  step={0.01}
-                  value={focus.length}
-                  onChange={(e) =>
-                    edit({
-                      length: Math.min(32, Math.max(0.01, +e.target.value)),
-                    })
-                  }
-                />
-              </label>
-              <Range
-                label={'Velocity · ' + Math.round(focus.velocity * 100) + '%'}
-                value={focus.velocity}
-                min={0.05}
-                max={1}
-                onChange={(v) => edit({ velocity: v })}
+            <label className="field">
+              <span>Start beat (from 1)</span>
+              <input
+                type="number"
+                min={1}
+                max={257}
+                step={Number(grid)}
+                value={(focus?.start ?? start) + 1}
+                onChange={(e) =>
+                  focus
+                    ? edit({
+                        start: Math.min(256, Math.max(0, +e.target.value - 1)),
+                      })
+                    : setStart(Math.min(256, Math.max(0, +e.target.value - 1)))
+                }
               />
+            </label>
+            {focus ? (
+              <>
+                <label className="field">
+                  <span>Length in beats</span>
+                  <input
+                    type="number"
+                    min={0.01}
+                    max={32}
+                    step={0.01}
+                    value={focus.length}
+                    onChange={(e) =>
+                      edit({
+                        length: Math.min(32, Math.max(0.01, +e.target.value)),
+                      })
+                    }
+                  />
+                </label>
+                <Range
+                  label={'Velocity · ' + Math.round(focus.velocity * 100) + '%'}
+                  value={focus.velocity}
+                  min={0.05}
+                  max={1}
+                  onChange={(v) => edit({ velocity: v })}
+                />
+                <button
+                  className="button secondary"
+                  onClick={() => {
+                    apply({ kind: 'delete' });
+                  }}
+                >
+                  <Trash2 size={15} /> Delete note
+                </button>
+              </>
+            ) : (
               <button
-                className="button secondary"
-                onClick={() => {
-                  onChange({
-                    notes: notes.filter((n) => n.id !== selected),
-                    peaks: undefined,
-                    duration: undefined,
-                  });
-                  setSelected('');
-                }}
+                className="button primary"
+                onClick={() => add(+pitch, start)}
               >
-                <Trash2 size={15} /> Delete note
+                <Plus size={15} /> Add note
               </button>
-            </>
-          ) : (
+            )}
             <button
-              className="button primary"
-              onClick={() => add(+pitch, start)}
+              className="button secondary"
+              onClick={() => {
+                apply(
+                  { kind: 'quantize', grid: Number(grid) },
+                  notes.map((n) => n.id),
+                );
+              }}
             >
-              <Plus size={15} /> Add note
+              Quantize all
             </button>
-          )}
-          <button
-            className="button secondary"
-            onClick={() => {
-              onChange({
-                notes: notes.map((n) => ({
-                  ...n,
-                  start: Math.round(n.start / Number(grid)) * Number(grid),
-                })),
-                peaks: undefined,
-                duration: undefined,
-              });
-            }}
-          >
-            Quantize all
-          </button>
-          <button className="button secondary" onClick={() => setSelected('')}>
-            Deselect note
-          </button>
-        </div>
+            <button className="button secondary" onClick={() => select([])}>
+              Deselect note
+            </button>
+          </div>
+        )}
         <p className="small-note">
           {notes.length} notes · Showing {noteName(bottom)}–{noteName(top)} ·{' '}
           {notes.filter((n) => n.pitch < bottom || n.pitch > top).length} notes

@@ -418,3 +418,15 @@
 .midi-import-dialog details li {
   margin-bottom: 8px;
 }
+.note-selection { border: 1px solid #405632; background: #172411; border-radius: 8px; padding: 16px; margin-bottom: 18px; }
+.note-selection .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.note-selection .button { min-height: 40px; font-size: 12px; }
+.note-selection [aria-pressed=true] { background: #c2f65a; color: #172411; }
+.note-selection p { line-height: 1.6; }
+.note-selection [role=status] { color: #d4f4aa; font-weight: 600; }
+.note-selection [role=alert] { color: #ffbcac; }
+.note-bulk-tools { border-top: 1px solid #405632; margin-top: 14px; padding-top: 14px; }
+.piano-editor:focus-visible { outline: 2px solid #c2f65a; outline-offset: 3px; }
+@media(max-width:600px) { .note-selection { padding: 12px; } .note-selection .actions .button { flex: 1 1 130px; } .note-bulk-tools .piano-tools .field { min-width: 150px; flex-basis: 100%; } }
+.note-edit-help, .note-edit-properties { margin-top: 10px; font-size: 12px; line-height: 1.7; }
+.note-edit-help summary, .note-edit-properties summary { cursor: pointer; color: #bfd8aa; padding: 4px 0; }

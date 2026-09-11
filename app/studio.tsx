@@ -44,6 +44,7 @@ import RecordTake from './record-take';
 import RecordMidi from './record-midi';
 import ImportMidi from './import-midi';
 import { appendMidi } from '@/lib/midi-import';
+import { applyNotePatch } from '@/lib/note-edit';
 import { keepMidi, midiPlan } from '@/lib/midi-notes';
 import type { RestoredBank } from '@/lib/take-bank';
 import type { RecordedTake } from '@/lib/recording';
@@ -405,7 +406,7 @@ export default function Studio({
     gesturing,
   ]);
   function undo(redo = false) {
-    if (playing || recording || busy || gesturing) return;
+    if (!editAllowed.current || structuralLocked) return;
     const source = redo ? future : past,
       target = redo ? past : future;
     if (!source.current.length) return;
@@ -1155,14 +1156,16 @@ export default function Studio({
             <div className="actions">
               <button
                 className="button secondary"
-                disabled={!past.current.length || structuralLocked}
+                disabled={!canEdit || !past.current.length || structuralLocked}
                 onClick={() => undo()}
               >
                 Undo
               </button>
               <button
                 className="button secondary"
-                disabled={!future.current.length || structuralLocked}
+                disabled={
+                  !canEdit || !future.current.length || structuralLocked
+                }
                 onClick={() => undo(true)}
               >
                 Redo
@@ -1599,6 +1602,7 @@ export default function Studio({
             />
           ) : tab === 'Piano roll' ? (
             <PianoRoll
+              key={focus?.id || 'empty-instrument'}
               track={focus}
               bpm={data.bpm}
               disabled={!canEdit || structuralLocked}
@@ -1633,8 +1637,11 @@ export default function Studio({
               }}
               onAdd={addInstrument}
               onChange={(p) => {
-                if (editAllowed.current && !structuralLocked && focus)
-                  patch(focus.id, p);
+                if (!editAllowed.current || structuralLocked || !focus)
+                  throw Error(
+                    'Editing is unavailable. Stop playback or recording and check your project access.',
+                  );
+                mutate((d) => applyNotePatch(d, data.bpm, focus, p));
               }}
             />
           ) : tab === 'Automation' ? (
