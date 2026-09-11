@@ -41,6 +41,8 @@ import { useProjectSync } from './use-project-sync';
 import ConflictValues from './conflict-values';
 import ExportAudio from './export-audio';
 import RecordTake from './record-take';
+import RecordMidi from './record-midi';
+import { keepMidi, midiPlan } from '@/lib/midi-notes';
 import type { RestoredBank } from '@/lib/take-bank';
 import type { RecordedTake } from '@/lib/recording';
 import {
@@ -158,7 +160,12 @@ export default function Studio({
   const playback = useRef<any>(null),
     input = useRef<HTMLInputElement>(null),
     alive = useRef(true);
-  const recording = !!recordSnapshot;
+  const [midiSnapshot, setMidiSnapshot] = useState<{
+    data: Arrangement;
+    target: MixerTrack;
+    start: number;
+  } | null>(null);
+  const recording = !!recordSnapshot || !!midiSnapshot;
   const seedJob = useRef<AbortController | null>(null);
   const projectIdRef = useRef(id);
   projectIdRef.current = id;
@@ -804,6 +811,34 @@ export default function Studio({
   return (
     <>
       {recordDialog}
+      {midiSnapshot && (
+        <RecordMidi
+          data={midiSnapshot.data}
+          target={midiSnapshot.target}
+          start={midiSnapshot.start}
+          canEdit={canEdit && !sync.accessEnded}
+          output={roomAudio?.output}
+          onClose={() => setMidiSnapshot(null)}
+          onKeep={(notes) => {
+            if (!alive.current || !editAllowed.current || sync.accessEnded)
+              throw Error(
+                'Editing access ended. Download your MIDI take to keep a copy.',
+              );
+            const next = keepMidi(
+              tracksRef.current,
+              midiSnapshot.data,
+              midiSnapshot.target,
+              notes,
+            );
+            mutate(() => next);
+            setSelected(midiSnapshot.target.id);
+            setMidiSnapshot(null);
+            notify(
+              'MIDI notes added. Save the project to keep this performance.',
+            );
+          }}
+        />
+      )}
       <Dialog open={library} onOpenChange={setLibrary}>
         <DialogContent className="form-dialog">
           <DialogTitle>Add a beat to this room project</DialogTitle>
@@ -1512,8 +1547,41 @@ export default function Studio({
             <PianoRoll
               track={focus}
               bpm={data.bpm}
+              disabled={!canEdit || structuralLocked}
+              onRecord={() => {
+                if (!editAllowed.current || structuralLocked || !focus?.notes)
+                  return;
+                const start = Math.max(
+                  0,
+                  ((position - focus.offset) * data.bpm) / 60,
+                );
+                try {
+                  midiPlan(
+                    focus,
+                    data.bpm,
+                    start,
+                    Math.min(
+                      8,
+                      256 - start,
+                      ((300 - focus.offset) * data.bpm) / 60 - start,
+                    ),
+                  );
+                  setMidiSnapshot(
+                    structuredClone({ data, target: focus, start }),
+                  );
+                } catch (e) {
+                  notify(
+                    e instanceof Error
+                      ? e.message
+                      : 'Select an available instrument.',
+                  );
+                }
+              }}
               onAdd={addInstrument}
-              onChange={(p) => focus && patch(focus.id, p)}
+              onChange={(p) => {
+                if (editAllowed.current && !structuralLocked && focus)
+                  patch(focus.id, p);
+              }}
             />
           ) : tab === 'Automation' ? (
             <AutomationEditor

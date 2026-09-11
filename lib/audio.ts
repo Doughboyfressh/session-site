@@ -973,7 +973,11 @@ export function midiFile(notes: Note[], bpm: number) {
     events.push(
       {
         tick: Math.round(n.start * 480),
-        bytes: [0x90, n.pitch, Math.round(n.velocity * 126) + 1],
+        bytes: [
+          0x90,
+          n.pitch,
+          Math.max(1, Math.min(127, Math.round(n.velocity * 127))),
+        ],
       },
       {
         tick: Math.round((n.start + n.length) * 480),
