@@ -17,6 +17,42 @@ export const profiles = sqliteTable('profiles', {
   avatar: text(),
   created: integer().notNull(),
 });
+export const takeBanks = sqliteTable(
+  'take_banks',
+  {
+    id: text().primaryKey(),
+    owner: text().notNull(),
+    project: text().notNull(),
+    title: text().notNull(),
+    data: text().notNull(),
+    revision: integer().notNull(),
+    updated: integer().notNull(),
+    lastSaveId: text().notNull(),
+    deletedAt: integer(),
+  },
+  (t) => [index('idx_take_banks_owner').on(t.owner)],
+);
+export const takeBankFiles = sqliteTable(
+  'take_bank_files',
+  {
+    bank: text().notNull(),
+    take: text().notNull(),
+    owner: text().notNull(),
+    project: text().notNull(),
+    file: text().notNull(),
+    hash: text().notNull(),
+    size: integer().notNull(),
+    frames: integer().notNull(),
+    sampleRate: integer().notNull(),
+    depth: integer().notNull(),
+    created: integer().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.bank, t.take] }),
+    uniqueIndex('idx_take_bank_files_file').on(t.file),
+    index('idx_take_bank_files_owner').on(t.owner),
+  ],
+);
 export const files = sqliteTable(
   'files',
   {

@@ -56,6 +56,9 @@ import Studio from './studio';
 import Room from './room';
 import { useDraftRecovery } from './use-draft-recovery';
 import RecoveryPanel from './recovery-panel';
+import SavedTakesPanel from './saved-takes-panel';
+import { loadBank } from './take-bank-client';
+import { bankProject } from '@/lib/take-bank';
 import { recoveredProject, type RecoveryDraft } from '@/lib/draft-recovery';
 import { creationHash } from '@/lib/project-creation';
 const empty = {
@@ -111,6 +114,7 @@ export default function SessionApp({
     [studioKey, setStudioKey] = useState(0);
   const recovery = useDraftRecovery(user?.id);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [takesOpen, setTakesOpen] = useState(false);
   const studioWorkspaceBusy = useRef(false);
   const workspaceRequest = useRef(0);
   const playback = useRef<any>(null),
@@ -266,6 +270,42 @@ export default function SessionApp({
     notify(
       'Working copy recovered. Review any newer collaborator changes, then save when ready.',
     );
+  }
+  async function restoreTakes(id: string, signal: AbortSignal) {
+    if (draft.current.dirty && !draft.current.id)
+      throw new Error(
+        'Save your current new project in the studio before opening saved takes. Its unsaved arrangement is still here.',
+      );
+    const request = ++workspaceRequest.current;
+    const check = () => {
+      signal.throwIfAborted();
+      if (request !== workspaceRequest.current)
+        throw new Error(
+          'The workspace changed. Reopen Saved takes to continue.',
+        );
+    };
+    const bank = await loadBank(id, signal);
+    check();
+    let project: any;
+    if (bank.data.projectId) {
+      project = await action(
+        { action: 'projectRead', id: bank.data.projectId },
+        { signal },
+      );
+      if (!project.canEdit)
+        throw new Error(
+          'Project editing access ended. Your bank is kept private.',
+        );
+    }
+    check();
+    draft.current = bankProject(
+      bank,
+      project,
+      roomDrafts.current.get(bank.data.projectId),
+    );
+    setStudioKey((k) => k + 1);
+    appendMode.current = false;
+    go('Studio');
   }
   useEffect(() => {
     if (init.current) return;
@@ -996,6 +1036,13 @@ export default function SessionApp({
                   >
                     Browser recovery
                   </button>
+                  <button
+                    className="button secondary"
+                    disabled={!user}
+                    onClick={() => setTakesOpen(true)}
+                  >
+                    Saved takes
+                  </button>
                   <button className="button primary" onClick={blankProject}>
                     <Plus size={16} /> New project
                   </button>
@@ -1460,6 +1507,12 @@ export default function SessionApp({
         onClose={() => setRecoveryOpen(false)}
         recovery={recovery}
         onRecover={restoreDraft}
+      />
+      <SavedTakesPanel
+        key={user?.id || 'signed-out'}
+        open={takesOpen && !!user}
+        onClose={() => setTakesOpen(false)}
+        onOpen={restoreTakes}
       />
     </SidebarProvider>
   );

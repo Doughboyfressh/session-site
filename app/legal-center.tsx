@@ -255,8 +255,8 @@ export default function LegalCenter({
           <h2>Your files and account data</h2>
           <p>
             Export your profile, listings, project arrangements, saved versions,
-            and account activity. The export contains file details; download
-            audio originals separately.
+            private take-bank details, and account activity. The export contains
+            file details; download audio originals separately.
           </p>
           {user ? (
             <>
@@ -297,6 +297,12 @@ export default function LegalCenter({
                       </a>
                       <button
                         className="icon-button danger-text"
+                        disabled={f.purpose === 'take'}
+                        title={
+                          f.purpose === 'take'
+                            ? 'Delete this bank from My projects → Saved takes'
+                            : undefined
+                        }
                         aria-label={'Permanently erase ' + f.name}
                         onClick={() => {
                           setErasing(f);

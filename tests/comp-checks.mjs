@@ -1,9 +1,11 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
 import assert from 'node:assert/strict';
 const modules = new Map();
 function load(file) {
+  file = path.resolve(file);
   if (modules.has(file)) return modules.get(file);
   const exports = {};
   modules.set(file, exports);
@@ -16,7 +18,7 @@ function load(file) {
     }).outputText,
     {
       exports,
-      require: () => load('lib/audio-files.ts'),
+      require: (id) => load(path.resolve(path.dirname(file), id + '.ts')),
       Blob,
       Float32Array,
       Uint8Array,
@@ -404,6 +406,11 @@ check(
   'Replacement changed mixer/timing settings',
 );
 await rejects(() => checkPunchTarget({ ...arrangement, tracks: [] }, target));
+checkPunchTarget(
+  { ...arrangement, tracks: [{ ...target, peaks: [0.2], duration: 1 }] },
+  { ...target, peaks: [0.8] },
+);
+check(true, 'Derived waveform data blocked a valid reopened target');
 await rejects(() =>
   checkPunchTarget(
     { ...arrangement, tracks: [{ ...target, volume: 1 }] },

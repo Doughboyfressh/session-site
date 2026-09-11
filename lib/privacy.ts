@@ -29,6 +29,10 @@ export async function privacyAction(b: any, uid: string) {
       tracks: 'SELECT * FROM tracks WHERE owner=?',
       projects: 'SELECT * FROM projects WHERE owner=?',
       versions: 'SELECT * FROM project_versions WHERE owner=?',
+      savedTakeBanks:
+        'SELECT id,project,title,data,revision,updated,deletedAt FROM take_banks WHERE owner=?',
+      savedTakeFiles:
+        'SELECT bank,take,project,file,size,frames,sampleRate,depth,created FROM take_bank_files WHERE owner=?',
       firstSaveReceipts:
         'SELECT creationKey,project,revision,created,deletedAt FROM project_creations WHERE owner=?',
       saved: 'SELECT * FROM saved WHERE user=?',
@@ -51,6 +55,11 @@ export async function privacyAction(b: any, uid: string) {
       uid,
     );
     if (!file) fail('File unavailable.', 404);
+    if (file.purpose === 'take')
+      fail(
+        'Delete this take bank from My projects → Saved takes to erase its original recordings together.',
+        409,
+      );
     await bucket().delete(file.id);
     await database().batch([
       database()

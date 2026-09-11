@@ -77,6 +77,16 @@ export async function readProject(id: string, user: string) {
   };
 }
 export async function fileAccess(id: string, user: string) {
+  const take = await one('SELECT purpose FROM files WHERE id=?', id);
+  if (take?.purpose === 'take')
+    return one(
+      `SELECT f.* FROM files f JOIN take_bank_files tf ON tf.file=f.id WHERE f.id=? AND f.owner=? AND tf.owner=? AND NOT EXISTS(SELECT 1 FROM take_banks b WHERE b.id=tf.bank AND b.deletedAt IS NOT NULL) AND (tf.project='' OR EXISTS(SELECT 1 FROM projects p WHERE p.id=tf.project AND ${projectEditCondition('p')}))`,
+      id,
+      user,
+      user,
+      user,
+      user,
+    );
   return one(
     "SELECT f.* FROM files f WHERE f.id=? AND (f.owner=? OR EXISTS (SELECT 1 FROM tracks t WHERE t.fileId=f.id AND t.visibility='public') OR EXISTS (SELECT 1 FROM profiles p WHERE p.avatar=f.id AND (p.visibility='public' OR p.id=? OR EXISTS (SELECT 1 FROM members self JOIN members other ON self.room=other.room WHERE self.user=? AND other.user=p.id))) OR EXISTS (SELECT 1 FROM project_files pf JOIN projects p ON p.id=pf.project WHERE pf.file=f.id AND (p.owner=? OR EXISTS (SELECT 1 FROM rooms r JOIN members m ON m.room=r.id WHERE r.project=p.id AND m.user=?))))",
     id,

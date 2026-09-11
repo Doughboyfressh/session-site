@@ -144,11 +144,17 @@ The initial service does not sell personal information, share it for cross-conte
 
 ## Cookies, local storage, and tracking choices
 
+The recorder can hold up to eight original takes and a combined vocal (a comp) in the current tab, with four minutes of original audio and a 48 MB local file limit. Unsaved recordings and comp edit choices are held in memory, not in browser arrangement recovery. Save takes & comp uploads the originals and comp metadata to a private bank in your account. You can reopen banks from My projects → Saved takes. Project-associated banks require current editing access to reopen or download. Saving a bank does not share its originals with collaborators. Up to 20 banks can be stored within the account storage limit. Previous uploads, including discarded takes and interrupted uploads, remain in storage until the bank is deleted; a bank holds at most 64 uploaded originals and 240 MB in total, while its current comp uses at most eight takes, four minutes and 48 MB. Deleting a bank erases its uploaded originals and comp choices but keeps finished comps already added to projects. Bank deletion remains available to the bank owner if project editing access ends. Small deletion markers are retained to prevent old saves from recreating deleted banks. Download or save originals you want to keep before closing the recorder. Adding a comp uploads the combined WAV only, using the same file and project sharing controls as other recordings; it does not upload the original takes or comp choices. Closing, reloading, or losing the tab can discard these temporary recordings.
+
+Browser arrangement recovery is on by default for signed-in members on each browser. The local database, session-arrangement-recovery-v1, stores account-scoped project titles, musical arrangements, source-audio references, original saved-version information, timestamps, recovery preferences, and deletion markers. It does not store audio files, camera or microphone streams, or recording takes waiting to be added. Up to 20 readable arrangement copies per account remain on that browser until the relevant copy is saved or deleted, recovery is turned off, or browser storage is cleared. Signing out does not erase them. Recovery preferences and deletion markers remain until browser storage is cleared. These copies are not encrypted by SESSION and may be accessible to someone with access to the same browser. Review or delete copies, remove damaged entries, or turn recovery off in My projects → Browser recovery. Browser cleanup, private-window closure, quota limits, or a crash before a write completes can prevent recovery. Reopening a shared-project draft requires current editing access; recovery does not automatically publish or save changes to the shared project.
+
 We use [COOKIES AND LOCAL STORAGE: NAMES AND FUNCTIONS] for sign-in, security, and preferences. Storage providers and durations: [PROVIDERS AND DURATIONS]. Browser controls may let you remove or block storage, which may affect sign-in or saved settings.
 
 The initial service does not use advertising trackers or track your activity across unrelated websites for advertising. Third-party collection across websites: [THIRD-PARTY TRACKING DISCLOSURE]. We do not change our practices in response to legacy Do Not Track signals because this cross-site advertising tracking is not part of the service. Where applicable law requires us to honor a recognized opt-out preference signal, including Global Privacy Control, we do so. A general statement about Do Not Track does not replace applicable opt-out obligations.
 
 ## Retention and deletion
+
+To prevent duplicate first saves after an interrupted connection, SESSION keeps a small server record containing your account ID, a random save reference, the project ID, a one-way fingerprint of the submitted arrangement and save choice, the original revision, and creation/deletion times. This record contains no separate audio file or arrangement copy. It remains after project deletion so an old retry cannot recreate that project; a retention limit and broader privacy-request handling remain to be finalized. Your account JSON export includes the reference, project, revision and timestamps. Browser recovery also keeps the pending save reference and original submitted arrangement until the first save is confirmed or the local copy is removed.
 
 We retain information for the purposes described here, considering account activity, your choices, legal obligations, security needs, and disputes. The retention schedule is set out below. A documented legal hold or other legally permitted exception can require longer retention; retained information is restricted to that purpose.
 
@@ -161,7 +167,7 @@ We retain information for the purposes described here, considering account activ
 | Technical/security logs | [PERIOD], with a documented extension only for a specific incident or legal need |
 | Support, rights reports, and appeals | [PERIOD AFTER RESOLUTION] or an applicable legal obligation, with restricted access |
 | Acceptance and permission evidence | [PERIOD AND JUSTIFICATION], retaining only what is needed to establish applicable terms/permissions |
-| Backups and recovery copies | [MAXIMUM PERIOD]; any retained recovery copies are subject to [ACCESS AND RESTORATION SAFEGUARDS] |
+| Server backups and recovery copies | [MAXIMUM PERIOD]; any retained recovery copies are subject to [ACCESS AND RESTORATION SAFEGUARDS] |
 | Existing collaborator working versions | Subject to applicable permissions, privacy law, rights decisions, and [PROJECT RETENTION PERIOD / CRITERIA]; links to an explicitly erased source upload are removed |
 
 Account deletion has not yet been implemented. The file-erasure control does not remove your profile, all messages, or unrelated project records. Your name, contributions, or messages may remain in another member's conversation or project where a lawful reason supports retention. Broader privacy requests require separate handling; the designated contact will be [PRIVACY EMAIL]. A collaborator's continued permission is not an automatic exception to a statutory deletion right.
@@ -193,6 +199,7 @@ People under 18 may not create accounts. If you believe we have collected a chil
 We post the effective date and notify members of material changes through the service or an available account contact. We obtain additional agreement where required before materially changing the use of information already collected. Contact [PRIVACY EMAIL] or [POSTAL ADDRESS] with questions or requests. For an accessible format of this notice, use [ACCESSIBILITY EMAIL].
 
 ---
+
 
 # Copyright, notices, and repeat infringement — draft
 

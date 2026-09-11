@@ -1,10 +1,17 @@
 import type { Arrangement, MixerTrack } from './audio';
 import type { RecordedTake } from './recording';
 import { encodeWave, type Samples } from './audio-files';
+import { sameProject } from './project-merge';
 
 export function checkPunchTarget(data: Arrangement, target: MixerTrack) {
   const current = data.tracks.find((t) => t.id === target.id);
-  if (!current || JSON.stringify(current) !== JSON.stringify(target))
+  if (
+    !current ||
+    !sameProject(
+      { title: '', data: { bpm: 92, tracks: [current] } },
+      { title: '', data: { bpm: 92, tracks: [target] } },
+    )
+  )
     throw new Error(
       'This clip changed while the punch was being prepared. Your recording is kept; reopen the selected clip to try again.',
     );

@@ -4,6 +4,9 @@ A private development release for artists, producers, and engineers.
 
 ## Studio
 
+- Explicit private take-bank saves retain mono WAV originals and comp sections in D1/R2. Reopen through My projects → Saved takes. Banks are account-private; project-associated originals require current editing access. Existing dirty arrangements are preserved and changed punch targets cannot be overwritten.
+- Each current bank supports eight takes/four minutes/48 MB; at most 20 banks per account. Historical/staged uploads stay within 64 originals/240 MB per bank and the existing 500 MB account limit until bank deletion. Interrupted initial uploads have visible cleanup entries. Deleting a bank erases its originals, keeps separately uploaded finished comps, and retains a minimal tombstone to reject old save retries.
+
 - 32-track arrangements; uploaded audio, starter loops, a 16-step drum sequencer, and piano-roll instruments (keys, bass, pad).
 - Note pitch, timing, length, velocity, quantization, and MIDI export.
 - Live volume, mute/solo, pan, three-band EQ, compression, reverb, delay, and master peak meter.
@@ -30,6 +33,8 @@ Rights & privacy contains full, nonoperative drafts of Terms, Privacy Notice, Co
 Authenticated account JSON export, file listing/download, and explicit permanent file erasure are available. Erasure removes the hosted original and project access links; it cannot recall downloaded/cached copies. Listing deletion is separate. Account deletion and staffed legal/privacy operations remain unfinished. Reports are stored without external notifications. Room events are hidden after 24 hours and pruned on later message activity; closing a room deletes them. This is not a scheduled retention guarantee.
 
 ## Development and validation
+
+Saved-take verification: tests/take-bank-server-checks.mjs uses actual migration 0004, in-memory SQLite, and fake R2 (147 assertions). tests/take-bank-harness.html checks save/retry/reopen audio, recorder controls, dirty project preservation, conflicting saves, and safe close (31 browser assertions). The HTTP stack and real iPhone/Safari persistence still need the final release review. Policy text remains a nonoperative draft pending the operator information promised after development.
 
 Use the committed lockfile. npm run dev runs the local preview; npm run build creates the Worker output. Production identity relies on trusted Sites dispatcher headers. Do not expose the Worker outside that boundary. D1 migrations are append-only; 0000 is preserved and 0001 adds media sessions, revisions/history, rate limits, and signal deduplication.
 

@@ -101,7 +101,7 @@ export async function saveProject(b: any, uid: string, now: number) {
   const files = [
     ...new Set(b.data.tracks.map((t: any) => t.fileId).filter(Boolean)),
   ] as string[];
-  const sources = `NOT EXISTS (SELECT 1 FROM json_each(?) source WHERE NOT EXISTS (SELECT 1 FROM files f WHERE f.id=source.value AND (f.owner=? OR EXISTS (SELECT 1 FROM tracks t WHERE t.fileId=f.id AND t.visibility='public' AND t.permission='collaborate') OR EXISTS (SELECT 1 FROM project_files pf WHERE pf.project=? AND pf.file=f.id))))`;
+  const sources = `NOT EXISTS (SELECT 1 FROM json_each(?) source WHERE NOT EXISTS (SELECT 1 FROM files f WHERE f.id=source.value AND f.purpose='audio' AND (f.owner=? OR EXISTS (SELECT 1 FROM tracks t WHERE t.fileId=f.id AND t.visibility='public' AND t.permission='collaborate') OR EXISTS (SELECT 1 FROM project_files pf WHERE pf.project=? AND pf.file=f.id))))`;
   if (
     !creation &&
     !(await one(

@@ -35,12 +35,19 @@ export async function action(
 export async function upload(
   file: File,
   purpose = 'audio',
-  options: { signal?: AbortSignal; projectId?: string } = {},
+  options: {
+    signal?: AbortSignal;
+    projectId?: string;
+    bankId?: string;
+    takeId?: string;
+  } = {},
 ) {
   const fd = new FormData();
   fd.set('file', file);
   fd.set('purpose', purpose);
   if (options.projectId) fd.set('projectId', options.projectId);
+  if (options.bankId) fd.set('bankId', options.bankId);
+  if (options.takeId) fd.set('takeId', options.takeId);
   const r = await fetch('/api/upload', {
     method: 'POST',
     body: fd,

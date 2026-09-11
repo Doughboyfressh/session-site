@@ -237,10 +237,10 @@ function App() {
         'Success closed bank',
       );
       await click('Done with takes');
-      await wait(() => text().includes('Close and discard local originals?'));
+      await wait(() => text().includes('Close recorder with unsaved changes?'));
       check(
         text().includes(
-          'Original takes and comp edit choices have not been uploaded',
+          'Closing discards unsaved local takes and comp choices',
         ),
         'Close disclosure missing',
       );

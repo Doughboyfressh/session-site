@@ -7,7 +7,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Pick, Confirm } from './helpers';
+import { Pick, Confirm, action } from './helpers';
 import {
   TakeCapture,
   type CaptureHooks,
@@ -29,6 +29,13 @@ import {
   type CompRegion,
 } from '@/lib/take-comp';
 import TakeWorkbench from './take-workbench';
+import type { MixerTrack } from '@/lib/audio';
+import type { RestoredBank } from '@/lib/take-bank';
+import {
+  BankWriter,
+  bankSignature,
+  type BankSnapshot,
+} from './take-bank-client';
 
 function TakePanel({
   inline,
@@ -97,6 +104,11 @@ export default function RecordTake({
   createCapture,
   roomAudio,
   seed,
+  projectId = '',
+  title = 'Untitled session',
+  target,
+  restored,
+  restoreWarning,
 }: {
   data: Arrangement;
   offset: number;
@@ -106,7 +118,16 @@ export default function RecordTake({
   createCapture?: (hooks: CaptureHooks) => TakeCapture;
   roomAudio?: RoomAudio;
   seed?: RecordedTake & { name: string };
+  projectId?: string;
+  title?: string;
+  target?: MixerTrack;
+  restored?: RestoredBank;
+  restoreWarning?: string;
 }) {
+  const writer = useRef<BankWriter | null>(null);
+  if (!writer.current) writer.current = new BankWriter(restored);
+  const [savingBank, setSavingBank] = useState(false),
+    [bankMessage, setBankMessage] = useState('');
   const [phase, setPhase] = useState<CapturePhase>('idle'),
     [level, setLevel] = useState(0),
     [clipped, setClipped] = useState(false),
@@ -120,7 +141,7 @@ export default function RecordTake({
     [error, setError] = useState(''),
     [takes, setTakes] = useState<LocalTake[]>([]),
     [selected, setSelected] = useState(''),
-    [taking, setTaking] = useState(!seed),
+    [taking, setTaking] = useState(!seed && !restored),
     [punch, setPunch] = useState<ReturnType<typeof planPunch> | null>(null),
     [regions, setRegions] = useState<CompRegion[]>([]),
     [past, setPast] = useState<CompRegion[][]>([]),
@@ -155,6 +176,54 @@ export default function RecordTake({
   allowed.current = canEdit;
   plan.current = regions;
   const take = takes.find((t) => t.id === selected) || takes.at(-1);
+  const snapshot = (): BankSnapshot => ({
+    version: 1,
+    title,
+    projectId,
+    backing: data,
+    offset,
+    ...(target ? { target } : {}),
+    takes,
+    regions,
+    selected,
+    applied: added,
+  });
+  const bankSaved =
+    !!takes.length && writer.current.saved === bankSignature(snapshot());
+  async function saveBank() {
+    if (busyRef.current || !allowed.current || !takes.length || !regions.length)
+      return;
+    const controller = new AbortController(),
+      token = ++attempt.current;
+    upload.current = controller;
+    busyRef.current = true;
+    stopPreview();
+    setSavingBank(true);
+    setUploading(true);
+    setError('');
+    setBankMessage('Saving your private takes…');
+    try {
+      await writer.current!.save(snapshot(), controller.signal);
+      if (alive.current && token === attempt.current)
+        setBankMessage(
+          'Takes and comp saved privately. Reopen them from My projects → Saved takes.',
+        );
+    } catch (e) {
+      if (alive.current && token === attempt.current) {
+        setBankMessage('');
+        setError(
+          (e instanceof Error ? e.message : 'Save failed.') +
+            ' Your local takes are still here. Retry Save takes & comp; incomplete uploads can be deleted from Saved takes.',
+        );
+      }
+    } finally {
+      if (alive.current && token === attempt.current) {
+        busyRef.current = false;
+        setSavingBank(false);
+        setUploading(false);
+      }
+    }
+  }
   const { limit: takeLimit, available: hasSpace } = takeBudget(takes, offset);
   function stopPreview() {
     preview.current?.pause();
@@ -186,7 +255,20 @@ export default function RecordTake({
   }
   useEffect(() => {
     alive.current = true;
-    if (seed) {
+    if (restored) {
+      bank.current = restored.originals.map((t) => ({
+        ...t,
+        url: rememberURL(t.blob),
+      }));
+      plan.current = structuredClone(restored.data.regions);
+      setTakes(bank.current);
+      setSelected(restored.data.selected);
+      setRegions(plan.current);
+      takeNumber.current = bank.current.length;
+      setBankMessage(
+        'Saved takes reopened. Review your comp before adding it to the arrangement.',
+      );
+    } else if (seed) {
       const entry: LocalTake = {
         ...seed,
         id: 'original-clip',
@@ -294,7 +376,10 @@ export default function RecordTake({
           context: () =>
             new AudioContext({
               sampleRate:
-                pendingPunch.current?.sampleRate || seed?.sampleRate || 48000,
+                pendingPunch.current?.sampleRate ||
+                bank.current[0]?.sampleRate ||
+                seed?.sampleRate ||
+                48000,
               latencyHint: 'interactive',
             }),
           media: (constraints) =>
@@ -326,6 +411,7 @@ export default function RecordTake({
       busyRef.current = false;
       setPreparing(false);
       setUploading(false);
+      setSavingBank(false);
       setError(
         'Editing access has ended. A completed take can still be downloaded from this tab.',
       );
@@ -380,7 +466,48 @@ export default function RecordTake({
     setSeconds(0);
     setClipped(false);
   }
-  function close() {
+  async function close() {
+    if (busyRef.current) return;
+    if (bankSaved && !active) {
+      const controller = new AbortController(),
+        token = ++attempt.current;
+      upload.current = controller;
+      busyRef.current = true;
+      setUploading(true);
+      setBankMessage('Checking your saved bank before closing…');
+      try {
+        const latest = await action(
+          { action: 'takeBankRead', id: writer.current!.id },
+          { signal: controller.signal },
+        );
+        if (
+          !alive.current ||
+          controller.signal.aborted ||
+          token !== attempt.current
+        )
+          return;
+        if (latest.revision !== writer.current!.revision)
+          throw new Error('This bank changed on another tab or device.');
+        onClose();
+      } catch (e) {
+        if (alive.current && token === attempt.current) {
+          setBankMessage('');
+          setError(
+            (e instanceof Error
+              ? e.message
+              : 'The saved bank could not be checked.') +
+              ' Your local originals are still here. Download them before closing if needed.',
+          );
+          setConfirmClose(true);
+        }
+      } finally {
+        if (alive.current && token === attempt.current) {
+          busyRef.current = false;
+          setUploading(false);
+        }
+      }
+      return;
+    }
     if (bank.current.length) {
       setConfirmClose(true);
       return;
@@ -445,6 +572,8 @@ export default function RecordTake({
     busyRef.current = false;
     setPreparing(false);
     setUploading(false);
+    setSavingBank(false);
+    setBankMessage('');
     setError(
       'Upload cancelled. Your local take is still available. An upload already accepted by the server may remain in your files.',
     );
@@ -556,6 +685,11 @@ export default function RecordTake({
             Editing {seed.name}. Apply the finished comp to replace this clip;
             its original file and mixer settings are kept. Studio Undo can
             restore the original after closing the recorder.
+          </p>
+        )}
+        {restoreWarning && (
+          <p className="record-error" role="alert">
+            {restoreWarning}
           </p>
         )}
         {taking && (
@@ -786,12 +920,20 @@ export default function RecordTake({
           />
         )}
         <p className="record-note">
-          Up to 8 takes and 4 minutes of recorded audio are kept in this
-          recorder only. Browser recovery does not include these takes or your
-          comp edits. Download any originals you want to keep before closing.
-          Adding a comp uploads only the finished vocal; save the project to
-          share it with authorized collaborators.
+          Up to 8 takes and 4 minutes of recorded audio fit in a bank. Choose
+          Save takes &amp; comp to keep originals and comp choices privately in
+          your account. Unsaved changes are lost when this recorder closes.
+          Adding a comp uploads the finished vocal; save the project to share it
+          with authorized collaborators.
         </p>
+        {bankMessage && (
+          <p className="record-progress" role="status">
+            {bankMessage}
+            {!bankSaved && !savingBank && writer.current.revision > 0
+              ? ' Current changes have not been saved.'
+              : ''}
+          </p>
+        )}
         {uploadAttempted && !added && (
           <p className="record-note">
             A previous upload attempt may have saved the finished vocal in your
@@ -800,7 +942,7 @@ export default function RecordTake({
         )}
         {added && (
           <p className="record-progress" role="status">
-            Comp added. Your original takes are still here to download. Close
+            Comp added. Save your take bank or download your originals. Close
             the recorder, then save your project.
           </p>
         )}
@@ -812,8 +954,29 @@ export default function RecordTake({
         <div className="actions record-actions">
           {!taking && take ? (
             <>
+              <button
+                className="button secondary"
+                disabled={
+                  uploading ||
+                  preparing ||
+                  !canEdit ||
+                  !regions.length ||
+                  bankSaved
+                }
+                onClick={() => void saveBank()}
+              >
+                {savingBank
+                  ? 'Saving takes…'
+                  : bankSaved
+                    ? 'Takes & comp saved'
+                    : 'Save takes & comp'}
+              </button>
               {added ? (
-                <button className="button primary" onClick={close}>
+                <button
+                  className="button primary"
+                  disabled={uploading || preparing}
+                  onClick={close}
+                >
                   Done with takes
                 </button>
               ) : (
@@ -845,7 +1008,7 @@ export default function RecordTake({
                     }
                     onClick={() => void keep()}
                   >
-                    {uploading
+                    {uploading && !savingBank
                       ? preparing
                         ? 'Preparing comp…'
                         : 'Adding comp…'
@@ -968,11 +1131,9 @@ export default function RecordTake({
         open={confirmClose}
         onClose={() => setConfirmClose(false)}
         onConfirm={onClose}
-        title="Close and discard local originals?"
+        title="Close recorder with unsaved changes?"
         description={
-          added
-            ? 'The finished comp is in your arrangement. Original takes and comp edit choices have not been uploaded. Download any originals you need before closing.'
-            : 'Download your takes or add the finished comp before leaving. Closing discards all local takes and comp edit choices. An earlier upload attempt may have saved a finished vocal in your files.'
+          'Choose Save takes & comp or download your originals before closing. Closing discards unsaved local takes and comp choices. Your last saved bank and any finished comp already added to the arrangement are kept.'
         }
         confirmLabel="Close recorder"
       />

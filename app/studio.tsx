@@ -41,6 +41,7 @@ import { useProjectSync } from './use-project-sync';
 import ConflictValues from './conflict-values';
 import ExportAudio from './export-audio';
 import RecordTake from './record-take';
+import type { RestoredBank } from '@/lib/take-bank';
 import type { RecordedTake } from '@/lib/recording';
 import {
   punchSeed,
@@ -117,7 +118,22 @@ export default function Studio({
       projectId: string;
       target?: MixerTrack;
       seed?: RecordedTake & { name: string };
-    } | null>(null),
+      restored?: RestoredBank;
+      restoreWarning?: string;
+    } | null>(() => {
+      const bank = initial?.restoreBank as RestoredBank | undefined;
+      return bank
+        ? {
+            data: bank.data.backing,
+            offset: bank.data.offset,
+            projectId: bank.data.projectId,
+            target: bank.data.target,
+            seed: bank.originals.find((t) => t.id === 'original-clip'),
+            restored: bank,
+            restoreWarning: initial.restoreWarning,
+          }
+        : null;
+    }),
     [pattern, setPattern] = useState(defaultPattern.map((r) => [...r])),
     [tab, setTab] = useState('Arrangement'),
     [remove, setRemove] = useState(''),
@@ -774,7 +790,12 @@ export default function Studio({
       data={recordSnapshot.data}
       offset={recordSnapshot.offset}
       seed={recordSnapshot.seed}
-      canEdit={canEdit && !sync.accessEnded}
+      projectId={recordSnapshot.projectId}
+      title={recordSnapshot.restored?.data.title || title}
+      target={recordSnapshot.target}
+      restored={recordSnapshot.restored}
+      restoreWarning={recordSnapshot.restoreWarning}
+      canEdit={canEdit && !sync.accessEnded && !recordSnapshot.restoreWarning}
       onKeep={keepTake}
       onClose={() => setRecordSnapshot(null)}
       roomAudio={roomAudio}
