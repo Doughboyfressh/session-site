@@ -430,3 +430,12 @@
 @media(max-width:600px) { .note-selection { padding: 12px; } .note-selection .actions .button { flex: 1 1 130px; } .note-bulk-tools .piano-tools .field { min-width: 150px; flex-basis: 100%; } }
 .note-edit-help, .note-edit-properties { margin-top: 10px; font-size: 12px; line-height: 1.7; }
 .note-edit-help summary, .note-edit-properties summary { cursor: pointer; color: #bfd8aa; padding: 4px 0; }
+
+/* Direct piano-roll editing */
+.piano-grid .midi-note{cursor:grab;touch-action:none;user-select:none;padding-right:10px}
+.piano-grid.note-gesturing .midi-note{cursor:grabbing}
+.piano-grid.box-mode{touch-action:none}
+.note-resize-handle{position:absolute;right:0;top:0;height:100%;width:9px;max-width:35%;border-left:1px solid #365217;background:#d8ff9255;cursor:ew-resize;touch-action:none}
+.note-selection-box{position:absolute;border:1px solid #d5ff90;background:#c2f65a25;pointer-events:none;z-index:2}
+.piano-editor .note-gesture-status{min-height:38px;margin:12px 0 8px;color:#bedb9d;line-height:1.5}
+.piano-grid.note-gesturing{user-select:none}

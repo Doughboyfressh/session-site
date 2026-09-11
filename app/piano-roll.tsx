@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { useNoteGesture } from './use-note-gesture';
 import {
   checkNotes,
   editNotes,
@@ -26,6 +27,7 @@ export default function PianoRoll({
   onChange,
   onAdd,
   onRecord,
+  onGestureActivity,
   disabled = false,
 }: {
   track?: MixerTrack;
@@ -33,6 +35,7 @@ export default function PianoRoll({
   onChange: (p: Partial<MixerTrack>) => void;
   onAdd: () => void;
   onRecord?: () => void;
+  onGestureActivity?: (active: boolean) => void;
   disabled?: boolean;
 }) {
   const [selection, setSelection] = useState<{ track: string; ids: string[] }>({
@@ -40,6 +43,7 @@ export default function PianoRoll({
       ids: [],
     }),
     [multiple, setMultiple] = useState(false),
+    [boxMode, setBoxMode] = useState(false),
     [error, setError] = useState(''),
     [groupLength, setGroupLength] = useState('1'),
     [groupVelocity, setGroupVelocity] = useState('75'),
@@ -48,23 +52,9 @@ export default function PianoRoll({
     [start, setStart] = useState(0),
     [length, setLength] = useState('0.5'),
     [keyboardRange, setKeyboardRange] = useState('48');
-  if (!track?.notes)
-    return (
-      <div className="empty-state">
-        <Music2 size={40} />
-        <h2>Write the melody you hear.</h2>
-        <p>
-          Add an instrument track, then place notes on the piano roll. Notes
-          follow your project tempo.
-        </p>
-        <button className="button primary" onClick={onAdd} disabled={disabled}>
-          <Plus size={17} /> Add instrument track
-        </button>
-      </div>
-    );
-  const notes = track.notes,
+  const notes = track?.notes || [],
     selected =
-      selection.track === track.id
+      selection.track === track?.id
         ? selection.ids.filter((id) => notes.some((n) => n.id === id))
         : [],
     focus =
@@ -73,7 +63,8 @@ export default function PianoRoll({
         : undefined,
     beats = Math.max(
       8,
-      Math.ceil(Math.max(0, ...notes.map((n) => n.start + n.length)) / 4) * 4,
+      Math.ceil(Math.max(0, ...notes.map((n) => n.start + n.length)) / 4) * 4 +
+        4,
     ),
     bottom = Number(keyboardRange),
     top = bottom + 24,
@@ -145,12 +136,52 @@ export default function PianoRoll({
   function edit(p: Partial<Note>) {
     commit(notes.map((n) => (n.id === selected[0] ? { ...n, ...p } : n)));
   }
+  const gesture = useNoteGesture({
+    track,
+    bpm,
+    beats,
+    top,
+    grid: Number(grid),
+    selected,
+    multiple,
+    boxMode,
+    disabled,
+    onSelect: select,
+    onCommit: commit,
+    onError: setError,
+    onActivity: onGestureActivity,
+  });
+  if (!track?.notes)
+    return (
+      <div className="empty-state">
+        <Music2 size={40} />
+        <h2>Write the melody you hear.</h2>
+        <p>
+          Add an instrument track, then place notes on the piano roll. Notes
+          follow your project tempo.
+        </p>
+        <button className="button primary" onClick={onAdd} disabled={disabled}>
+          <Plus size={17} /> Add instrument track
+        </button>
+      </div>
+    );
   return (
     <section
       className="piano-editor"
       tabIndex={0}
       aria-label="Piano roll editor"
+      onPointerDownCapture={gesture.freshPointer}
+      onClickCapture={(e) => {
+        if (gesture.active || gesture.consumeClick(e.detail)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }}
       onKeyDown={(e) => {
+        if (gesture.active) {
+          e.preventDefault();
+          return;
+        }
         const target = e.target as HTMLElement;
         if (
           disabled ||
@@ -210,8 +241,8 @@ export default function PianoRoll({
           <div>
             <h2>{track.name}</h2>
             <p>
-              Click the grid to place a note. Select several notes to shape a
-              chord or melody together.
+              Click the grid to place a note. Drag notes to move them, or drag
+              their right edge to change the length.
             </p>
           </div>
           <div className="actions">
@@ -286,6 +317,13 @@ export default function PianoRoll({
           <div className="actions">
             <button
               className="button secondary"
+              aria-pressed={boxMode}
+              onClick={() => setBoxMode((v) => !v)}
+            >
+              Box select
+            </button>
+            <button
+              className="button secondary"
               aria-pressed={multiple}
               onClick={() => {
                 setMultiple((v) => !v);
@@ -327,6 +365,15 @@ export default function PianoRoll({
               the piano roll focused: arrows move notes; Shift adds an octave or
               moves one beat. Ctrl/⌘A selects all, Ctrl/⌘D repeats, Delete
               removes, and Escape clears the selection.
+            </p>
+            <p>
+              Drag any selected note to move the whole selection. Drag a right
+              edge to lengthen or shorten every selected note by the same
+              amount. Turn on Box select, or Shift-drag empty grid space, to
+              select a phrase. Shift adds to the selection. On touch screens,
+              drag notes to edit; turn off Box select and Select multiple notes
+              to scroll empty grid space. Release to keep an edit; Escape
+              cancels it. Each drag is one Undo step.
             </p>
             <p>
               Moves use the chosen grid. Repeat starts after the selection’s
@@ -440,16 +487,21 @@ export default function PianoRoll({
               </details>
             </div>
           )}
-          {error && <p role="alert">{error}</p>}
         </div>
         <div className="piano-scroll">
-          <div className="piano-ruler">
+          <div
+            className="piano-ruler"
+            style={{ minWidth: Math.max(650, beats * 64 + 56) }}
+          >
             <span />
             {Array.from({ length: beats }, (_, i) => (
               <span key={i}>{i + 1}</span>
             ))}
           </div>
-          <div className="piano-body">
+          <div
+            className="piano-body"
+            style={{ minWidth: Math.max(650, beats * 64 + 56) }}
+          >
             <div className="piano-keys">
               {rows.map((p) => (
                 <button
@@ -477,13 +529,29 @@ export default function PianoRoll({
               ))}
             </div>
             <div
-              className="piano-grid"
+              ref={gesture.gridRef}
+              className={
+                'piano-grid' +
+                (boxMode || multiple ? ' box-mode' : '') +
+                (gesture.active ? ' note-gesturing' : '')
+              }
               style={{
                 backgroundSize: `${100 / (beats / Number(grid))}% 24px`,
               }}
+              onPointerDown={(e) => gesture.begin(e)}
+              onPointerMove={gesture.move}
+              onPointerUp={gesture.end}
+              onPointerCancel={gesture.lost}
+              onLostPointerCapture={gesture.lost}
               onClick={(e) => {
                 if (disabled) return;
-                if (multiple || e.shiftKey || e.ctrlKey || e.metaKey) {
+                if (
+                  boxMode ||
+                  multiple ||
+                  e.shiftKey ||
+                  e.ctrlKey ||
+                  e.metaKey
+                ) {
                   select([]);
                   return;
                 }
@@ -493,13 +561,17 @@ export default function PianoRoll({
                 if (p >= bottom && p <= top) add(p, at);
               }}
             >
-              {notes
+              {(gesture.draft || notes)
                 .filter((n) => n.pitch >= bottom && n.pitch <= top)
                 .map((n) => (
                   <button
                     key={n.id}
+                    data-note-id={n.id}
                     className={
-                      'midi-note ' + (selected.includes(n.id) ? 'chosen' : '')
+                      'midi-note ' +
+                      ((gesture.previewSelection || selected).includes(n.id)
+                        ? 'chosen'
+                        : '')
                     }
                     style={{
                       left: (n.start / beats) * 100 + '%',
@@ -507,6 +579,7 @@ export default function PianoRoll({
                       width: (n.length / beats) * 100 + '%',
                       opacity: 0.5 + n.velocity * 0.5,
                     }}
+                    onPointerDown={(e) => gesture.begin(e, n)}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (disabled) return;
@@ -522,11 +595,35 @@ export default function PianoRoll({
                     aria-label={noteName(n.pitch) + ' at beat ' + (n.start + 1)}
                   >
                     {noteName(n.pitch)}
+                    <span
+                      className="note-resize-handle"
+                      data-note-resize
+                      aria-hidden="true"
+                      title="Drag to resize"
+                    />
                   </button>
                 ))}
+              {gesture.box && (
+                <div
+                  className="note-selection-box"
+                  style={gesture.box}
+                  aria-hidden="true"
+                />
+              )}
             </div>
           </div>
         </div>
+        <p
+          className="note-gesture-status"
+          role="status"
+          aria-label="Note gesture"
+        >
+          {gesture.status ||
+            (boxMode
+              ? 'Drag empty grid space to select notes.'
+              : 'Drag notes to move · Drag right edges to resize')}
+        </p>
+        {error && <p role="alert">{error}</p>}
         {selected.length < 2 && (
           <div className="piano-tools">
             <Pick

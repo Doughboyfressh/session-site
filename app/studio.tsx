@@ -96,6 +96,7 @@ export default function Studio({
   const [zoom, setZoom] = useState(1);
   const [levels, setLevels] = useState<Record<string, number>>({});
   const [gesturing, setGesturing] = useState(false);
+  const [noteGesturing, setNoteGesturing] = useState(false);
   const gesture = useRef<{ recorded: boolean } | null>(null);
   function beginGesture() {
     if (!gesture.current) {
@@ -186,7 +187,13 @@ export default function Studio({
     initial,
     id,
     snapshot: { title, data },
-    paused: recording || playing || !!busy || !!exportSnapshot || gesturing,
+    paused:
+      recording ||
+      playing ||
+      !!busy ||
+      !!exportSnapshot ||
+      gesturing ||
+      noteGesturing,
     apply: (p, changed, resetHistory = true) => {
       setTitle(p.title);
       setData(p.data);
@@ -244,9 +251,14 @@ export default function Studio({
   }, [roomAllowed]);
   useEffect(() => {
     onActivity?.(
-      recording || !!busy || !!exportSnapshot || library || gesturing,
+      recording ||
+        !!busy ||
+        !!exportSnapshot ||
+        library ||
+        gesturing ||
+        noteGesturing,
     );
-  }, [recording, busy, exportSnapshot, library, gesturing]);
+  }, [recording, busy, exportSnapshot, library, gesturing, noteGesturing]);
   useEffect(() => () => onActivity?.(false), []);
   useEffect(() => {
     onDraft({
@@ -286,14 +298,14 @@ export default function Studio({
   }, []);
   useEffect(() => {
     const f = (e: BeforeUnloadEvent) => {
-      if (dirty || recording) {
+      if (dirty || recording || noteGesturing) {
         e.preventDefault();
         e.returnValue = '';
       }
     };
     window.addEventListener('beforeunload', f);
     return () => window.removeEventListener('beforeunload', f);
-  }, [dirty, recording]);
+  }, [dirty, recording, noteGesturing]);
   useEffect(() => {
     if (!playing) return;
     const timer = setInterval(() => {
@@ -388,6 +400,7 @@ export default function Studio({
       !dirty ||
       busy ||
       gesturing ||
+      noteGesturing ||
       recording
     )
       return;
@@ -404,6 +417,7 @@ export default function Studio({
     canEdit,
     sync.conflict,
     gesturing,
+    noteGesturing,
   ]);
   function undo(redo = false) {
     if (!editAllowed.current || structuralLocked) return;
@@ -792,8 +806,9 @@ export default function Studio({
     }
   }
   const focus = data.tracks.find((t) => t.id === selected) || data.tracks[0];
-  const structuralLocked =
+  const pianoLocked =
     playing || recording || !!busy || !!exportSnapshot || gesturing;
+  const structuralLocked = pianoLocked || noteGesturing;
   const length = Math.max(
     30,
     ...data.tracks.map(
@@ -1605,7 +1620,8 @@ export default function Studio({
               key={focus?.id || 'empty-instrument'}
               track={focus}
               bpm={data.bpm}
-              disabled={!canEdit || structuralLocked}
+              disabled={!canEdit || pianoLocked}
+              onGestureActivity={setNoteGesturing}
               onRecord={() => {
                 if (!editAllowed.current || structuralLocked || !focus?.notes)
                   return;
@@ -1637,7 +1653,7 @@ export default function Studio({
               }}
               onAdd={addInstrument}
               onChange={(p) => {
-                if (!editAllowed.current || structuralLocked || !focus)
+                if (!editAllowed.current || pianoLocked || !focus)
                   throw Error(
                     'Editing is unavailable. Stop playback or recording and check your project access.',
                   );

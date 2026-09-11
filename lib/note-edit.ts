@@ -3,6 +3,8 @@ import { validateArrangement } from './arrangement-validation';
 
 export type NoteEdit =
   | { kind: 'move'; beats: number }
+  | { kind: 'drag'; beats: number; semitones: number }
+  | { kind: 'resize'; beats: number }
   | { kind: 'transpose'; semitones: number }
   | { kind: 'duplicate'; beats: number }
   | { kind: 'quantize'; grid: number }
@@ -161,12 +163,15 @@ export function editNotes(
       'Each note needs a unique identity. Reopen the current project.',
     );
   if (
-    edit.kind === 'transpose' &&
+    (edit.kind === 'transpose' || edit.kind === 'drag') &&
     (!Number.isInteger(edit.semitones) || Math.abs(edit.semitones) > 127)
   )
     throw Error('Choose a whole-number pitch change within 127 semitones.');
   if (
-    (edit.kind === 'move' || edit.kind === 'duplicate') &&
+    (edit.kind === 'move' ||
+      edit.kind === 'duplicate' ||
+      edit.kind === 'drag' ||
+      edit.kind === 'resize') &&
     (!Number.isFinite(edit.beats) ||
       Math.abs(edit.beats) > 256 ||
       (edit.kind === 'duplicate' && edit.beats <= 0))
@@ -202,6 +207,20 @@ export function editNotes(
     notes = track.notes!.map((n) => {
       if (!selection.has(n.id)) return n;
       if (edit.kind === 'move') return { ...n, start: n.start + edit.beats };
+      if (edit.kind === 'drag')
+        return {
+          ...n,
+          start: n.start + edit.beats,
+          pitch: n.pitch + edit.semitones,
+        };
+      if (edit.kind === 'resize') {
+        let length = n.length + edit.beats;
+        const epsilon =
+          Number.EPSILON * Math.max(1, n.length, Math.abs(edit.beats)) * 4;
+        if (Math.abs(length - 0.01) <= epsilon) length = 0.01;
+        if (Math.abs(length - 32) <= epsilon) length = 32;
+        return { ...n, length };
+      }
       if (edit.kind === 'transpose')
         return { ...n, pitch: n.pitch + edit.semitones };
       if (edit.kind === 'quantize')
@@ -215,6 +234,10 @@ export function editNotes(
     throw Error('The entire selection must stay within MIDI pitches 0–127.');
   if (notes.some((n) => n.start < 0 || n.start > 256))
     throw Error('The entire selection must stay between beats 1 and 257.');
+  if (notes.some((n) => n.length < 0.01 || n.length > 32))
+    throw Error(
+      'Every selected note must stay between 0.01 and 32 beats long.',
+    );
   checkNotes(track, bpm, notes);
   if (JSON.stringify(notes) === JSON.stringify(track.notes))
     notes = track.notes!;
