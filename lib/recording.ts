@@ -1,6 +1,7 @@
 import { playMix, type Arrangement, type StudioOutput } from './audio';
 import type { MicrophoneLease } from './room-audio';
 import { encodeWave } from './audio-files';
+import { recordingTiming, type RecordingTiming } from './recording-timing';
 
 export type CapturePhase =
   | 'idle'
@@ -8,7 +9,9 @@ export type CapturePhase =
   | 'ready'
   | 'preparing'
   | 'counting'
+  | 'preroll'
   | 'recording'
+  | 'draining'
   | 'finishing'
   | 'review'
   | 'error';
@@ -20,6 +23,7 @@ export type RecordedTake = {
   sampleRate: number;
   depth: 24 | 32;
   kind?: 'comp';
+  correctionMs?: number;
 };
 export type CaptureHooks = {
   state: (phase: CapturePhase) => void;
@@ -53,6 +57,10 @@ export class TakeCapture {
   private offset = 0;
   private startTime = 0;
   private beat = 1;
+  private musicalFrame = 0;
+  private correctionFrames = 0;
+  private limitFrames = 0;
+  private finishFrames: number | null = null;
   constructor(
     private hooks: CaptureHooks,
     private deps: CaptureDependencies = {
@@ -113,6 +121,7 @@ export class TakeCapture {
     this.release();
     this.chunks = [];
     this.frameCount = 0;
+    this.finishFrames = null;
     this.set('idle');
   }
   dispose() {
@@ -172,7 +181,7 @@ export class TakeCapture {
           return;
         }
       }
-      await c.audioWorklet.addModule('/recording-worklet.js?v=1');
+      await c.audioWorklet.addModule('/recording-worklet.js?v=2');
       if (!this.valid(token)) return;
       const track = stream.getAudioTracks()[0];
       if (!track || track.readyState !== 'live' || track.muted)
@@ -209,7 +218,13 @@ export class TakeCapture {
         if (data.type === 'error') this.fail(data.message);
         if (
           data.type === 'samples' &&
-          ['counting', 'recording', 'finishing'].includes(this.phase)
+          [
+            'counting',
+            'preroll',
+            'recording',
+            'draining',
+            'finishing',
+          ].includes(this.phase)
         ) {
           if (
             !(data.samples instanceof Float32Array) ||
@@ -221,7 +236,13 @@ export class TakeCapture {
         }
         if (
           data.type === 'done' &&
-          ['counting', 'recording', 'finishing'].includes(this.phase)
+          [
+            'counting',
+            'preroll',
+            'recording',
+            'draining',
+            'finishing',
+          ].includes(this.phase)
         )
           void this.complete(token, data.frames, c.sampleRate);
       };
@@ -250,12 +271,20 @@ export class TakeCapture {
     bars: number,
     maxSeconds = 120,
     exact?: { frames: number; sampleRate: number },
+    timing: RecordingTiming = {},
   ) {
     if (this.phase !== 'ready' || !this.c || !this.node) return;
     const token = this.epoch,
       c = this.c;
     this.set('preparing');
     try {
+      const clock = recordingTiming(
+        arrangement.bpm,
+        offset,
+        bars,
+        c.sampleRate,
+        timing,
+      );
       if (
         ![0, 1, 2].includes(bars) ||
         !Number.isFinite(offset) ||
@@ -280,12 +309,17 @@ export class TakeCapture {
           'The microphone sample rate or recording limit does not match this punch. Your current vocal is unchanged.',
         );
       this.offset = offset;
-      this.beat = 60 / arrangement.bpm;
-      const lead = bars * 4 * this.beat + 0.35;
+      this.beat = clock.beat;
+      this.correctionFrames = clock.correctionFrames;
+      this.finishFrames = null;
+      this.limitFrames =
+        exact?.frames ??
+        Math.floor(Math.min(maxSeconds, 300 - offset) * c.sampleRate);
+      const lead = clock.countFrames / c.sampleRate + 0.35;
       if (arrangement.tracks.length) {
         const backing = await playMix(structuredClone(arrangement), undefined, {
           audioContext: c,
-          from: offset,
+          from: clock.from,
           allowPastEnd: true,
           startDelay: lead,
           signal: this.control.signal,
@@ -297,20 +331,19 @@ export class TakeCapture {
         }
         this.backing = backing;
       }
-      this.startTime = this.backing?.audioStartTime ?? c.currentTime + lead;
-      const firstFrame =
+      const backingFrame =
         this.backing?.audioStartFrame ??
-        Math.ceil(this.startTime * c.sampleRate);
-      this.startTime = firstFrame / c.sampleRate;
+        Math.ceil((c.currentTime + lead) * c.sampleRate);
+      this.musicalFrame = backingFrame + clock.preRollFrames;
+      this.startTime = this.musicalFrame / c.sampleRate;
       this.node!.port.postMessage({
         type: 'arm',
-        start: firstFrame,
-        limit:
-          exact?.frames ??
-          Math.floor(Math.min(maxSeconds, 300 - offset) * c.sampleRate),
+        start: this.musicalFrame + this.correctionFrames,
+        limit: this.limitFrames,
       });
       for (let n = 0; n < bars * 4; n++) {
-        const when = this.startTime - (bars * 4 - n) * this.beat;
+        const when =
+          (backingFrame - clock.countFrames) / c.sampleRate + n * this.beat;
         const o = c.createOscillator(),
           g = c.createGain();
         o.frequency.value = n % 4 === 0 ? 1200 : 800;
@@ -330,14 +363,38 @@ export class TakeCapture {
       const tick = () => {
         if (!this.valid(token)) return;
         const elapsed = c.currentTime - this.startTime;
-        if (elapsed >= 0 && this.phase === 'counting') this.set('recording');
+        if (['counting', 'preroll', 'recording'].includes(this.phase)) {
+          if (elapsed >= this.limitFrames / c.sampleRate) {
+            this.endAt(this.musicalFrame + this.limitFrames);
+          } else {
+            const next =
+              elapsed >= 0
+                ? 'recording'
+                : c.currentTime >= backingFrame / c.sampleRate
+                  ? 'preroll'
+                  : 'counting';
+            if (this.phase !== next) this.set(next);
+          }
+        }
         this.hooks.progress(
-          Math.max(0, elapsed),
-          Math.max(0, Math.min(bars * 4, Math.ceil(-elapsed / this.beat))),
+          Math.max(0, Math.min(this.limitFrames / c.sampleRate, elapsed)),
+          Math.max(
+            0,
+            Math.min(
+              this.phase === 'counting' ? bars * 4 : Infinity,
+              Math.ceil(
+                ((this.phase === 'counting'
+                  ? backingFrame / c.sampleRate
+                  : this.startTime) -
+                  c.currentTime) /
+                  this.beat,
+              ),
+            ),
+          ),
         );
       };
       tick();
-      this.timer = setInterval(tick, 70);
+      if (this.valid(token)) this.timer = setInterval(tick, 70);
     } catch (e) {
       if (this.valid(token))
         this.fail(
@@ -346,32 +403,54 @@ export class TakeCapture {
     }
   }
   finish() {
-    if (this.phase !== 'recording') return;
-    this.set('finishing');
+    if (this.phase !== 'recording' || !this.c) return;
+    this.endAt(
+      Math.min(
+        this.musicalFrame + this.limitFrames,
+        Math.ceil(this.c.currentTime * this.c.sampleRate),
+      ),
+    );
+  }
+  private endAt(frame: number) {
+    if (!this.c || !['counting', 'preroll', 'recording'].includes(this.phase))
+      return;
+    const token = this.epoch;
+    this.finishFrames = Math.max(0, frame - this.musicalFrame);
+    this.set(this.correctionFrames ? 'draining' : 'finishing');
+    if (!this.valid(token)) return;
     this.backing?.stop();
-    this.node?.port.postMessage({ type: 'finish' });
-    this.finishTimer = setTimeout(
-      () =>
+    this.node?.port.postMessage({
+      type: 'finish',
+      end: frame + this.correctionFrames,
+    });
+    this.finishTimer = setTimeout(() => {
+      if (this.valid(token))
         this.fail(
           'The recording did not finish. Please reconnect the microphone and retry.',
-        ),
-      5000,
-    );
+        );
+    }, 5000);
   }
   private async complete(token: number, frames: number, sampleRate: number) {
     if (!this.valid(token)) return;
     this.set('finishing');
     this.release();
     try {
-      if (frames !== this.frameCount || frames < sampleRate * 0.1)
+      if (frames !== this.frameCount)
+        throw new Error('The take was incomplete. Please record it again.');
+      const keptFrames = Math.min(
+        frames,
+        this.finishFrames ?? this.limitFrames,
+      );
+      if (keptFrames < sampleRate * 0.1)
         throw new Error(
           'The take was too short or incomplete. Record at least a tenth of a second.',
         );
-      const samples = new Float32Array(frames);
+      const samples = new Float32Array(keptFrames);
       let at = 0;
       for (const chunk of this.chunks) {
-        samples.set(chunk, at);
-        at += chunk.length;
+        const kept = chunk.subarray(0, Math.max(0, keptFrames - at));
+        samples.set(kept, at);
+        at += kept.length;
       }
       this.chunks = [];
       let peak = 0;
@@ -379,7 +458,7 @@ export class TakeCapture {
       const depth = peak > 1 ? 32 : 24;
       const encoded = await encodeWave(
         {
-          length: frames,
+          length: keptFrames,
           sampleRate,
           numberOfChannels: 1,
           getChannelData: () => samples,
@@ -391,11 +470,12 @@ export class TakeCapture {
       this.set('review');
       this.hooks.take({
         blob: encoded.blob,
-        seconds: frames / sampleRate,
+        seconds: keptFrames / sampleRate,
         offset: this.offset,
         peak: encoded.peak,
         sampleRate,
         depth,
+        correctionMs: (this.correctionFrames * 1000) / sampleRate,
       });
     } catch (e) {
       if (this.valid(token))

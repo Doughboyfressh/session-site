@@ -113,6 +113,8 @@ export default function RecordTake({
     [seconds, setSeconds] = useState(0),
     [beats, setBeats] = useState(0),
     [bars, setBars] = useState('1'),
+    [preRoll, setPreRoll] = useState('0'),
+    [correction, setCorrection] = useState('0'),
     [device, setDevice] = useState(''),
     [devices, setDevices] = useState<MediaDeviceInfo[]>([]),
     [error, setError] = useState(''),
@@ -509,9 +511,20 @@ export default function RecordTake({
     'opening',
     'preparing',
     'counting',
+    'preroll',
     'recording',
+    'draining',
     'finishing',
   ].includes(phase);
+  const correctionValid =
+    correction.trim() !== '' &&
+    Number.isFinite(Number(correction)) &&
+    Number(correction) >= 0 &&
+    Number(correction) <= 500;
+  const leadSeconds = Math.min(
+    punch?.offset ?? offset,
+    (Number(preRoll) * 4 * 60) / data.bpm,
+  );
   return (
     <>
       <TakePanel
@@ -560,6 +573,7 @@ export default function RecordTake({
                   value={device}
                   onChange={(id) => {
                     setDevice(id);
+                    setCorrection('0');
                     if (phase === 'ready') connect(id);
                   }}
                   options={[
@@ -583,14 +597,66 @@ export default function RecordTake({
                   { value: '2', label: '2 bars · 8 beats' },
                 ]}
               />
+              <Pick
+                label="Musical pre-roll"
+                value={preRoll}
+                onChange={setPreRoll}
+                options={[
+                  { value: '0', label: 'Off' },
+                  { value: '1', label: 'Up to 1 bar' },
+                  { value: '2', label: 'Up to 2 bars' },
+                ]}
+              />
+              <label className="field">
+                <span>Recording delay correction (ms)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={500}
+                  step={1}
+                  value={correction}
+                  aria-label="Recording delay correction (ms)"
+                  aria-describedby="recording-delay-help"
+                  aria-invalid={!correctionValid}
+                  onChange={(e) => setCorrection(e.target.value)}
+                />
+              </label>
             </fieldset>
+            <p className="record-note" role="status">
+              {Number(preRoll)
+                ? `After the count-in, hear ${leadSeconds.toFixed(2)} seconds before the recording point. Pre-roll stops at the start of the project.`
+                : 'Recording begins after the count-in.'}
+              {Number(preRoll) > 0 && !data.tracks.length
+                ? ' Add backing tracks to hear music during the lead-in.'
+                : ''}
+              {Number(preRoll) > 0 && seed
+                ? ' The selected vocal stays muted in the backing.'
+                : ''}
+            </p>
+            <p className="record-note" id="recording-delay-help">
+              Start at 0. If a test recording lands 80 ms late, try 80 here. A
+              positive value corrects incoming delay for the next take; its
+              start position and punch length stay the same. This is a manual
+              setting, not an automatic measurement. Recheck after changing
+              headphones, microphones or audio interfaces.
+            </p>
+            {!correctionValid && (
+              <p className="form-error" role="alert">
+                Enter a delay correction from 0 to 500 ms.
+              </p>
+            )}
             <div className="record-input">
               <div>
                 <Mic size={18} />
                 <strong>
-                  {['ready', 'preparing', 'counting', 'recording'].includes(
-                    phase,
-                  )
+                  {[
+                    'ready',
+                    'preparing',
+                    'counting',
+                    'preroll',
+                    'recording',
+                    'draining',
+                  ].includes(phase)
                     ? roomAudio
                       ? 'Recording input is on'
                       : 'Microphone is on'
@@ -622,8 +688,20 @@ export default function RecordTake({
                   <>
                     <strong className="record-count">{beats || 'Ready'}</strong>
                     <span>
-                      Count-in · recording begins after the final beat
+                      {Number(preRoll) && leadSeconds > 0
+                        ? 'Count-in · music lead-in is next'
+                        : 'Count-in · recording begins after the final beat'}
                     </span>
+                  </>
+                ) : phase === 'preroll' ? (
+                  <>
+                    <strong className="record-count">{beats || 'Ready'}</strong>
+                    <span>Pre-roll · listen for your recording point</span>
+                  </>
+                ) : phase === 'draining' ? (
+                  <>
+                    <Loader2 className="spin" size={20} />
+                    <span>Finishing the last moment of microphone audio…</span>
                   </>
                 ) : phase === 'recording' ? (
                   <>
@@ -802,7 +880,7 @@ export default function RecordTake({
                   </button>
                   <button
                     className="button primary"
-                    disabled={!canEdit || !hasSpace}
+                    disabled={!canEdit || !hasSpace || !correctionValid}
                     onClick={() => {
                       setClipped(false);
                       setError('');
@@ -812,6 +890,10 @@ export default function RecordTake({
                         Number(bars),
                         punch ? punch.frames / punch.sampleRate : takeLimit,
                         punch ?? undefined,
+                        {
+                          preRollBars: Number(preRoll),
+                          correctionMs: Number(correction),
+                        },
                       );
                     }}
                   >
@@ -866,8 +948,9 @@ export default function RecordTake({
           </p>
         )}
         <p className="record-note">
-          Device latency can affect where a performance lands. Check the take
-          against your backing and adjust its clip position if needed.
+          Delay correction applies only to newly recorded takes. Compare a short
+          test against your backing before recording a full performance. Your
+          timing settings remain while this recorder is open.
         </p>
       </TakePanel>
       <Confirm

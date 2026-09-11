@@ -91,6 +91,12 @@ export default function TakeWorkbench({
       </div>
       <div className="take-review">
         <strong>{selected.name}</strong>
+        {selected.correctionMs !== undefined && (
+          <p className="record-note">
+            Recorded with {selected.correctionMs.toFixed(1)} ms delay
+            correction.
+          </p>
+        )}
         <p>
           Mono {selected.depth}-bit{selected.depth === 32 ? ' float' : ''} WAV ·{' '}
           {(selected.blob.size / 1024 / 1024).toFixed(1)} MB

@@ -203,9 +203,17 @@ function App() {
             },
           ],
         },
+        0.5,
         0,
-        0,
+        120,
+        undefined,
+        { preRollBars: 1, correctionMs: 300 },
       );
+      await wait(
+        () => phase === 'preroll' && backingProbe.energy(220) > -55,
+        'pre-roll enters room bus',
+      );
+      check(true, 'Music pre-roll reaches room collaborators before recording');
       await wait(
         () => phase === 'recording' && backingProbe.energy(220) > -55,
         'recording backing enters room bus',
@@ -216,7 +224,16 @@ function App() {
       );
       await delay(300);
       capture.finish();
+      check(
+        String(phase) === 'draining',
+        'Room recording retains delayed input tail',
+      );
       await wait(() => !!take, 'backed take completed');
+      check(
+        (take as unknown as RecordedTake).offset === 0.5 &&
+          (take as unknown as RecordedTake).correctionMs === 300,
+        'Room correction preserves recording position',
+      );
       const decoded = await voice.c.decodeAudioData(
         await (take as unknown as RecordedTake).blob.arrayBuffer(),
       );
@@ -239,7 +256,21 @@ function App() {
       bus.disable();
       capture.cancel();
       await capture.connect();
+      take = null;
+      await capture.start({ bpm: 240, tracks: [] }, 0, 0, 1, undefined, {
+        correctionMs: 500,
+      });
+      await wait(
+        () => phase === 'recording',
+        'room recording before tail disconnect',
+      );
+      capture.finish();
       microphones.end();
+      await delay(600);
+      check(
+        take === null,
+        'Room disconnect during correction tail produces no completed take',
+      );
       check(
         String(phase) === 'error' && error.includes('room microphone'),
         'Call disconnect visibly cancels active recorder input',

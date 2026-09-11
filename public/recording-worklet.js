@@ -28,8 +28,20 @@ class SessionCapture extends AudioWorkletProcessor {
         this.active = true;
         this.frames = 0;
         this.used = 0;
-      } else if (data.type === 'finish') this.finish();
-      else if (data.type === 'cancel') {
+      } else if (data.type === 'finish') {
+        if (data.end === undefined) this.finish();
+        else if (!Number.isSafeInteger(data.end) || data.end < this.start) {
+          this.port.postMessage({
+            type: 'error',
+            message: 'Recording end timing was invalid. Try again.',
+          });
+        } else if (this.active) {
+          this.limit = Math.min(this.limit, data.end - this.start);
+          // A delayed control message may arrive after this boundary. The
+          // receiver trims already-delivered PCM to its requested frame count.
+          if (this.frames >= this.limit) this.finish();
+        }
+      } else if (data.type === 'cancel') {
         this.active = false;
         this.used = 0;
         this.frames = 0;
@@ -67,6 +79,10 @@ class SessionCapture extends AudioWorkletProcessor {
       }
       this.peak = Math.max(this.peak, Math.abs(value));
       if (this.active && currentFrame + i >= this.start) {
+        if (this.frames >= this.limit) {
+          this.finish();
+          continue;
+        }
         this.chunk[this.used++] = value;
         this.frames++;
         if (this.used === this.chunk.length) this.flush();
