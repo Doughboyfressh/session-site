@@ -15,7 +15,14 @@ class SessionCapture extends AudioWorkletProcessor {
           data.start < currentFrame ||
           !Number.isSafeInteger(data.limit) ||
           data.limit < 1 ||
-          data.limit > sampleRate * 120
+          data.limit > sampleRate * (data.cycle ? 240 : 120) ||
+          (data.cycle !== undefined &&
+            (!Number.isSafeInteger(data.cycle) ||
+              data.cycle < Math.ceil(sampleRate * 0.1) ||
+              data.cycle > sampleRate * 120 ||
+              data.limit % data.cycle !== 0 ||
+              data.limit / data.cycle < 2 ||
+              data.limit / data.cycle > 8))
         ) {
           this.port.postMessage({
             type: 'error',
@@ -25,6 +32,7 @@ class SessionCapture extends AudioWorkletProcessor {
         }
         this.start = data.start;
         this.limit = data.limit;
+        this.cycle = data.cycle || 0;
         this.active = true;
         this.frames = 0;
         this.used = 0;
@@ -41,6 +49,12 @@ class SessionCapture extends AudioWorkletProcessor {
           // receiver trims already-delivered PCM to its requested frame count.
           if (this.frames >= this.limit) this.finish();
         }
+      } else if (data.type === 'halt') {
+        // Acknowledge after all earlier samples and pass messages on this port.
+        if (Number.isSafeInteger(data.end))
+          this.limit = Math.min(this.limit, Math.max(0, data.end - this.start));
+        this.finish();
+        this.port.postMessage({ type: 'halted', frames: this.frames });
       } else if (data.type === 'cancel') {
         this.active = false;
         this.used = 0;
@@ -86,6 +100,14 @@ class SessionCapture extends AudioWorkletProcessor {
         this.chunk[this.used++] = value;
         this.frames++;
         if (this.used === this.chunk.length) this.flush();
+        if (this.cycle && this.frames % this.cycle === 0) {
+          this.flush();
+          this.port.postMessage({
+            type: 'pass',
+            index: this.frames / this.cycle,
+            frames: this.cycle,
+          });
+        }
         if (this.frames === this.limit) this.finish();
       }
     }

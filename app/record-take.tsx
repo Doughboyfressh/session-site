@@ -31,6 +31,7 @@ import {
 import TakeWorkbench from './take-workbench';
 import type { MixerTrack } from '@/lib/audio';
 import type { RestoredBank } from '@/lib/take-bank';
+import { loopPlan } from '@/lib/loop-recording';
 import {
   BankWriter,
   bankSignature,
@@ -136,6 +137,12 @@ export default function RecordTake({
     [bars, setBars] = useState('1'),
     [preRoll, setPreRoll] = useState('0'),
     [correction, setCorrection] = useState('0'),
+    [loopPasses, setLoopPasses] = useState('1'),
+    [loopLength, setLoopLength] = useState(
+      String(Math.min(300 - offset, (4 * 60) / data.bpm)),
+    ),
+    [loopRunning, setLoopRunning] = useState(false),
+    [loopPass, setLoopPass] = useState(1),
     [device, setDevice] = useState(''),
     [devices, setDevices] = useState<MediaDeviceInfo[]>([]),
     [error, setError] = useState(''),
@@ -171,6 +178,7 @@ export default function RecordTake({
   const pendingPunch = useRef<
     (ReturnType<typeof planPunch> & { regions: CompRegion[] }) | null
   >(null);
+  const pendingLoop = useRef(false);
   const preparedRef = useRef(prepared);
   preparedRef.current = prepared;
   allowed.current = canEdit;
@@ -283,7 +291,16 @@ export default function RecordTake({
     }
     const hooks: CaptureHooks = {
       state: (p) => {
-        if (alive.current) setPhase(p);
+        if (alive.current) {
+          setPhase(p);
+          if (pendingLoop.current && ['review', 'error', 'idle'].includes(p)) {
+            pendingLoop.current = false;
+            pendingPunch.current = null;
+            setLoopRunning(false);
+            setPunch(null);
+            setTaking(!bank.current.length);
+          }
+        }
       },
       level: (p) => {
         if (alive.current) {
@@ -291,20 +308,28 @@ export default function RecordTake({
           if (p >= 0.98) setClipped(true);
         }
       },
-      progress: (s, b) => {
+      progress: (s, b, pass) => {
         if (alive.current) {
           setSeconds(s);
           setBeats(b);
+          if (pass) setLoopPass(pass);
         }
       },
       error: (message) => {
         if (alive.current) setError(message);
       },
       take: (t) => {
-        if (!alive.current || !allowed.current) return;
+        if (
+          !alive.current ||
+          (!allowed.current && !(t.loopPass && pendingLoop.current))
+        )
+          return;
+        const looping = !!t.loopPass && pendingLoop.current;
         const punch = pendingPunch.current;
-        pendingPunch.current = null;
-        setPunch(null);
+        if (!looping) {
+          pendingPunch.current = null;
+          setPunch(null);
+        }
         if (
           bank.current.length >= MAX_TAKES ||
           bank.current.reduce((n, t) => n + t.blob.size, 0) + t.blob.size >
@@ -318,20 +343,23 @@ export default function RecordTake({
           setTaking(false);
           return;
         }
+        const { loopPass: _loopPass, ...recorded } = t;
         const entry: LocalTake = {
-          ...t,
+          ...recorded,
           ...(punch
             ? { coverageStart: punch.start, compOrigin: punch.origin }
             : {}),
           id: crypto.randomUUID(),
-          name: (punch ? 'Punch ' : 'Take ') + ++takeNumber.current,
+          name:
+            (looping ? 'Loop take ' : punch ? 'Punch ' : 'Take ') +
+            ++takeNumber.current,
           url: rememberURL(t.blob),
         };
         bank.current = [...bank.current, entry];
         setTakes(bank.current);
         setSelected(entry.id);
-        setTaking(false);
-        if (punch) {
+        if (!looping) setTaking(false);
+        if (punch && !looping) {
           if (
             t.sampleRate === punch.sampleRate &&
             Math.round(t.seconds * t.sampleRate) === punch.frames &&
@@ -363,7 +391,7 @@ export default function RecordTake({
             setError(
               'The punch ended early or did not match the selected section. Your comp is unchanged. This recording is kept for download or use within its recorded range.',
             );
-        } else if (!plan.current.length) {
+        } else if (!punch && !plan.current.length) {
           const next = fullTake(entry);
           plan.current = next;
           setRegions(next);
@@ -403,10 +431,14 @@ export default function RecordTake({
       attempt.current++;
       upload.current?.abort();
       renderJob.current?.abort();
-      capture.current?.cancel();
-      pendingPunch.current = null;
-      setPunch(null);
-      if (bank.current.length) setTaking(false);
+      if (pendingLoop.current)
+        capture.current?.interrupt('Editing access ended.');
+      else {
+        capture.current?.cancel();
+        pendingPunch.current = null;
+        setPunch(null);
+        if (bank.current.length) setTaking(false);
+      }
       stopPreview();
       busyRef.current = false;
       setPreparing(false);
@@ -467,7 +499,7 @@ export default function RecordTake({
     setClipped(false);
   }
   async function close() {
-    if (busyRef.current) return;
+    if (busyRef.current || pendingLoop.current) return;
     if (bankSaved && !active) {
       const controller = new AbortController(),
         token = ++attempt.current;
@@ -650,6 +682,32 @@ export default function RecordTake({
     Number.isFinite(Number(correction)) &&
     Number(correction) >= 0 &&
     Number(correction) <= 500;
+  let plannedLoop: ReturnType<typeof loopPlan> | undefined,
+    loopIssue = '';
+  if (Number(loopPasses) > 1 && !loopRunning) {
+    try {
+      plannedLoop = loopPlan(
+        punch?.offset ?? offset,
+        punch ? punch.frames / punch.sampleRate : Number(loopLength),
+        Number(loopPasses),
+        punch?.sampleRate ||
+          capture.current?.sampleRate ||
+          bank.current[0]?.sampleRate ||
+          48000,
+        takes,
+      );
+      if (
+        punch &&
+        capture.current?.sampleRate &&
+        capture.current.sampleRate !== punch.sampleRate
+      )
+        throw new Error(
+          'This microphone rate does not match the selected comp. Reconnect at the comp sample rate before looping this section.',
+        );
+    } catch (e) {
+      loopIssue = e instanceof Error ? e.message : 'Choose a valid loop.';
+    }
+  }
   const leadSeconds = Math.min(
     punch?.offset ?? offset,
     (Number(preRoll) * 4 * 60) / data.bpm,
@@ -658,7 +716,7 @@ export default function RecordTake({
     <>
       <TakePanel
         inline={!!roomAudio}
-        uploading={uploading || preparing}
+        uploading={uploading || preparing || loopRunning}
         onClose={close}
       >
         <div className="record-position">
@@ -676,7 +734,7 @@ export default function RecordTake({
           <p className="record-progress" role="status">
             Punch in: {(punch.start / punch.sampleRate).toFixed(2)}–
             {(punch.end / punch.sampleRate).toFixed(2)}s of your vocal.
-            Recording stops automatically at the end. Stopping early keeps your
+            Recording stops after the selected passes. Stopping early keeps your
             current comp unchanged.
           </p>
         )}
@@ -731,6 +789,29 @@ export default function RecordTake({
                   { value: '2', label: '2 bars · 8 beats' },
                 ]}
               />
+              <Pick
+                label="Recording passes"
+                value={loopPasses}
+                onChange={setLoopPasses}
+                options={Array.from({ length: 8 }, (_, i) => ({
+                  value: String(i + 1),
+                  label: i === 0 ? 'Single take' : `${i + 1} loop passes`,
+                }))}
+              />
+              {Number(loopPasses) > 1 && !punch && (
+                <label className="field">
+                  <span>Loop length (seconds)</span>
+                  <input
+                    aria-label="Loop length (seconds)"
+                    type="number"
+                    min={0.1}
+                    max={Math.min(120, 300 - offset)}
+                    step={0.01}
+                    value={loopLength}
+                    onChange={(e) => setLoopLength(e.target.value)}
+                  />
+                </label>
+              )}
               <Pick
                 label="Musical pre-roll"
                 value={preRoll}
@@ -869,6 +950,25 @@ export default function RecordTake({
                 : 'Keep this tab open while recording. On some phones, starting the microphone here can interrupt a call in another tab.'}
             </p>
           </>
+        )}
+        {taking && Number(loopPasses) > 1 && (
+          <p className="record-note">
+            The count-in and pre-roll happen once, then the selected section
+            repeats. Each complete pass becomes a separate take at the same
+            position. Stopping keeps complete passes and discards the unfinished
+            pass. Save your take bank after review.
+          </p>
+        )}
+        {taking && loopIssue && (
+          <p className="record-error" role="alert">
+            {loopIssue}
+          </p>
+        )}
+        {loopRunning && (
+          <p className="record-progress" role="status">
+            Loop pass {loopPass} of {loopPasses} · {takes.length} takes ready
+            {phase === 'finishing' ? ' · Preparing completed passes…' : ''}
+          </p>
         )}
         {!taking && take && (
           <TakeWorkbench
@@ -1024,14 +1124,25 @@ export default function RecordTake({
               <button
                 className="button secondary"
                 onClick={() => {
+                  if (pendingLoop.current) {
+                    capture.current?.finish();
+                    return;
+                  }
                   capture.current?.cancel();
                   pendingPunch.current = null;
                   setPunch(null);
                   if (takes.length) setTaking(false);
                   else onClose();
                 }}
+                disabled={
+                  loopRunning && ['draining', 'finishing'].includes(phase)
+                }
               >
-                {takes.length ? 'Back to takes' : 'Cancel'}
+                {loopRunning
+                  ? 'Stop loop'
+                  : takes.length
+                    ? 'Back to takes'
+                    : 'Cancel'}
               </button>
               {phase === 'ready' ? (
                 <>
@@ -1043,16 +1154,27 @@ export default function RecordTake({
                   </button>
                   <button
                     className="button primary"
-                    disabled={!canEdit || !hasSpace || !correctionValid}
+                    disabled={
+                      !canEdit || !hasSpace || !correctionValid || !!loopIssue
+                    }
                     onClick={() => {
                       setClipped(false);
                       setError('');
+                      if (plannedLoop) {
+                        pendingLoop.current = true;
+                        setLoopRunning(true);
+                        setLoopPass(1);
+                      }
                       void capture.current?.start(
                         data,
                         punch?.offset ?? offset,
                         Number(bars),
-                        punch ? punch.frames / punch.sampleRate : takeLimit,
-                        punch ?? undefined,
+                        plannedLoop
+                          ? plannedLoop.frames / plannedLoop.sampleRate
+                          : punch
+                            ? punch.frames / punch.sampleRate
+                            : takeLimit,
+                        plannedLoop || punch || undefined,
                         {
                           preRollBars: Number(preRoll),
                           correctionMs: Number(correction),

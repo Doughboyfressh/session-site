@@ -2,6 +2,7 @@ import { playMix, type Arrangement, type StudioOutput } from './audio';
 import type { MicrophoneLease } from './room-audio';
 import { encodeWave } from './audio-files';
 import { recordingTiming, type RecordingTiming } from './recording-timing';
+import { loopPlan } from './loop-recording';
 
 export type CapturePhase =
   | 'idle'
@@ -24,11 +25,17 @@ export type RecordedTake = {
   depth: 24 | 32;
   kind?: 'comp';
   correctionMs?: number;
+  loopPass?: number;
 };
 export type CaptureHooks = {
   state: (phase: CapturePhase) => void;
   level: (peak: number) => void;
-  progress: (seconds: number, beatsLeft: number) => void;
+  progress: (
+    seconds: number,
+    beatsLeft: number,
+    pass?: number,
+    total?: number,
+  ) => void;
   take: (take: RecordedTake) => void;
   error: (message: string) => void;
 };
@@ -61,6 +68,15 @@ export class TakeCapture {
   private correctionFrames = 0;
   private limitFrames = 0;
   private finishFrames: number | null = null;
+  private cycleFrames = 0;
+  private passCount = 1;
+  private completedPasses = 0;
+  private deliveredPasses = 0;
+  private totalReceived = 0;
+  private passQueue: Promise<void> = Promise.resolve();
+  private loopError = '';
+  private closingLoop = false;
+  private interruptedLoop = false;
   constructor(
     private hooks: CaptureHooks,
     private deps: CaptureDependencies = {
@@ -122,12 +138,63 @@ export class TakeCapture {
     this.chunks = [];
     this.frameCount = 0;
     this.finishFrames = null;
+    this.cycleFrames = 0;
+    this.passCount = 1;
+    this.completedPasses = 0;
+    this.deliveredPasses = 0;
+    this.totalReceived = 0;
+    this.passQueue = Promise.resolve();
+    this.loopError = '';
+    this.closingLoop = false;
+    this.interruptedLoop = false;
+    this.musicalFrame = 0;
+    this.startTime = 0;
+    this.correctionFrames = 0;
+    this.limitFrames = 0;
     this.set('idle');
   }
   dispose() {
     this.cancel();
   }
+  get sampleRate() {
+    return this.c?.sampleRate;
+  }
+  interrupt(message: string) {
+    this.fail(message);
+  }
   private fail(message: string) {
+    if (this.cycleFrames && this.closingLoop) {
+      this.loopError = message;
+      return;
+    }
+    if (this.cycleFrames && this.phase !== 'preparing' && this.node && this.c) {
+      this.loopError = message;
+      if (this.interruptedLoop) return;
+      this.interruptedLoop = true;
+      const token = this.epoch,
+        cutoff = Math.floor(this.c.currentTime * this.c.sampleRate);
+      this.finishFrames = Math.min(
+        this.finishFrames ?? this.limitFrames,
+        Math.max(0, cutoff - this.musicalFrame - this.correctionFrames),
+      );
+      this.set('finishing');
+      this.backing?.stop();
+      this.input?.disconnect();
+      if (this.timer) clearInterval(this.timer);
+      this.timer = null;
+      if (this.finishTimer) clearTimeout(this.finishTimer);
+      // Leave the port alive for queued complete passes and the ordered stop ack.
+      this.node.port.postMessage({ type: 'halt', end: cutoff });
+      this.finishTimer = setTimeout(() => {
+        if (this.valid(token))
+          void this.finishLoop(
+            token,
+            this.loopError +
+              ' The audio stop could not be confirmed; only complete passes received before recovery are kept.',
+          );
+      }, 1000);
+      return;
+    }
     this.cancel();
     this.set('error');
     this.hooks.error(message);
@@ -181,7 +248,7 @@ export class TakeCapture {
           return;
         }
       }
-      await c.audioWorklet.addModule('/recording-worklet.js?v=2');
+      await c.audioWorklet.addModule('/recording-worklet.js?v=3');
       if (!this.valid(token)) return;
       const track = stream.getAudioTracks()[0];
       if (!track || track.readyState !== 'live' || track.muted)
@@ -213,9 +280,13 @@ export class TakeCapture {
           );
       };
       this.node.port.onmessage = ({ data }) => {
-        if (!this.valid(token)) return;
+        if (!this.valid(token) || this.closingLoop) return;
         if (data.type === 'level') this.hooks.level(data.peak);
         if (data.type === 'error') this.fail(data.message);
+        if (data.type === 'halted' && this.interruptedLoop) {
+          void this.finishLoop(token);
+          return;
+        }
         if (
           data.type === 'samples' &&
           [
@@ -228,11 +299,46 @@ export class TakeCapture {
         ) {
           if (
             !(data.samples instanceof Float32Array) ||
-            this.frameCount + data.samples.length > c.sampleRate * 120
+            this.frameCount + data.samples.length >
+              (this.cycleFrames || c.sampleRate * 120) ||
+            this.totalReceived + data.samples.length > c.sampleRate * 240
           )
             return this.fail('The take exceeded its recording limit.');
           this.chunks.push(data.samples);
           this.frameCount += data.samples.length;
+          this.totalReceived += data.samples.length;
+        }
+        if (data.type === 'pass' && this.cycleFrames) {
+          if (
+            data.index !== this.completedPasses + 1 ||
+            data.index > this.passCount ||
+            data.frames !== this.cycleFrames ||
+            this.frameCount !== this.cycleFrames
+          )
+            return this.fail('A loop pass was incomplete.');
+          const chunks = this.chunks,
+            frames = this.frameCount,
+            index = ++this.completedPasses;
+          this.chunks = [];
+          this.frameCount = 0;
+          const withinStop = () =>
+            this.finishFrames === null || index * frames <= this.finishFrames;
+          this.passQueue = this.passQueue
+            .then(async () => {
+              if (!this.valid(token) || !withinStop()) return;
+              const take = await this.encodeTake(chunks, frames, c.sampleRate);
+              if (this.valid(token) && withinStop()) {
+                this.deliveredPasses++;
+                this.hooks.take({ ...take, loopPass: index });
+              }
+            })
+            .catch((e) => {
+              if (this.valid(token))
+                this.loopError =
+                  e instanceof Error
+                    ? e.message
+                    : 'A completed pass could not be prepared.';
+            });
         }
         if (
           data.type === 'done' &&
@@ -244,7 +350,11 @@ export class TakeCapture {
             'finishing',
           ].includes(this.phase)
         )
-          void this.complete(token, data.frames, c.sampleRate);
+          if (this.cycleFrames) {
+            if (data.frames !== this.totalReceived)
+              this.loopError = 'The final loop audio was incomplete.';
+            void this.finishLoop(token);
+          } else void this.complete(token, data.frames, c.sampleRate);
       };
       this.input.connect(this.node).connect(c.destination);
       c.onstatechange = () => {
@@ -270,7 +380,7 @@ export class TakeCapture {
     offset: number,
     bars: number,
     maxSeconds = 120,
-    exact?: { frames: number; sampleRate: number },
+    exact?: { frames: number; sampleRate: number; passes?: number },
     timing: RecordingTiming = {},
   ) {
     if (this.phase !== 'ready' || !this.c || !this.node) return;
@@ -315,6 +425,17 @@ export class TakeCapture {
       this.limitFrames =
         exact?.frames ??
         Math.floor(Math.min(maxSeconds, 300 - offset) * c.sampleRate);
+      if (exact?.passes !== undefined) {
+        const loop = loopPlan(
+          offset,
+          exact.frames / c.sampleRate,
+          exact.passes,
+          c.sampleRate,
+        );
+        this.cycleFrames = loop.frames;
+        this.passCount = loop.passes;
+        this.limitFrames = loop.frames * loop.passes;
+      }
       const lead = clock.countFrames / c.sampleRate + 0.35;
       if (arrangement.tracks.length) {
         const backing = await playMix(structuredClone(arrangement), undefined, {
@@ -324,6 +445,14 @@ export class TakeCapture {
           startDelay: lead,
           signal: this.control.signal,
           output: this.deps.output,
+          recordingLoop: this.cycleFrames
+            ? {
+                offset,
+                frames: this.cycleFrames,
+                passes: this.passCount,
+                preRollFrames: clock.preRollFrames,
+              }
+            : undefined,
         });
         if (!this.valid(token)) {
           backing.stop();
@@ -340,6 +469,7 @@ export class TakeCapture {
         type: 'arm',
         start: this.musicalFrame + this.correctionFrames,
         limit: this.limitFrames,
+        ...(this.cycleFrames ? { cycle: this.cycleFrames } : {}),
       });
       for (let n = 0; n < bars * 4; n++) {
         const when =
@@ -377,7 +507,9 @@ export class TakeCapture {
           }
         }
         this.hooks.progress(
-          Math.max(0, Math.min(this.limitFrames / c.sampleRate, elapsed)),
+          this.cycleFrames
+            ? Math.max(0, elapsed) % (this.cycleFrames / c.sampleRate)
+            : Math.max(0, Math.min(this.limitFrames / c.sampleRate, elapsed)),
           Math.max(
             0,
             Math.min(
@@ -391,6 +523,15 @@ export class TakeCapture {
               ),
             ),
           ),
+          this.cycleFrames
+            ? Math.min(
+                this.passCount,
+                Math.floor(
+                  (Math.max(0, elapsed) * c.sampleRate) / this.cycleFrames,
+                ) + 1,
+              )
+            : 1,
+          this.passCount,
         );
       };
       tick();
@@ -403,13 +544,80 @@ export class TakeCapture {
     }
   }
   finish() {
-    if (this.phase !== 'recording' || !this.c) return;
+    if (this.cycleFrames && this.phase === 'preparing') {
+      this.cancel();
+      return;
+    }
+    if (
+      (!this.cycleFrames && this.phase !== 'recording') ||
+      (this.cycleFrames &&
+        !['counting', 'preroll', 'recording'].includes(this.phase)) ||
+      !this.c
+    )
+      return;
     this.endAt(
       Math.min(
         this.musicalFrame + this.limitFrames,
-        Math.ceil(this.c.currentTime * this.c.sampleRate),
+        Math.max(
+          this.musicalFrame,
+          Math.ceil(this.c.currentTime * this.c.sampleRate),
+        ),
       ),
     );
+  }
+  private async encodeTake(
+    chunks: Float32Array[],
+    frames: number,
+    sampleRate: number,
+  ): Promise<RecordedTake> {
+    const samples = new Float32Array(frames);
+    let at = 0,
+      peak = 0;
+    for (const chunk of chunks) {
+      const kept = chunk.subarray(0, Math.max(0, frames - at));
+      samples.set(kept, at);
+      at += kept.length;
+    }
+    for (const value of samples) peak = Math.max(peak, Math.abs(value));
+    const depth = peak > 1 ? 32 : 24;
+    const encoded = await encodeWave(
+      {
+        length: frames,
+        sampleRate,
+        numberOfChannels: 1,
+        getChannelData: () => samples,
+      },
+      depth,
+      { channels: 1, dither: true, signal: this.control.signal },
+    );
+    return {
+      blob: encoded.blob,
+      seconds: frames / sampleRate,
+      offset: this.offset,
+      peak: encoded.peak,
+      sampleRate,
+      depth,
+      correctionMs: (this.correctionFrames * 1000) / sampleRate,
+    };
+  }
+  private async finishLoop(token: number, message = '') {
+    if (!this.valid(token) || this.closingLoop) return;
+    this.closingLoop = true;
+    this.set('finishing');
+    this.release();
+    this.chunks = [];
+    this.frameCount = 0;
+    await this.passQueue;
+    if (!this.valid(token)) return;
+    this.set('review');
+    const issue = message || this.loopError;
+    if (issue || this.deliveredPasses < this.passCount)
+      this.hooks.error(
+        (issue ? issue + ' ' : '') +
+          (this.deliveredPasses
+            ? `${this.deliveredPasses} completed ${this.deliveredPasses === 1 ? 'pass is' : 'passes are'} kept. The unfinished pass was discarded.`
+            : 'No complete loop pass was recorded. Try again.'),
+      );
   }
   private endAt(frame: number) {
     if (!this.c || !['counting', 'preroll', 'recording'].includes(this.phase))

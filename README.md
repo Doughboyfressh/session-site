@@ -4,6 +4,7 @@ A private development release for artists, producers, and engineers.
 
 ## Studio
 
+- Loop recording repeats a selected section for 2–8 passes, with count-in and musical pre-roll once. Each full pass becomes a separate mono original at the same project position. Early stops and microphone interruptions preserve complete passes and discard the unfinished pass. Repeated punch recordings remain alternatives until the user chooses comp sections. The existing take-bank duration, size, and access limits apply.
 - Explicit private take-bank saves retain mono WAV originals and comp sections in D1/R2. Reopen through My projects → Saved takes. Banks are account-private; project-associated originals require current editing access. Existing dirty arrangements are preserved and changed punch targets cannot be overwritten.
 - Each current bank supports eight takes/four minutes/48 MB; at most 20 banks per account. Historical/staged uploads stay within 64 originals/240 MB per bank and the existing 500 MB account limit until bank deletion. Interrupted initial uploads have visible cleanup entries. Deleting a bank erases its originals, keeps separately uploaded finished comps, and retains a minimal tombstone to reject old save retries.
 
@@ -14,7 +15,7 @@ A private development release for artists, producers, and engineers.
 - Private saves with revision conflicts, optional ten-second autosave, and up to 20 manual checkpoints. Previously authorized source files remain attached to project history until project deletion or explicit file erasure.
 - Microphone recording up to two minutes; imports and stereo 44.1 kHz / 16-bit WAV export up to five minutes. Uploads: 25 MB per file, 500 MB per account.
 
-This browser studio does not yet match FL Studio, Logic Pro, or Pro Tools. Native VST/AU/AAX hosting, advanced time stretching and pitch correction, take comping, MIDI device input, bus routing, stem packages, mastering loudness analysis, and sample-accurate recording compensation are not implemented. Generated sources follow tempo; imported audio retains its original speed. Structural edits and automation apply on the next playback. Keep independent backups.
+This browser studio does not yet match FL Studio, Logic Pro, or Pro Tools. Native VST/AU/AAX hosting, advanced time stretching and pitch correction, and MIDI device input remain outside this release. Take comping and punch alternatives are available; recording delay correction is manually set, with sample-based boundaries, and is not an automatic hardware latency measurement. Generated sources follow tempo; imported audio retains its original speed. Structural edits and automation apply on the next playback. Keep independent backups.
 
 ## Community and rooms
 
@@ -22,9 +23,9 @@ Profiles, usernames, avatars, roles, public/private visibility, protected upload
 
 Four-member invite-only rooms include expiring/revocable invitations, host removal, chat, camera/mic participation, and separately chosen screen/tab-audio sharing. Membership and active media sessions are separate. A new call from one account replaces its old session. Signals carry both session identities; retries are deduplicated and stale signals rejected. Perfect negotiation, bounded ICE recovery, and manual renegotiation support reconnecting. Route, round-trip time, jitter, and loss are displayed.
 
-Cloudflare STUN and TURN are configured. Temporary TURN credentials are issued server-side only to authorized room members. The TURN key identifier and API token are stored in Sites runtime settings; keep the token out of browser code. Credential generation has been verified. Rooms disclose availability; cross-network media tests remain pending. See [Cloudflare credential generation](https://developers.cloudflare.com/realtime/turn/generate-credentials/).
+Cloudflare STUN and TURN are configured. Temporary TURN credentials are issued server-side only to authorized room members. The TURN key identifier and API token are stored in Sites runtime settings; keep the token out of browser code. Credential generation has been verified. The user confirmed computer/iPhone audio and video in both directions, mute/unmute, reconnect, and automatic return during earlier development. These results do not establish all-network reliability; a final real-device session review remains pending. See [Cloudflare credential generation](https://developers.cloudflare.com/realtime/turn/generate-credentials/).
 
-Sites access remains owner-private; room invitations alone do not grant site access. Rooms support one person driving and others listening, not synchronized remote ensemble performance or concurrent DAW editing. No server room-media recording is implemented; participants may capture received media.
+Sites access remains restricted to the owner and the previously authorized external viewer; room invitations alone do not grant site access. Rooms support one person driving and others listening, not synchronized remote ensemble performance or concurrent DAW editing. No server room-media recording is implemented; participants may capture received media.
 
 ## Policies and privacy
 
@@ -33,6 +34,8 @@ Rights & privacy contains full, nonoperative drafts of Terms, Privacy Notice, Co
 Authenticated account JSON export, file listing/download, and explicit permanent file erasure are available. Erasure removes the hosted original and project access links; it cannot recall downloaded/cached copies. Listing deletion is separate. Account deletion and staffed legal/privacy operations remain unfinished. Reports are stored without external notifications. Room events are hidden after 24 hours and pruned on later message activity; closing a room deletes them. This is not a scheduled retention guarantee.
 
 ## Development and validation
+
+Loop verification: tests/loop-recording-checks.mjs exercises the actual worklet and timing planners at 44.1 and 48 kHz. tests/loop-recording-harness.html exercises continuous capture, exact pass PCM length, one-time pre-roll, delay correction, early and delayed stop, queued-pass recovery, interrupted preparation, busy controls, and repeated punch comp choices. The phone harness checks the responsive interface, not real iPhone/Safari recording or hardware latency.
 
 Saved-take verification: tests/take-bank-server-checks.mjs uses actual migration 0004, in-memory SQLite, and fake R2 (147 assertions). tests/take-bank-harness.html checks save/retry/reopen audio, recorder controls, dirty project preservation, conflicting saves, and safe close (31 browser assertions). The HTTP stack and real iPhone/Safari persistence still need the final release review. Policy text remains a nonoperative draft pending the operator information promised after development.
 

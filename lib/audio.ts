@@ -1,4 +1,5 @@
 import { defaultPattern, type Track } from './catalog';
+import { loopSegments, type RecordingLoop } from './loop-recording';
 import {
   routingFor,
   audibleTrack,
@@ -53,6 +54,7 @@ export type Arrangement = {
 };
 export type StudioOutput = (node: AudioNode) => () => void;
 export type TransportOptions = {
+  recordingLoop?: RecordingLoop;
   from?: number;
   loop?: boolean;
   loopStart?: number;
@@ -671,6 +673,11 @@ export async function playMix(
   options: TransportOptions = {},
 ) {
   const c = options.audioContext || context();
+  const finiteLoop = options.recordingLoop
+    ? loopSegments(options.recordingLoop, c.sampleRate)
+    : null;
+  if (finiteLoop && options.loop)
+    throw new Error('Choose one playback loop mode.');
   await c.resume();
   if (options.signal?.aborted)
     throw new DOMException('Playback cancelled.', 'AbortError');
@@ -750,60 +757,81 @@ export async function playMix(
   let latest = data;
   function schedule() {
     if (stopped) return;
+    if (finiteLoop) {
+      for (const segment of finiteLoop)
+        scheduleSlice(
+          firstWhen + segment.frame / c.sampleRate,
+          segment.from,
+          segment.to,
+        );
+      return;
+    }
     if (currentFrom >= end) return;
     while (!options.loop || next < c.currentTime + 0.4) {
-      for (const { t, b } of loaded) {
-        const tr = latest.tracks.find((x) => x.id === t.id);
-        if (!tr) continue;
-        const n = scheduleClip(
-          c,
-          tr,
-          b,
-          channels.get(t.id)!,
-          next,
-          currentFrom,
-          end,
-        );
-        if (n) {
-          nodes.add(n);
-          n.addEventListener('ended', () => nodes.delete(n));
-        }
-      }
-      if (options.metronome) {
-        const beat = 60 / data.bpm;
-        for (
-          let pos = Math.ceil(currentFrom / beat) * beat;
-          pos < end;
-          pos += beat
-        ) {
-          const o = c.createOscillator(),
-            g = c.createGain();
-          o.frequency.value = Math.round(pos / beat) % 4 === 0 ? 1200 : 800;
-          g.gain.setValueAtTime(0.05, next + pos - currentFrom);
-          g.gain.exponentialRampToValueAtTime(
-            0.0001,
-            next + pos - currentFrom + 0.045,
-          );
-          o.connect(g).connect(master);
-          clicks.add(o);
-          o.onended = () => {
-            clicks.delete(o);
-            o.disconnect();
-            g.disconnect();
-          };
-          o.start(next + pos - currentFrom);
-          o.stop(next + pos - currentFrom + 0.05);
-        }
-      }
+      scheduleSlice(next, currentFrom, end);
       next += end - currentFrom;
       if (!options.loop) break;
       currentFrom = startLoop;
     }
   }
+  function scheduleSlice(next: number, currentFrom: number, end: number) {
+    for (const { t, b } of loaded) {
+      const tr = latest.tracks.find((x) => x.id === t.id);
+      if (!tr) continue;
+      const n = scheduleClip(
+        c,
+        tr,
+        b,
+        channels.get(t.id)!,
+        next,
+        currentFrom,
+        end,
+      );
+      if (n) {
+        nodes.add(n);
+        n.addEventListener('ended', () => nodes.delete(n));
+      }
+    }
+    if (options.metronome) {
+      const beat = 60 / data.bpm;
+      for (
+        let pos = Math.ceil(currentFrom / beat) * beat;
+        pos < end;
+        pos += beat
+      ) {
+        const o = c.createOscillator(),
+          g = c.createGain();
+        o.frequency.value = Math.round(pos / beat) % 4 === 0 ? 1200 : 800;
+        g.gain.setValueAtTime(0.05, next + pos - currentFrom);
+        g.gain.exponentialRampToValueAtTime(
+          0.0001,
+          next + pos - currentFrom + 0.045,
+        );
+        o.connect(g).connect(master);
+        clicks.add(o);
+        o.onended = () => {
+          clicks.delete(o);
+          o.disconnect();
+          g.disconnect();
+        };
+        o.start(next + pos - currentFrom);
+        o.stop(next + pos - currentFrom + 0.05);
+      }
+    }
+  }
   schedule();
   const timer = setInterval(() => {
     if (options.loop) schedule();
-    else if (c.currentTime >= firstWhen + duration - initialFrom + 1.8) {
+    else if (
+      c.currentTime >=
+      firstWhen +
+        (options.recordingLoop
+          ? (options.recordingLoop.preRollFrames +
+              options.recordingLoop.frames * options.recordingLoop.passes) /
+            c.sampleRate
+          : duration - initialFrom) +
+        1.8
+    ) {
       stop();
       onEnd?.();
     }
