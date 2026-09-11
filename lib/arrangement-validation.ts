@@ -1,3 +1,4 @@
+import { GROUP_IDS, validateRouting } from './mixer-routing';
 function fail(message: string): never {
   throw Object.assign(new Error(message), { status: 400 });
 }
@@ -6,6 +7,7 @@ export function validateArrangement(d: any, draft = false) {
     fail('Keep projects within 32 tracks.');
   if (!Number.isFinite(d.bpm) || d.bpm < 40 || d.bpm > 240)
     fail('Tempo must be 40–240 BPM.');
+  if (d.routing !== undefined) validateRouting(d.routing, draft);
   const ids = new Set();
   for (const t of d.tracks) {
     if (!t || typeof t !== 'object') fail('Invalid track.');
@@ -42,6 +44,8 @@ export function validateArrangement(d: any, draft = false) {
       ['high', -12, 12],
       ['reverb', 0, 1],
       ['delay', 0, 1],
+      ['sendReverb', 0, 1],
+      ['sendDelay', 0, 1],
       ['compression', 0, 1],
       ['fadeIn', 0, 30],
       ['fadeOut', 0, 30],
@@ -56,6 +60,8 @@ export function validateArrangement(d: any, draft = false) {
     }
     if (t.fileId && typeof t.fileId !== 'string')
       fail('Invalid audio reference.');
+    if (t.groupId !== undefined && !GROUP_IDS.includes(t.groupId))
+      fail('Choose an available mixer group or Main.');
     if (
       t.splitFrom !== undefined &&
       (typeof t.splitFrom !== 'string' ||

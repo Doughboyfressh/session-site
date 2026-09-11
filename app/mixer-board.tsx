@@ -1,5 +1,8 @@
 'use client';
 import type { MixerTrack } from '@/lib/audio';
+import type { MixerRouting, GroupId } from '@/lib/mixer-routing';
+import { Pick } from './helpers';
+import GroupMixer from './group-mixer';
 
 export default function MixerBoard({
   tracks,
@@ -9,6 +12,8 @@ export default function MixerBoard({
   onSelect,
   onGestureStart,
   onGestureEnd,
+  routing,
+  onRouting,
 }: {
   tracks: MixerTrack[];
   levels: Record<string, number>;
@@ -17,6 +22,8 @@ export default function MixerBoard({
   onSelect: (id: string) => void;
   onGestureStart: () => void;
   onGestureEnd: () => void;
+  routing: MixerRouting;
+  onRouting: (routing: MixerRouting) => void;
 }) {
   const gesture = {
     onPointerDown: (event: React.PointerEvent<HTMLInputElement>) => {
@@ -94,6 +101,49 @@ export default function MixerBoard({
                     Solo
                   </button>
                 </div>
+                <fieldset className="channel-routing" disabled={disabled}>
+                  <Pick
+                    label={track.name + ' output'}
+                    value={track.groupId || ''}
+                    onChange={(value) => {
+                      if (!disabled)
+                        onPatch(track.id, {
+                          groupId: (value || undefined) as GroupId | undefined,
+                        });
+                    }}
+                    options={[
+                      { value: '', label: 'Main' },
+                      ...routing.groups.map((g) => ({
+                        value: g.id,
+                        label: g.name || g.id,
+                      })),
+                    ]}
+                  />
+                  {(['sendReverb', 'sendDelay'] as const).map((key) => (
+                    <label className="mix-pan" key={key}>
+                      {key === 'sendReverb' ? 'Reverb send' : 'Delay send'}{' '}
+                      <output>{Math.round((track[key] || 0) * 100)}%</output>
+                      <input
+                        {...gesture}
+                        aria-label={
+                          track.name +
+                          (key === 'sendReverb'
+                            ? ' reverb send'
+                            : ' delay send')
+                        }
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        disabled={disabled}
+                        value={track[key] || 0}
+                        onChange={(e) =>
+                          onPatch(track.id, { [key]: +e.target.value })
+                        }
+                      />
+                    </label>
+                  ))}
+                </fieldset>
                 <label className="mix-pan">
                   Pan{' '}
                   <output>
@@ -169,6 +219,15 @@ export default function MixerBoard({
         Meters show each channel after its effects, before the master limiter.
         One fader gesture is one undo step.
       </p>
+      <GroupMixer
+        routing={routing}
+        levels={levels}
+        disabled={disabled}
+        onChange={onRouting}
+        gesture={gesture}
+        onGestureStart={onGestureStart}
+        onGestureEnd={onGestureEnd}
+      />
     </section>
   );
 }

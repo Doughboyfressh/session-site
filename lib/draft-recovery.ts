@@ -1,6 +1,7 @@
 import type { Arrangement } from './audio';
 import { validateArrangement } from './arrangement-validation';
 import { validCreation, type ProjectCreation } from './project-creation';
+import { cleanRouting, validateRouting } from './mixer-routing';
 
 export const MAX_DRAFTS = 20;
 export const MAX_DRAFT_BYTES = 600 * 1024;
@@ -49,6 +50,9 @@ const fields = [
   'fadeEnd',
   'splitFrom',
   'automation',
+  'groupId',
+  'sendReverb',
+  'sendDelay',
 ];
 function identity(value: unknown) {
   return typeof value === 'string' && value.length > 0 && value.length <= 128;
@@ -115,6 +119,10 @@ export function recoverySnapshot(value: any): DraftSnapshot {
       return t;
     }),
   };
+  if (value.data.routing !== undefined) {
+    validateRouting(value.data.routing, true);
+    data.routing = cleanRouting(value.data.routing);
+  }
   validateArrangement(data, true);
   return structuredClone({ title: value.title, data });
 }

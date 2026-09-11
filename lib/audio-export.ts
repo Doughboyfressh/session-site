@@ -1,6 +1,7 @@
 import {
   bufferFor,
   channel,
+  routingGraph,
   scheduleClip,
   type Arrangement,
   type MixerTrack,
@@ -96,6 +97,7 @@ export async function renderExportTrack(
   frames: number,
   options: Pick<ExportOptions, 'sampleRate' | 'processing' | 'gainDb'>,
   signal?: AbortSignal,
+  arrangement?: Arrangement,
 ): Promise<Samples> {
   checkCancelled(signal);
   const latency =
@@ -108,9 +110,19 @@ export async function renderExportTrack(
   output.gain.value = 10 ** (options.gainDb / 20);
   output.connect(c.destination);
   const track = { ...t, muted: false, solo: false };
+  const routed =
+    options.processing === 'processed' && arrangement
+      ? routingGraph(
+          c,
+          { ...arrangement, tracks: [track] },
+          output,
+          false,
+          true,
+        )
+      : null;
   const input =
     options.processing === 'processed'
-      ? channel(c, track, output)
+      ? channel(c, track, routed?.inputs.get(track.id) || output)
       : (() => {
           const gain = c.createGain();
           gain.connect(output);
@@ -139,6 +151,7 @@ export async function renderExportTrack(
     };
   } finally {
     input.dispose();
+    routed?.dispose();
     output.disconnect();
   }
 }
@@ -241,6 +254,7 @@ export async function createAudioExport(
         frames,
         settings,
         signal,
+        data,
       );
       if (sum)
         for (let first = 0; first < frames; first += 65536) {
@@ -311,9 +325,9 @@ export async function createAudioExport(
       `Export gain: ${settings.gainDb} dB, applied equally to every file. Integer dither: ${settings.depth !== 32 && settings.dither ? 'TPDF' : 'off'}.`,
       settings.processing === 'dry'
         ? 'Dry tracks preserve clip offsets, trims and fades. Mixer volume, pan, automation, EQ, compression, reverb and delay are bypassed.'
-        : 'Processed tracks preserve clip offsets, trims, fades, volume, pan, automation and channel effects. Compressor lookahead is compensated.',
+        : 'Processed tracks preserve clip offsets, trims, fades, volume, pan, automation, channel effects, group gain/pan and their contribution to shared reverb/delay. Compressor lookahead is compensated.',
       'No master compressor or normalization is applied. A reference file is the sum of the selected exported tracks before WAV quantization.',
-      'The selected tracks are exported even if muted or excluded by solo in the studio. Loop and metronome are excluded.',
+      'The selected tracks are exported even if track/group mute or solo excludes them in the studio. Shared return levels are included in processed exports. Dry exports bypass groups and shared returns. Loop and metronome are excluded.',
       'Audio source quality is unchanged by selecting a higher output sample rate or bit depth. Exporting does not change the permissions attached to the music.',
       '',
       ...peaks.map(

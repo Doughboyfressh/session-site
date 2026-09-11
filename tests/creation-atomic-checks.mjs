@@ -67,11 +67,13 @@ function load(file) {
       id === 'cloudflare:workers'
         ? { env: { DB: D1 } }
         : load(
-            id.includes('project-creation')
-              ? 'lib/project-creation.ts'
-              : id.includes('privacy')
-                ? 'lib/arrangement-validation.ts'
-                : 'lib/server.ts',
+            id.includes('mixer-routing')
+              ? 'lib/mixer-routing.ts'
+              : id.includes('project-creation')
+                ? 'lib/project-creation.ts'
+                : id.includes('privacy')
+                  ? 'lib/arrangement-validation.ts'
+                  : 'lib/server.ts',
           ),
     crypto,
     TextEncoder,
@@ -238,6 +240,109 @@ await rejected(
 check(
   !db.prepare('SELECT * FROM projects WHERE id=?').get(accepted.id),
   'Resolution resurrected deleted project',
+);
+const { defaultRouting } = load('lib/mixer-routing.ts');
+const routingSave = body();
+routingSave.data = {
+  bpm: 120,
+  routing: defaultRouting(),
+  tracks: [
+    {
+      id: 'keys',
+      name: 'Keys',
+      notes: [],
+      volume: 0.8,
+      pan: 0,
+      muted: false,
+      solo: false,
+      offset: 0,
+      trimStart: 0,
+      trimEnd: 0,
+      low: 0,
+      mid: 0,
+      high: 0,
+      groupId: 'group-1',
+      sendReverb: 0.4,
+      sendDelay: 0.3,
+    },
+  ],
+};
+routingSave.data.routing.groups[0].name = 'My vocals';
+const routingSaved = await api.saveProject(routingSave, 'routing-owner', 10);
+let storedRouting = JSON.parse(
+  db.prepare('SELECT data FROM projects WHERE id=?').get(routingSaved.id).data,
+);
+check(
+  storedRouting.routing.groups[0].name === 'My vocals' &&
+    storedRouting.tracks[0].sendReverb === 0.4,
+  'Project save dropped routing',
+);
+check(
+  JSON.parse(
+    db
+      .prepare('SELECT data FROM project_versions WHERE project=?')
+      .get(routingSaved.id).data,
+  ).routing.groups[0].name === 'My vocals',
+  'Checkpoint dropped routing',
+);
+const updateRouting = {
+  id: routingSaved.id,
+  title: 'Changed mix',
+  baseRevision: 1,
+  data: structuredClone(routingSave.data),
+};
+updateRouting.data.routing.groups[0].volume = 0.5;
+const changedRouting = await api.saveProject(
+  updateRouting,
+  'routing-owner',
+  11,
+);
+check(changedRouting.revision === 2, 'Routing update did not advance revision');
+await rejected(() => api.saveProject(updateRouting, 'routing-owner', 12), 409);
+for (const bad of [
+  null,
+  { groups: [] },
+  { ...defaultRouting(), delay: -1 },
+  { ...defaultRouting(), groups: Array(4).fill(defaultRouting().groups[0]) },
+]) {
+  await rejected(
+    () =>
+      api.saveProject(
+        {
+          ...updateRouting,
+          baseRevision: 2,
+          data: { ...updateRouting.data, routing: bad },
+        },
+        'routing-owner',
+        13,
+      ),
+    400,
+  );
+}
+await rejected(
+  () =>
+    api.saveProject(
+      {
+        ...updateRouting,
+        baseRevision: 2,
+        data: {
+          ...updateRouting.data,
+          tracks: [{ ...updateRouting.data.tracks[0], groupId: 'missing' }],
+        },
+      },
+      'routing-owner',
+      14,
+    ),
+  400,
+);
+storedRouting = JSON.parse(
+  db.prepare('SELECT data FROM projects WHERE id=?').get(routingSaved.id).data,
+);
+check(
+  storedRouting.routing.groups[0].volume === 0.5 &&
+    db.prepare('SELECT revision FROM projects WHERE id=?').get(routingSaved.id)
+      .revision === 2,
+  'Rejected routing overwrote saved project',
 );
 console.log(
   'PASS: ' +

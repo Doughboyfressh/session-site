@@ -1,4 +1,10 @@
 import { defaultPattern, type Track } from './catalog';
+import {
+  routingFor,
+  audibleTrack,
+  type GroupId,
+  type MixerRouting,
+} from './mixer-routing';
 export type Note = {
   id: string;
   pitch: number;
@@ -36,8 +42,15 @@ export type MixerTrack = {
   fadeEnd?: number;
   splitFrom?: string;
   automation?: AutomationPoint[];
+  groupId?: GroupId;
+  sendReverb?: number;
+  sendDelay?: number;
 };
-export type Arrangement = { bpm: number; tracks: MixerTrack[] };
+export type Arrangement = {
+  bpm: number;
+  tracks: MixerTrack[];
+  routing?: MixerRouting;
+};
 export type StudioOutput = (node: AudioNode) => () => void;
 export type TransportOptions = {
   from?: number;
@@ -314,6 +327,19 @@ export function stereoMeter(c: BaseAudioContext, source: AudioNode) {
     },
   };
 }
+function roomImpulse(c: BaseAudioContext) {
+  const impulse = c.createBuffer(2, c.sampleRate * 1.6, c.sampleRate);
+  let seed = 31253;
+  for (let ch = 0; ch < 2; ch++) {
+    const d = impulse.getChannelData(ch);
+    for (let i = 0; i < d.length; i++) {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      d[i] =
+        ((seed / 4294967296) * 2 - 1) * Math.pow(1 - i / d.length, 3) * 0.4;
+    }
+  }
+  return impulse;
+}
 export function channel(
   c: BaseAudioContext,
   t: MixerTrack,
@@ -347,17 +373,7 @@ export function channel(
     delay = c.createDelay(1),
     feedback = c.createGain(),
     echo = c.createGain();
-  const impulse = c.createBuffer(2, c.sampleRate * 1.6, c.sampleRate);
-  let seed = 31253;
-  for (let ch = 0; ch < 2; ch++) {
-    const d = impulse.getChannelData(ch);
-    for (let i = 0; i < d.length; i++) {
-      seed = (seed * 1664525 + 1013904223) >>> 0;
-      d[i] =
-        ((seed / 4294967296) * 2 - 1) * Math.pow(1 - i / d.length, 3) * 0.4;
-    }
-  }
-  convolver.buffer = impulse;
+  convolver.buffer = roomImpulse(c);
   auto.connect(convolver).connect(wet).connect(output);
   auto.connect(delay);
   delay.delayTime.value = 0.25;
@@ -418,6 +434,122 @@ export function channel(
         echo,
         output,
       ].forEach((n) => n.disconnect());
+    },
+  };
+}
+// Linear group buses and shared returns. The same graph renders each exported
+// contribution, so processed stems include their own share of the shared effects.
+export function routingGraph(
+  c: BaseAudioContext,
+  data: Arrangement,
+  destination: AudioNode,
+  metering = false,
+  ignoreListening = false,
+) {
+  const nodes: AudioNode[] = [];
+  const own = <T extends AudioNode>(node: T): T => {
+    nodes.push(node);
+    return node;
+  };
+  const reverb = own(c.createConvolver()),
+    delay = own(c.createDelay(1)),
+    feedback = own(c.createGain());
+  reverb.buffer = roomImpulse(c);
+  delay.delayTime.value = 0.25;
+  feedback.gain.value = 0.28;
+  delay.connect(feedback).connect(delay);
+  const reverbOut = own(c.createGain()),
+    delayOut = own(c.createGain());
+  reverb.connect(reverbOut).connect(destination);
+  delay.connect(delayOut).connect(destination);
+  const meters = new Map<string, ReturnType<typeof stereoMeter>>();
+  if (metering) {
+    meters.set('return:reverb', stereoMeter(c, reverbOut));
+    meters.set('return:delay', stereoMeter(c, delayOut));
+  }
+  const bus = (dest: AudioNode) => {
+    const input = own(c.createGain()),
+      pan = own(c.createStereoPanner()),
+      gain = own(c.createGain());
+    input.connect(pan).connect(gain).connect(dest);
+    return { input, pan, gain };
+  };
+  const groups = new Map(
+    routingFor(data).groups.map((g) => {
+      const dry = bus(destination),
+        verb = bus(reverb),
+        echo = bus(delay);
+      if (metering) meters.set('group:' + g.id, stereoMeter(c, dry.gain));
+      return [g.id as string, { dry, verb, echo }];
+    }),
+  );
+  const direct = { dry: bus(destination), verb: bus(reverb), echo: bus(delay) };
+  groups.set('', direct);
+  const routes = new Map(
+    data.tracks.map((t) => {
+      const input = own(c.createGain()),
+        verb = own(c.createGain()),
+        echo = own(c.createGain());
+      input.connect(verb);
+      input.connect(echo);
+      return [
+        t.id,
+        { input, verb, echo, group: undefined as string | undefined },
+      ];
+    }),
+  );
+  let initial = true,
+    disposed = false;
+  const set = (param: AudioParam, value: number) => {
+    if (initial) param.setValueAtTime(value, c.currentTime);
+    else param.setTargetAtTime(value, c.currentTime, 0.015);
+  };
+  function update(next: Arrangement) {
+    if (disposed) return;
+    const config = routingFor(next);
+    set(reverbOut.gain, config.reverb);
+    set(delayOut.gain, config.delay);
+    for (const group of config.groups) {
+      const target = groups.get(group.id)!;
+      for (const b of [target.dry, target.verb, target.echo]) {
+        set(b.gain.gain, group.volume);
+        set(b.pan.pan, group.pan);
+      }
+    }
+    for (const [id, route] of routes) {
+      const track = next.tracks.find((t) => t.id === id);
+      const group = track?.groupId || '';
+      const dest = groups.get(group) || direct;
+      if (group !== route.group) {
+        if (route.group !== undefined)
+          route.input.disconnect((groups.get(route.group) || direct).dry.input);
+        route.verb.disconnect();
+        route.echo.disconnect();
+        route.input.connect(dest.dry.input);
+        route.verb.connect(dest.verb.input);
+        route.echo.connect(dest.echo.input);
+        route.group = group;
+      }
+      set(
+        route.input.gain,
+        track && (ignoreListening || audibleTrack(next, track)) ? 1 : 0,
+      );
+      set(route.verb.gain, track?.sendReverb || 0);
+      set(route.echo.gain, track?.sendDelay || 0);
+    }
+    initial = false;
+  }
+  update(data);
+  return {
+    inputs: new Map([...routes].map(([id, r]) => [id, r.input])),
+    update,
+    levels: () =>
+      Object.fromEntries([...meters].map(([id, m]) => [id, m.level()])),
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      meters.forEach((m) => m.dispose());
+      nodes.forEach((n) => n.disconnect());
     },
   };
 }
@@ -585,6 +717,7 @@ export async function playMix(
   master.connect(c.destination);
   const masterMeter = stereoMeter(c, master);
   const releaseOutput = options.output?.(master);
+  const routing = routingGraph(c, data, master, true);
   const channels = new Map(
     loaded.map(({ t }) => [
       t.id,
@@ -592,19 +725,17 @@ export async function playMix(
         c,
         {
           ...t,
-          muted: t.muted || (data.tracks.some((x) => x.solo) && !t.solo),
+          muted: !audibleTrack(data, t),
         },
-        master,
+        routing.inputs.get(t.id)!,
         true,
       ),
     ]),
   );
-  channels.forEach((ch, id) =>
-    ch.update(
-      data.tracks.find((t) => t.id === id)!,
-      data.tracks.some((t) => t.solo),
-    ),
-  );
+  channels.forEach((ch, id) => {
+    const track = data.tracks.find((t) => t.id === id)!;
+    ch.update({ ...track, muted: !audibleTrack(data, track) }, false);
+  });
   const nodes = new Set<AudioBufferSourceNode>();
   const clicks = new Set<OscillatorNode>();
   let stopped = false,
@@ -694,6 +825,7 @@ export async function playMix(
     clicks.clear();
     options.signal?.removeEventListener('abort', stop);
     channels.forEach((ch) => ch.dispose());
+    routing.dispose();
     releaseOutput?.();
     master.disconnect();
     masterMeter.dispose();
@@ -713,27 +845,26 @@ export async function playMix(
     },
     update: (d: Arrangement) => {
       latest = d;
+      routing.update(d);
       channels.forEach((ch, id) => {
         const t = d.tracks.find((x) => x.id === id);
-        if (t)
-          ch.update(
-            t,
-            d.tracks.some((x) => x.solo),
-          );
+        if (t) ch.update({ ...t, muted: !audibleTrack(d, t) }, false);
         else ch.update({ ...defaults(), muted: true });
       });
     },
     level: () => {
       return masterMeter.level();
     },
-    levels: () =>
-      Object.fromEntries([...channels].map(([id, ch]) => [id, ch.level()])),
+    levels: () => ({
+      ...Object.fromEntries([...channels].map(([id, ch]) => [id, ch.level()])),
+      ...routing.levels(),
+    }),
   };
 }
 export async function renderBuffer(data: Arrangement) {
   const loaded = await Promise.all(
     data.tracks
-      .filter((t) => !t.muted && (!data.tracks.some((x) => x.solo) || t.solo))
+      .filter((t) => audibleTrack(data, t))
       .map(async (t) => ({
         t,
         b: await bufferFor(t, data.bpm, { sampleRate: 44100 }),
@@ -753,9 +884,19 @@ export async function renderBuffer(data: Arrangement) {
   master.threshold.value = -1;
   master.ratio.value = 20;
   master.connect(c.destination);
-  for (const { t, b } of loaded)
-    scheduleClip(c, t, b, channel(c, t, master), 0, 0, duration);
-  return c.startRendering();
+  const routing = routingGraph(c, data, master);
+  const channels = loaded.map(({ t, b }) => {
+    const input = channel(c, t, routing.inputs.get(t.id)!);
+    scheduleClip(c, t, b, input, 0, 0, duration);
+    return input;
+  });
+  try {
+    return await c.startRendering();
+  } finally {
+    channels.forEach((ch) => ch.dispose());
+    routing.dispose();
+    master.disconnect();
+  }
 }
 export async function renderMix(data: Arrangement) {
   return wav(await renderBuffer(data));

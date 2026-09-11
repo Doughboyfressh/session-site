@@ -1,4 +1,10 @@
 import type { Arrangement, MixerTrack } from './audio';
+import {
+  cleanRouting,
+  routingFor,
+  GROUP_IDS,
+  type MixerRouting,
+} from './mixer-routing';
 
 export type ProjectSnapshot = { title: string; data: Arrangement };
 export type MergeChoice = 'local' | 'remote';
@@ -29,6 +35,9 @@ export function cleanProject(project: ProjectSnapshot): ProjectSnapshot {
     data: {
       bpm: project.data.bpm,
       tracks: project.data.tracks.map(cleanTrack),
+      ...(project.data.routing
+        ? { routing: cleanRouting(project.data.routing) }
+        : {}),
     },
   };
 }
@@ -215,6 +224,29 @@ export function mergeProject(
       tracks: ordered.map((id) => tracks.get(id)!),
     },
   };
+  if ([base, local, remote].some((p) => p.data.routing)) {
+    const [b, l, r] = [base, local, remote].map((p) => routingFor(p.data));
+    project.data.routing = {
+      groups: GROUP_IDS.map((id) => {
+        const group = [b, l, r].map((config) =>
+          config.groups.find((g) => g.id === id)!,
+        );
+        return Object.fromEntries(
+          ['id', 'name', 'volume', 'pan', 'muted', 'solo'].map((key) => [
+            key,
+            pick(
+              (group[0] as any)[key],
+              (group[1] as any)[key],
+              (group[2] as any)[key],
+              `${group[1].name || id} group · ${key}`,
+            ),
+          ]),
+        );
+      }),
+      reverb: pick(b.reverb, l.reverb, r.reverb, 'Shared reverb level'),
+      delay: pick(b.delay, l.delay, r.delay, 'Shared delay level'),
+    } as MixerRouting;
+  }
   // A union can exceed the server limit even when both input projects are valid.
   const tooManyTracks = project.data.tracks.length > 32;
   const tooLarge =

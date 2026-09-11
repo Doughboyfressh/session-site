@@ -11,6 +11,7 @@ import { mergeProject } from '../lib/project-merge';
 import { useDraftRecovery } from '../app/use-draft-recovery';
 import { HookRaceChecks } from './recovery-races';
 import { creationHash } from '../lib/project-creation';
+import { defaultRouting } from '../lib/mixer-routing';
 import '../app/globals.css';
 import '../app/advanced.css';
 
@@ -114,7 +115,17 @@ function App() {
       check(failed, 'Operation should have failed');
     };
     try {
-      const original = make();
+      const original = {
+        ...make(),
+        data: { ...make().data, routing: defaultRouting() },
+      };
+      original.data.routing.groups[0].name = 'Recovered vocals';
+      original.data.routing.reverb = 0.42;
+      Object.assign(original.data.tracks[0], {
+        groupId: 'group-1',
+        sendReverb: 0.35,
+        sendDelay: 0.12,
+      });
       const rec = recoveryRecord('A', {
         ...original,
         secret: 'DO-NOT-KEEP',
@@ -143,6 +154,15 @@ function App() {
       check(original.data.tracks[0].volume === 0.4, 'Capture mutated editor');
       check(await a.put(rec, 0), 'Initial commit failed');
       await a.close();
+      const routed = (await a.list('A')).drafts[0];
+      check(
+        routed.data.routing?.groups[0].name === 'Recovered vocals' &&
+          routed.data.routing.reverb === 0.42 &&
+          routed.data.tracks[0].sendReverb === 0.35 &&
+          routed.data.tracks[0].sendDelay === 0.12 &&
+          routed.data.tracks[0].groupId === 'group-1',
+        'Reopened browser recovery lost routing or sends',
+      );
       check(
         (await a.list('A')).drafts[0].data.tracks[0].volume === 0.2,
         'Reopen lost data',

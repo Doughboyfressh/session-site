@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mergeProject, sameProject } from '../lib/project-merge.ts';
+import { loadTS } from './load-ts.mjs';
+const { mergeProject, sameProject } = loadTS('lib/project-merge.ts');
 const track = (id) => ({
   id,
   name: id,

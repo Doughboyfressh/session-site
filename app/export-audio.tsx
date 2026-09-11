@@ -14,6 +14,7 @@ import {
   type ExportProgress,
 } from '@/lib/audio-export';
 import type { Arrangement } from '@/lib/audio';
+import { audibleTrack } from '@/lib/mixer-routing';
 
 export default function ExportAudio({
   title,
@@ -25,7 +26,7 @@ export default function ExportAudio({
   onClose: () => void;
 }) {
   const audible = data.tracks
-    .filter((t) => !t.muted && (!data.tracks.some((x) => x.solo) || t.solo))
+    .filter((t) => audibleTrack(data, t))
     .map((t) => t.id);
   const [options, setOptions] = useState<ExportOptions>({
     kind: 'mix',
@@ -203,8 +204,8 @@ export default function ExportAudio({
           </div>
           <p className="export-note">
             {options.processing === 'dry'
-              ? 'Dry audio keeps positions, trims and fades. Mixer volume, pan, automation and effects are bypassed.'
-              : 'Mixer effects, levels, pan and automation are included. Exports leave out the playback safety compressor.'}{' '}
+              ? 'Dry audio keeps positions, trims and fades. Mixer volume, pan, automation, groups and effects are bypassed.'
+              : 'Channel effects, group levels/pan and each track’s share of reverb/delay returns are included. Exports leave out the playback safety compressor.'}{' '}
             Export gain applies equally to every file.
           </p>
           <div className="export-checks">
@@ -273,21 +274,20 @@ export default function ExportAudio({
                 <span>{String(index + 1).padStart(2, '0')}</span>
                 <strong>{track.name}</strong>
                 <small>
-                  {track.muted
-                    ? 'Muted in studio'
-                    : data.tracks.some((t) => t.solo) && !track.solo
-                      ? 'Outside solo selection'
-                      : ''}
+                  {!audibleTrack(data, track)
+                    ? 'Excluded by studio mute/solo'
+                    : ''}
                 </small>
               </label>
             ))}
           </div>
         </fieldset>
         <p className="export-note">
-          Every selected track is included, even if muted in the studio.
-          Separate WAVs start at 00:00 and have the same length. ZIP packages
-          include an import guide. Five-minute timeline; up to five extra
-          seconds for tails. Exports are limited to 128 MB.
+          Every selected track is included, even if track or group mute/solo
+          excludes it in the studio. Separate WAVs start at 00:00 and have the
+          same length. ZIP packages include an import guide. Five-minute
+          timeline; up to five extra seconds for tails. Exports are limited to
+          128 MB.
         </p>
         {running && (
           <div className="export-progress" role="status">

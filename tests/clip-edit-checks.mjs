@@ -7,7 +7,8 @@ import {
   snapTime,
   splitClip,
 } from '../lib/clip-edit.ts';
-import { mergeProject, sameProject } from '../lib/project-merge.ts';
+import { loadTS } from './load-ts.mjs';
+const { mergeProject, sameProject } = loadTS('lib/project-merge.ts');
 const source = {
   id: 'source',
   name: 'Original',

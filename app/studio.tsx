@@ -51,6 +51,7 @@ import {
 import type { RoomAudio } from '@/lib/room-audio';
 import ArrangementTimeline from './arrangement-timeline';
 import MixerBoard from './mixer-board';
+import { routingFor } from '@/lib/mixer-routing';
 import {
   clipLength,
   duplicateClip,
@@ -1466,7 +1467,17 @@ export default function Studio({
             <MixerBoard
               tracks={data.tracks}
               levels={levels}
-              disabled={recording || !!busy || !!exportSnapshot}
+              disabled={!canEdit || recording || !!busy || !!exportSnapshot}
+              routing={routingFor(data)}
+              onRouting={(routing) => {
+                if (
+                  editAllowed.current &&
+                  !recording &&
+                  !busy &&
+                  !exportSnapshot
+                )
+                  mutate((d) => ({ ...d, routing }));
+              }}
               onPatch={patch}
               onSelect={(tid) => {
                 endGesture();
@@ -1602,10 +1613,11 @@ export default function Studio({
               added. Keep or download each recording before closing the page.
               Use headphones while recording. Recording is limited to 2 minutes;
               the arrangement to 5 minutes. Exports can include extra time for
-              effect tails. Volume, pan, EQ, compression, reverb, and delay
-              respond during playback. Note edits, fades, automation, and timing
-              changes apply on the next playback. Tempo changes affect generated
-              instruments and drums; imported audio keeps its original speed.
+              effect tails. Groups, sends, shared returns, volume, pan, EQ,
+              compression, reverb, and delay respond during playback. Note
+              edits, fades, automation, and timing changes apply on the next
+              playback. Tempo changes affect generated instruments and drums;
+              imported audio keeps its original speed.
             </p>
           </div>
           <Dialog
