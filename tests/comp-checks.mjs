@@ -28,6 +28,7 @@ function load(file) {
       setTimeout,
       clearTimeout,
       console,
+      structuredClone,
     },
   );
   return exports;
@@ -41,6 +42,7 @@ const {
   renderComp,
   takeBudget,
   MAX_TAKE_BYTES,
+  planPunch,
 } = load('lib/take-comp.ts');
 let checks = 0;
 function check(v, m) {
@@ -248,6 +250,194 @@ check(
   takeBudget([{ ...meta, seconds: 210 }], 0).limit === 30,
   'Remaining recording allowance lost',
 );
+for (const rate of [44100, 48000]) {
+  const base = await take('base', 0.2, 1, rate);
+  const original = new Uint8Array(await base.blob.arrayBuffer());
+  const from = 0.25,
+    to = 0.75;
+  const spec = planPunch(fullTake(base), [base], from, to);
+  check(
+    spec.frames === rate / 2 && spec.offset === 12.75,
+    'Punch plan not aligned',
+  );
+  const donor = {
+    ...(await take(
+      'punch',
+      (i) => (i < rate / 4 ? 0.6 : -0.4),
+      0.5,
+      rate,
+      spec.offset,
+    )),
+    coverageStart: spec.start,
+    compOrigin: spec.origin,
+  };
+  const list = [base, donor];
+  const plan = replaceCompRange(fullTake(base), list, donor.id, from, to);
+  const pcm = await takePCM(await renderComp(plan, list));
+  check(
+    pcm.length === rate &&
+      Math.abs(pcm[1000] - 0.2) < 1e-6 &&
+      Math.abs(pcm[rate - 1000] - 0.2) < 1e-6,
+    'Punch changed surrounding vocal',
+  );
+  check(
+    Math.abs(pcm[Math.round(rate * 0.3)] - 0.6) < 1e-6 &&
+      Math.abs(pcm[Math.round(rate * 0.65)] + 0.4) < 1e-6,
+    'Partial PCM source offset is wrong',
+  );
+  check(
+    Buffer.from(original).equals(Buffer.from(await base.blob.arrayBuffer())),
+    'Punch mutated original source',
+  );
+  await rejects(() => fullTake(donor));
+  await rejects(() =>
+    replaceCompRange(fullTake(base), list, donor.id, 0.2, 0.75),
+  );
+  await rejects(() =>
+    replaceCompRange(fullTake(base), list, donor.id, 0.25, 0.8),
+  );
+  await rejects(() => planPunch(fullTake(base), [base], 0, 0.05));
+  await rejects(() => planPunch(fullTake(base), [base], NaN, 1));
+  await rejects(() => planPunch(fullTake(base), [base], 0, 1.1));
+  await rejects(() => planPunch(fullTake(base), Array(8).fill(base), 0, 1));
+  for (const [a, b] of [
+    [0, 0.25],
+    [0.75, 1],
+  ]) {
+    const p = planPunch(fullTake(base), [base], a, b);
+    const edge = {
+      ...(await take('edge', 0.8, b - a, rate, p.offset)),
+      coverageStart: p.start,
+      compOrigin: p.origin,
+    };
+    const next = replaceCompRange(fullTake(base), [base, edge], edge.id, a, b);
+    const output = await renderComp(next, [base, edge]);
+    check(
+      output.offset === base.offset && output.seconds === 1,
+      'Edge punch moved the comp origin',
+    );
+    const samples = await takePCM(output);
+    check(
+      Math.abs(samples[Math.round(((a + b) / 2) * rate)] - 0.8) < 1e-6,
+      'Edge punch samples missing',
+    );
+    await rejects(() => fullTake(edge));
+  }
+  const short = {
+    ...donor,
+    ...(await take('short-punch', 0.4, 0.2, rate, spec.offset)),
+  };
+  await rejects(() =>
+    replaceCompRange(fullTake(base), [base, short], short.id, from, to),
+  );
+  check(
+    compFrames(
+      replaceCompRange(fullTake(base), [base, short], short.id, from, 0.45),
+      [base, short],
+    ).length === rate,
+    'Covered short punch range rejected',
+  );
+}
+const { punchSeed, punchBacking, checkPunchTarget, applyPunchClip } =
+  load('lib/punch-clip.ts');
+const target = {
+  id: 'vocal',
+  name: 'Vocal',
+  fileId: 'original',
+  offset: 12.5,
+  trimStart: 0,
+  trimEnd: 0,
+  duration: 1,
+  volume: 0.6,
+  pan: -0.3,
+  solo: true,
+  muted: false,
+  low: 2,
+  fadeIn: 0.1,
+  fadeStart: 0,
+  fadeEnd: 1,
+  automation: [{ time: 13, value: 0.2 }],
+};
+const arrangement = {
+  bpm: 120,
+  tracks: Array.from({ length: 32 }, (_, i) =>
+    i === 0 ? target : { ...target, id: 'other' + i, solo: false },
+  ),
+};
+const signal = new Float32Array(48000).fill(1.1);
+const samples = {
+  length: 48000,
+  sampleRate: 48000,
+  numberOfChannels: 1,
+  getChannelData: () => signal,
+};
+const seed = await punchSeed(target, samples);
+check(seed.depth === 32 && seed.peak > 1, 'Seed clipped source headroom');
+const backing = punchBacking(arrangement, target);
+check(
+  backing.tracks[0].muted &&
+    backing.tracks[0].solo &&
+    !arrangement.tracks[0].muted &&
+    backing.tracks.length === 32,
+  'Backing changed solo or original data',
+);
+const replaced = applyPunchClip(
+  arrangement,
+  target,
+  seed,
+  seed,
+  'new-file',
+  [1],
+);
+check(
+  replaced.tracks.length === 32 &&
+    replaced.tracks[0].fileId === 'new-file' &&
+    arrangement.tracks[0].fileId === 'original',
+  'Replacement lost original or added channel at capacity',
+);
+check(
+  JSON.stringify({
+    ...replaced.tracks[0],
+    fileId: target.fileId,
+    peaks: undefined,
+  }) === JSON.stringify(target),
+  'Replacement changed mixer/timing settings',
+);
+await rejects(() => checkPunchTarget({ ...arrangement, tracks: [] }, target));
+await rejects(() =>
+  checkPunchTarget(
+    { ...arrangement, tracks: [{ ...target, volume: 1 }] },
+    target,
+  ),
+);
+await rejects(() =>
+  applyPunchClip(
+    arrangement,
+    target,
+    seed,
+    { ...seed, seconds: 0.9 },
+    'new',
+    [],
+  ),
+);
+await rejects(() =>
+  applyPunchClip(arrangement, target, seed, { ...seed, offset: 13 }, 'new', []),
+);
+await rejects(() =>
+  applyPunchClip(
+    arrangement,
+    target,
+    seed,
+    { ...seed, sampleRate: 44100 },
+    'new',
+    [],
+  ),
+);
+await rejects(() => punchSeed(target, { ...samples, numberOfChannels: 2 }));
+await rejects(() => punchSeed({ ...target, trimStart: 0.1 }, samples));
+await rejects(() => punchSeed({ ...target, trimEnd: 0.1 }, samples));
+await rejects(() => punchSeed(target, { ...samples, length: 121 * 48000 }));
+await rejects(() => punchSeed(target, samples, AbortSignal.abort()));
 console.log(
   'PASS: ' +
     checks +

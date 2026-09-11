@@ -42,6 +42,12 @@ import ConflictValues from './conflict-values';
 import ExportAudio from './export-audio';
 import RecordTake from './record-take';
 import type { RecordedTake } from '@/lib/recording';
+import {
+  punchSeed,
+  punchBacking,
+  checkPunchTarget,
+  applyPunchClip,
+} from '@/lib/punch-clip';
 import type { RoomAudio } from '@/lib/room-audio';
 import ArrangementTimeline from './arrangement-timeline';
 import MixerBoard from './mixer-board';
@@ -108,6 +114,8 @@ export default function Studio({
       data: Arrangement;
       offset: number;
       projectId: string;
+      target?: MixerTrack;
+      seed?: RecordedTake & { name: string };
     } | null>(null),
     [pattern, setPattern] = useState(defaultPattern.map((r) => [...r])),
     [tab, setTab] = useState('Arrangement'),
@@ -134,6 +142,9 @@ export default function Studio({
     input = useRef<HTMLInputElement>(null),
     alive = useRef(true);
   const recording = !!recordSnapshot;
+  const seedJob = useRef<AbortController | null>(null);
+  const projectIdRef = useRef(id);
+  projectIdRef.current = id;
   const editEpoch = useRef(0);
   const tracksRef = useRef(data);
   const titleRef = useRef(title);
@@ -161,6 +172,7 @@ export default function Studio({
       setAutosave(false);
       stop();
       editEpoch.current++;
+      seedJob.current?.abort();
       endGesture();
     },
     prepareCreation: async (creation, baseline) => {
@@ -191,6 +203,7 @@ export default function Studio({
   editAllowed.current = canEdit;
   useEffect(() => {
     if (!roomAllowed) {
+      seedJob.current?.abort();
       endGesture();
       setAutosave(false);
       stop();
@@ -233,6 +246,7 @@ export default function Studio({
     alive.current = true;
     return () => {
       alive.current = false;
+      seedJob.current?.abort();
       generation.current++;
       playback.current?.stop();
       editEpoch.current++;
@@ -583,19 +597,81 @@ export default function Studio({
     stop();
     setRecordSnapshot(structuredClone({ data, offset, projectId: id }));
   }
+  async function recordSelected() {
+    if (!focus?.fileId || !canEdit || structuralLocked || seedJob.current)
+      return;
+    const target = structuredClone(focus),
+      backing = structuredClone(data),
+      projectId = id;
+    const permission = editEpoch.current,
+      controller = new AbortController();
+    seedJob.current = controller;
+    const check = () => {
+      if (
+        !alive.current ||
+        !editAllowed.current ||
+        permission !== editEpoch.current ||
+        controller.signal.aborted ||
+        projectIdRef.current !== projectId
+      )
+        throw new Error(
+          'Punch preparation was cancelled or editing access ended.',
+        );
+      checkPunchTarget(tracksRef.current, target);
+    };
+    stop();
+    setBusy('Preparing vocal');
+    try {
+      check();
+      const audio = await bufferFor(target, backing.bpm, {
+        sampleRate: 48000,
+        signal: controller.signal,
+        revalidate: true,
+      });
+      check();
+      const seed = await punchSeed(target, audio, controller.signal);
+      check();
+      setRecordSnapshot({
+        data: punchBacking(backing, target),
+        offset: target.offset,
+        projectId,
+        target,
+        seed,
+      });
+    } catch (e) {
+      if (alive.current)
+        notify(
+          e instanceof Error ? e.message : 'The vocal could not be opened.',
+        );
+    } finally {
+      if (seedJob.current === controller) seedJob.current = null;
+      if (alive.current) setBusy('');
+    }
+  }
   async function keepTake(take: RecordedTake, signal: AbortSignal) {
     const permission = editEpoch.current;
+    const snapshot = recordSnapshot;
     const check = () => {
       if (
         signal.aborted ||
         !alive.current ||
         !editAllowed.current ||
-        permission !== editEpoch.current
+        permission !== editEpoch.current ||
+        projectIdRef.current !== snapshot?.projectId
       )
         throw new Error(
           'Adding this take was cancelled or editing access ended. Your local take is still available to download.',
         );
-      if (tracksRef.current.tracks.length >= 32)
+      if (snapshot?.target && snapshot.seed)
+        applyPunchClip(
+          tracksRef.current,
+          snapshot.target,
+          snapshot.seed,
+          take,
+          snapshot.target.fileId!,
+          [],
+        );
+      else if (tracksRef.current.tracks.length >= 32)
         throw new Error(
           'This session has reached 32 tracks. Download this take or remove a track before adding it.',
         );
@@ -617,6 +693,24 @@ export default function Studio({
       { signal, projectId: recordSnapshot?.projectId },
     );
     check();
+    if (snapshot?.target && snapshot.seed) {
+      mutate((d) =>
+        applyPunchClip(
+          d,
+          snapshot.target!,
+          snapshot.seed!,
+          take,
+          f.id,
+          peaks(decoded),
+        ),
+      );
+      setSelected(snapshot.target.id);
+      setTab('Arrangement');
+      notify(
+        'Vocal updated. Close the recorder to undo, or save the project to share your changes.',
+      );
+      return;
+    }
     const t: MixerTrack = {
       ...defaults(
         (take.kind === 'comp' ? 'Vocal comp ' : 'Vocal take ') +
@@ -678,6 +772,7 @@ export default function Studio({
     <RecordTake
       data={recordSnapshot.data}
       offset={recordSnapshot.offset}
+      seed={recordSnapshot.seed}
       canEdit={canEdit && !sync.accessEnded}
       onKeep={keepTake}
       onClose={() => setRecordSnapshot(null)}
@@ -1100,6 +1195,13 @@ export default function Studio({
           {tab === 'Arrangement' && (
             <div className="clip-tools">
               <div className="clip-tool-actions">
+                <button
+                  className="button secondary"
+                  disabled={!canEdit || !focus?.fileId || structuralLocked}
+                  onClick={() => void recordSelected()}
+                >
+                  Punch in selected vocal
+                </button>
                 <label>
                   Grid{' '}
                   <select

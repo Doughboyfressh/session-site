@@ -278,6 +278,39 @@ function App() {
             short.offset === 0 && Math.abs(short.seconds - 0.1) <= 1 / rate,
             'Take-bank automatic limit inaccurate',
           );
+          take = null;
+          const frames = rate === 44100 ? 5516 : 6005;
+          await limited.connect();
+          await limited.start(arrangement, 12.75, 0, frames / rate, {
+            frames,
+            sampleRate: rate,
+          });
+          await wait(() => !!take || !!error);
+          check(!error, error);
+          const punched = take as unknown as RecordedTake;
+          check(
+            Math.round(punched.seconds * rate) === frames &&
+              punched.offset === 12.75,
+            'Punch lost exact frame boundary',
+          );
+          take = null;
+          await limited.connect();
+          await limited.start(arrangement, 12.75, 0, 0.2, {
+            frames,
+            sampleRate: rate === 44100 ? 48000 : 44100,
+          });
+          check(
+            !!error && !take && String(phase) === 'error',
+            'Mismatched sample rate was armed',
+          );
+          error = '';
+          await limited.connect();
+          await limited.start(arrangement, 299.9, 0, 0.2, {
+            frames: Math.round(rate * 0.2),
+            sampleRate: rate,
+          });
+          check(!!error && !take, 'Punch past timeline end was armed');
+          error = '';
         } finally {
           limited.dispose();
         }

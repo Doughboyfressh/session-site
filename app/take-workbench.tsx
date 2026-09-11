@@ -11,6 +11,9 @@ export default function TakeWorkbench({
   regions,
   onWhole,
   onReplace,
+  onPunch,
+  canPunch,
+  fixedLength,
   onUndo,
   onRedo,
   undo,
@@ -29,6 +32,9 @@ export default function TakeWorkbench({
   regions: CompRegion[];
   onWhole: () => void;
   onReplace: (from: number, to: number) => void;
+  onPunch: (from: number, to: number) => void;
+  canPunch: boolean;
+  fixedLength?: boolean;
   onUndo: () => void;
   onRedo: () => void;
   undo: boolean;
@@ -89,6 +95,17 @@ export default function TakeWorkbench({
           Mono {selected.depth}-bit{selected.depth === 32 ? ' float' : ''} WAV ·{' '}
           {(selected.blob.size / 1024 / 1024).toFixed(1)} MB
         </p>
+        {selected.coverageStart !== undefined && (
+          <p className="record-note">
+            Recorded range:{' '}
+            {(selected.coverageStart / selected.sampleRate).toFixed(2)}–
+            {(
+              selected.coverageStart / selected.sampleRate +
+              selected.seconds
+            ).toFixed(2)}
+            s. This take contains only that section.
+          </p>
+        )}
         <audio
           ref={preview}
           src={selected.url}
@@ -191,10 +208,26 @@ export default function TakeWorkbench({
             Use {selected.name} for this section
           </button>
         </fieldset>
+        <button
+          className="button primary"
+          disabled={locked || !canPunch}
+          onClick={() =>
+            onPunch(
+              from.trim() ? Number(from) : NaN,
+              to.trim() ? Number(to) : NaN,
+            )
+          }
+        >
+          Record this section
+        </button>
         <div className="actions comp-tools">
           <button
             className="button secondary"
-            disabled={locked}
+            disabled={
+              locked ||
+              selected.coverageStart !== undefined ||
+              (!!fixedLength && selected.id !== 'original-clip')
+            }
             onClick={onWhole}
           >
             Use {selected.name} as full comp

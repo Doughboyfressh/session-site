@@ -22,6 +22,7 @@ import {
   MAX_TAKE_SECONDS,
   MAX_TAKE_BYTES,
   fullTake,
+  planPunch,
   replaceCompRange,
   renderComp,
   type LocalTake,
@@ -95,6 +96,7 @@ export default function RecordTake({
   onClose,
   createCapture,
   roomAudio,
+  seed,
 }: {
   data: Arrangement;
   offset: number;
@@ -103,6 +105,7 @@ export default function RecordTake({
   onClose: () => void;
   createCapture?: (hooks: CaptureHooks) => TakeCapture;
   roomAudio?: RoomAudio;
+  seed?: RecordedTake & { name: string };
 }) {
   const [phase, setPhase] = useState<CapturePhase>('idle'),
     [level, setLevel] = useState(0),
@@ -115,7 +118,8 @@ export default function RecordTake({
     [error, setError] = useState(''),
     [takes, setTakes] = useState<LocalTake[]>([]),
     [selected, setSelected] = useState(''),
-    [taking, setTaking] = useState(true),
+    [taking, setTaking] = useState(!seed),
+    [punch, setPunch] = useState<ReturnType<typeof planPunch> | null>(null),
     [regions, setRegions] = useState<CompRegion[]>([]),
     [past, setPast] = useState<CompRegion[][]>([]),
     [future, setFuture] = useState<CompRegion[][]>([]),
@@ -141,6 +145,11 @@ export default function RecordTake({
     busyRef = useRef(false),
     takeNumber = useRef(0),
     allowed = useRef(canEdit);
+  const pendingPunch = useRef<
+    (ReturnType<typeof planPunch> & { regions: CompRegion[] }) | null
+  >(null);
+  const preparedRef = useRef(prepared);
+  preparedRef.current = prepared;
   allowed.current = canEdit;
   plan.current = regions;
   const take = takes.find((t) => t.id === selected) || takes.at(-1);
@@ -161,7 +170,8 @@ export default function RecordTake({
   function invalidate() {
     stopPreview();
     renderJob.current?.abort();
-    if (prepared) releaseURL(prepared.url);
+    if (preparedRef.current) releaseURL(preparedRef.current.url);
+    preparedRef.current = null;
     setPrepared(null);
     setError('');
   }
@@ -174,6 +184,19 @@ export default function RecordTake({
   }
   useEffect(() => {
     alive.current = true;
+    if (seed) {
+      const entry: LocalTake = {
+        ...seed,
+        id: 'original-clip',
+        name: seed.name,
+        url: rememberURL(seed.blob),
+      };
+      bank.current = [entry];
+      plan.current = fullTake(entry);
+      setTakes(bank.current);
+      setSelected(entry.id);
+      setRegions(plan.current);
+    }
     const hooks: CaptureHooks = {
       state: (p) => {
         if (alive.current) setPhase(p);
@@ -195,6 +218,9 @@ export default function RecordTake({
       },
       take: (t) => {
         if (!alive.current || !allowed.current) return;
+        const punch = pendingPunch.current;
+        pendingPunch.current = null;
+        setPunch(null);
         if (
           bank.current.length >= MAX_TAKES ||
           bank.current.reduce((n, t) => n + t.blob.size, 0) + t.blob.size >
@@ -208,17 +234,52 @@ export default function RecordTake({
           setTaking(false);
           return;
         }
-        const entry = {
+        const entry: LocalTake = {
           ...t,
+          ...(punch
+            ? { coverageStart: punch.start, compOrigin: punch.origin }
+            : {}),
           id: crypto.randomUUID(),
-          name: 'Take ' + ++takeNumber.current,
+          name: (punch ? 'Punch ' : 'Take ') + ++takeNumber.current,
           url: rememberURL(t.blob),
         };
         bank.current = [...bank.current, entry];
         setTakes(bank.current);
         setSelected(entry.id);
         setTaking(false);
-        if (!plan.current.length) {
+        if (punch) {
+          if (
+            t.sampleRate === punch.sampleRate &&
+            Math.round(t.seconds * t.sampleRate) === punch.frames &&
+            Math.abs(t.offset - punch.offset) < 1e-9 &&
+            JSON.stringify(plan.current) === JSON.stringify(punch.regions)
+          ) {
+            try {
+              const next = replaceCompRange(
+                plan.current,
+                bank.current,
+                entry.id,
+                punch.start / punch.sampleRate,
+                punch.end / punch.sampleRate,
+              );
+              invalidate();
+              const previous = plan.current;
+              setPast((p) => [...p, previous].slice(-20));
+              setFuture([]);
+              plan.current = next;
+              setRegions(next);
+            } catch (e) {
+              setError(
+                e instanceof Error
+                  ? e.message
+                  : 'Your current comp is unchanged.',
+              );
+            }
+          } else
+            setError(
+              'The punch ended early or did not match the selected section. Your comp is unchanged. This recording is kept for download or use within its recorded range.',
+            );
+        } else if (!plan.current.length) {
           const next = fullTake(entry);
           plan.current = next;
           setRegions(next);
@@ -227,23 +288,18 @@ export default function RecordTake({
     };
     capture.current = createCapture
       ? createCapture(hooks)
-      : new TakeCapture(
-          hooks,
-          roomAudio
-            ? {
-                context: () =>
-                  new AudioContext({
-                    sampleRate: 48000,
-                    latencyHint: 'interactive',
-                  }),
-                media: async () => {
-                  throw new Error('Join the room call before recording.');
-                },
-                acquire: roomAudio.acquire,
-                output: roomAudio.output,
-              }
-            : undefined,
-        );
+      : new TakeCapture(hooks, {
+          context: () =>
+            new AudioContext({
+              sampleRate:
+                pendingPunch.current?.sampleRate || seed?.sampleRate || 48000,
+              latencyHint: 'interactive',
+            }),
+          media: (constraints) =>
+            navigator.mediaDevices.getUserMedia(constraints),
+          acquire: roomAudio?.acquire,
+          output: roomAudio?.output,
+        });
     return () => {
       alive.current = false;
       attempt.current++;
@@ -261,6 +317,9 @@ export default function RecordTake({
       upload.current?.abort();
       renderJob.current?.abort();
       capture.current?.cancel();
+      pendingPunch.current = null;
+      setPunch(null);
+      if (bank.current.length) setTaking(false);
       stopPreview();
       busyRef.current = false;
       setPreparing(false);
@@ -298,6 +357,7 @@ export default function RecordTake({
   }
   function discard() {
     if (!take || busyRef.current) return;
+    if (seed && take.id === 'original-clip') return;
     invalidate();
     releaseURL(take.url);
     const remaining = bank.current.filter((t) => t.id !== take.id);
@@ -306,8 +366,11 @@ export default function RecordTake({
     setSelected(remaining[0]?.id || '');
     setPast([]);
     setFuture([]);
-    if (regions.some((r) => r.takeId === take.id))
-      setRegions(remaining.length ? fullTake(remaining[0]) : []);
+    if (regions.some((r) => r.takeId === take.id)) {
+      const base = remaining.find((t) => t.coverageStart === undefined);
+      plan.current = base ? fullTake(base) : [];
+      setRegions(plan.current);
+    }
     setTaking(!remaining.length);
     setUploadAttempted(false);
     setError('');
@@ -417,10 +480,30 @@ export default function RecordTake({
     if (!allowed.current || !hasSpace || busyRef.current || added) return;
     stopPreview();
     capture.current?.cancel();
+    pendingPunch.current = null;
+    setPunch(null);
     setTaking(true);
     setError('');
     setSeconds(0);
     setClipped(false);
+  }
+  function punchIn(from: number, to: number) {
+    if (!allowed.current || busyRef.current || added) return;
+    try {
+      const next = planPunch(regions, takes, from, to);
+      stopPreview();
+      capture.current?.cancel();
+      pendingPunch.current = { ...next, regions: structuredClone(regions) };
+      setPunch(next);
+      setTaking(true);
+      setError('');
+      setSeconds(0);
+      setClipped(false);
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : 'Choose a valid punch section.',
+      );
+    }
   }
   const active = [
     'opening',
@@ -438,13 +521,30 @@ export default function RecordTake({
       >
         <div className="record-position">
           <span>
-            Starts at <strong>{offset.toFixed(2)}s</strong>
+            Starts at <strong>{(punch?.offset ?? offset).toFixed(2)}s</strong>
           </span>
           <span>{data.bpm} BPM · 4/4</span>
           <span>
-            Up to {Math.max(0, takeLimit).toFixed(1)} seconds per next take
+            {punch
+              ? `${(punch.frames / punch.sampleRate).toFixed(2)} second punch`
+              : `Up to ${Math.max(0, takeLimit).toFixed(1)} seconds per next take`}
           </span>
         </div>
+        {punch && (
+          <p className="record-progress" role="status">
+            Punch in: {(punch.start / punch.sampleRate).toFixed(2)}–
+            {(punch.end / punch.sampleRate).toFixed(2)}s of your vocal.
+            Recording stops automatically at the end. Stopping early keeps your
+            current comp unchanged.
+          </p>
+        )}
+        {seed && (
+          <p className="record-note">
+            Editing {seed.name}. Apply the finished comp to replace this clip;
+            its original file and mixer settings are kept. Studio Undo can
+            restore the original after closing the recorder.
+          </p>
+        )}
         {taking && (
           <>
             <fieldset disabled={active || !canEdit} className="record-settings">
@@ -568,6 +668,9 @@ export default function RecordTake({
             }}
             regions={regions}
             onWhole={() => changePlan(fullTake(take))}
+            onPunch={punchIn}
+            canPunch={hasSpace && !!regions.length}
+            fixedLength={!!seed}
             onReplace={(from, to) => {
               try {
                 changePlan(replaceCompRange(regions, takes, take.id, from, to));
@@ -639,28 +742,38 @@ export default function RecordTake({
                 <>
                   <button
                     className="button secondary"
-                    disabled={uploading || preparing}
+                    disabled={
+                      uploading ||
+                      preparing ||
+                      (!!seed && take.id === 'original-clip')
+                    }
                     onClick={() => setConfirmDiscard(true)}
                   >
                     Discard selected take
                   </button>
-                  <button
-                    className="button secondary"
-                    disabled={uploading || preparing || !canEdit || !hasSpace}
-                    onClick={another}
-                  >
-                    Record another take
-                  </button>
+                  {!seed && (
+                    <button
+                      className="button secondary"
+                      disabled={uploading || preparing || !canEdit || !hasSpace}
+                      onClick={another}
+                    >
+                      Record another take
+                    </button>
+                  )}
                   <button
                     className="button primary"
-                    disabled={uploading || preparing || !canEdit}
+                    disabled={
+                      uploading || preparing || !canEdit || !regions.length
+                    }
                     onClick={() => void keep()}
                   >
                     {uploading
                       ? preparing
                         ? 'Preparing comp…'
                         : 'Adding comp…'
-                      : 'Add comp to project'}
+                      : seed
+                        ? 'Apply comp to selected clip'
+                        : 'Add comp to project'}
                   </button>
                 </>
               )}
@@ -671,6 +784,8 @@ export default function RecordTake({
                 className="button secondary"
                 onClick={() => {
                   capture.current?.cancel();
+                  pendingPunch.current = null;
+                  setPunch(null);
                   if (takes.length) setTaking(false);
                   else onClose();
                 }}
@@ -693,9 +808,10 @@ export default function RecordTake({
                       setError('');
                       void capture.current?.start(
                         data,
-                        offset,
+                        punch?.offset ?? offset,
                         Number(bars),
-                        takeLimit,
+                        punch ? punch.frames / punch.sampleRate : takeLimit,
+                        punch ?? undefined,
                       );
                     }}
                   >
@@ -762,7 +878,7 @@ export default function RecordTake({
           setConfirmDiscard(false);
         }}
         title="Discard selected take?"
-        description="Download it first if you want to keep it. If this take is used in your comp, the comp resets to the first remaining take. Comp undo history will be cleared."
+        description="Download it first if you want to keep it. If this take is used in your comp, the comp resets to the first remaining full take, or clears if none remains. Comp undo history will be cleared."
         confirmLabel="Discard take"
       />
       <Confirm

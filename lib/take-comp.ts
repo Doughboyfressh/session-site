@@ -8,6 +8,9 @@ export type LocalTake = RecordedTake & {
   id: string;
   name: string;
   url: string;
+  // Partial recordings contain only these frames, never a padded silent prefix.
+  coverageStart?: number;
+  compOrigin?: number;
 };
 // Positions are relative to the common recording start, in seconds.
 export type CompRegion = { takeId: string; start: number; end: number };
@@ -21,6 +24,10 @@ export function takeBudget(takes: RecordedTake[], offset: number) {
   return { limit, available: takes.length < MAX_TAKES && limit >= 0.1 };
 }
 export function fullTake(take: LocalTake): CompRegion[] {
+  if (take.coverageStart !== undefined)
+    throw new Error(
+      'A punch recording covers only its selected section. Choose a full take as the comp base.',
+    );
   return [{ takeId: take.id, start: 0, end: take.seconds }];
 }
 export function compFrames(regions: CompRegion[], takes: LocalTake[]) {
@@ -29,7 +36,8 @@ export function compFrames(regions: CompRegion[], takes: LocalTake[]) {
   const first = takes.find((t) => t.id === regions[0].takeId);
   if (!first) throw new Error('A source take is missing.');
   const rate = first.sampleRate;
-  if (!Number.isFinite(first.offset) || first.offset < 0 || first.offset >= 300)
+  const offset = first.compOrigin ?? first.offset;
+  if (!Number.isFinite(offset) || offset < 0 || offset >= 300)
     throw new Error('Invalid comp start position.');
   if (![44100, 48000].includes(rate))
     throw new Error('Unsupported take sample rate.');
@@ -38,18 +46,25 @@ export function compFrames(regions: CompRegion[], takes: LocalTake[]) {
     const t = takes.find((t) => t.id === r.takeId),
       start = Math.round(r.start * rate),
       end = Math.round(r.end * rate);
-    if (!t || t.offset !== first.offset || t.sampleRate !== rate)
+    if (!t || (t.compOrigin ?? t.offset) !== offset || t.sampleRate !== rate)
       throw new Error(
         'Comp sections must use takes with the same start position and sample rate. Download differing takes to convert them separately.',
       );
     if (
       !Number.isFinite(r.start) ||
       !Number.isFinite(r.end) ||
+      !Number.isFinite(t.seconds) ||
+      t.seconds <= 0 ||
+      !Number.isSafeInteger(t.coverageStart ?? 0) ||
+      (t.coverageStart ?? 0) < 0 ||
+      !Number.isFinite(t.offset) ||
+      Math.abs(t.offset - (offset + (t.coverageStart ?? 0) / rate)) > 1e-9 ||
       start !== at ||
+      start < (t.coverageStart ?? 0) ||
       end <= start ||
-      end > Math.round(t.seconds * rate) ||
+      end > (t.coverageStart ?? 0) + Math.round(t.seconds * rate) ||
       end > 120 * rate ||
-      first.offset + end / rate > 300 + 1 / rate
+      offset + end / rate > 300 + 1 / rate
     )
       throw new Error(
         'Choose continuous sections within the recorded length of each take.',
@@ -57,7 +72,40 @@ export function compFrames(regions: CompRegion[], takes: LocalTake[]) {
     at = end;
     return { takeId: r.takeId, start, end };
   });
-  return { frames, rate, length: at, offset: first.offset };
+  return { frames, rate, length: at, offset };
+}
+export function planPunch(
+  regions: CompRegion[],
+  takes: LocalTake[],
+  from: number,
+  to: number,
+) {
+  const { rate, length, offset } = compFrames(regions, takes);
+  const start = Math.round(from * rate),
+    end = Math.round(to * rate);
+  if (
+    !Number.isFinite(from) ||
+    !Number.isFinite(to) ||
+    start < 0 ||
+    end > length ||
+    end - start < Math.ceil(rate * 0.1)
+  )
+    throw new Error(
+      'Choose a section of at least 0.1 seconds inside your comp.',
+    );
+  const budget = takeBudget(takes, offset + start / rate);
+  if (!budget.available || (end - start) / rate > budget.limit + 1e-9)
+    throw new Error(
+      'There is not enough room in this take bank for that section. Download or discard a take first.',
+    );
+  return {
+    start,
+    end,
+    frames: end - start,
+    sampleRate: rate,
+    origin: offset,
+    offset: offset + start / rate,
+  };
 }
 export function replaceCompRange(
   regions: CompRegion[],
@@ -202,15 +250,14 @@ export async function renderComp(
   checkCancelled(signal);
   const pcm = new Float32Array(length);
   for (const id of new Set(frames.map((r) => r.takeId))) {
-    const source = await takePCM(
-      takes.find((t) => t.id === id)!,
-      signal,
-    );
+    const take = takes.find((t) => t.id === id)!;
+    const sourceStart = take.coverageStart ?? 0;
+    const source = await takePCM(take, signal);
     for (const r of frames.filter((r) => r.takeId === id)) {
       for (let at = r.start; at < r.end; at += 65536) {
         checkCancelled(signal);
         const end = Math.min(at + 65536, r.end);
-        pcm.set(source.subarray(at, end), at);
+        pcm.set(source.subarray(at - sourceStart, end - sourceStart), at);
         await yieldExport(signal);
       }
     }

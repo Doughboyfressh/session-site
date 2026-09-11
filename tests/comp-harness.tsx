@@ -12,19 +12,37 @@ let count = 0,
   kept: RecordedTake[] = [],
   mode = 'ok',
   hold: (() => void) | null = null;
+let captureMode = 'full';
 function factory(h: CaptureHooks): TakeCapture {
   let epoch = 0;
+  let length = 48000,
+    start = 12.5;
   return {
     connect: async () => {
       h.state('ready');
     },
-    start: async () => {
+    start: async (
+      _data: unknown,
+      offset: number,
+      _bars: number,
+      _limit: number,
+      exact?: { frames: number; sampleRate: number },
+    ) => {
+      start = offset;
+      length = exact?.frames || 48000;
+      if (captureMode === 'disconnect') {
+        h.state('error');
+        h.error('Simulated microphone disconnect. Current vocal unchanged.');
+        return;
+      }
       h.state('recording');
     },
     finish: () => {
       const token = epoch;
       h.state('finishing');
-      const samples = new Float32Array(48000).fill(++count % 2 ? 0.2 : 0.7);
+      const samples = new Float32Array(
+        captureMode === 'short' ? Math.floor(length / 2) : length,
+      ).fill(++count % 2 ? 0.2 : 0.7);
       void encodeWave(
         {
           length: samples.length,
@@ -42,8 +60,8 @@ function factory(h: CaptureHooks): TakeCapture {
           peak,
           sampleRate: 48000,
           depth: 24,
-          seconds: 1,
-          offset: 12.5,
+          seconds: samples.length / 48000,
+          offset: start,
         });
       });
     },
@@ -86,15 +104,22 @@ function input(label: string, value: string) {
 }
 function App() {
   const [show, setShow] = useState(false),
+    [seed, setSeed] = useState<(RecordedTake & { name: string }) | undefined>(),
     [granted, setGranted] = useState(true),
     [key, setKey] = useState(0),
     [log, setLog] = useState(''),
     [busy, setBusy] = useState(false);
-  async function open() {
+  async function open(withSeed?: RecordedTake & { name: string }) {
+    setSeed(withSeed);
     setGranted(true);
     setKey((k) => k + 1);
     setShow(true);
-    await wait(() => !!button('Enable microphone'));
+    await wait(
+      () =>
+        !!button(
+          withSeed ? 'Apply comp to selected clip' : 'Enable microphone',
+        ),
+    );
   }
   async function record() {
     await click('Enable microphone');
@@ -103,6 +128,7 @@ function App() {
     await wait(() => !!button('Record another take'));
   }
   async function run() {
+    captureMode = 'full';
     setBusy(true);
     setLog('Checking comp workflow…');
     let checks = 0;
@@ -266,6 +292,167 @@ function App() {
       setBusy(false);
     }
   }
+  async function runPunch() {
+    setBusy(true);
+    setLog('Checking punch-in workflow…');
+    let checks = 0;
+    const check = (v: unknown, message: string) => {
+      if (!v) throw Error(message);
+      checks++;
+    };
+    const timeline = () =>
+      document.querySelector('.comp-timeline')?.textContent || '';
+    const text = () => document.body.textContent || '';
+    const range = async () => {
+      input('Comp range start', '.25');
+      input('Comp range end', '.75');
+      await new Promise((r) => setTimeout(r, 25));
+    };
+    const previewURL = () =>
+      document.querySelector<HTMLAnchorElement>(
+        'a[download="SESSION vocal comp.wav"]',
+      )?.href;
+    try {
+      captureMode = 'full';
+      mode = 'ok';
+      count = 0;
+      kept = [];
+      await open();
+      await record();
+      await range();
+      const original = timeline();
+      await click('Record this section');
+      check(
+        text().includes('0.25–0.75s') && text().includes('12.75s'),
+        'Punch position missing',
+      );
+      await record();
+      check(
+        timeline().includes('Punch 2') &&
+          document.querySelectorAll('.comp-timeline button').length === 3,
+        'Completed punch not applied',
+      );
+      check(
+        button('Use Punch 2 as full comp')?.disabled,
+        'Partial take can become full comp',
+      );
+      const punched = timeline();
+      await click('Undo comp edit');
+      check(
+        timeline() === original,
+        'Auto-punch Undo did not restore previous vocal',
+      );
+      await click('Redo');
+      check(timeline() === punched, 'Auto-punch Redo lost edit');
+      await click('Prepare comp preview');
+      await wait(() => !!previewURL());
+      const prepared = previewURL()!;
+      await range();
+      await click('Record this section');
+      captureMode = 'short';
+      await record();
+      check(
+        timeline() === punched && previewURL() === prepared,
+        'Short punch replaced vocal or discarded valid preview',
+      );
+      check(
+        text().includes('ended early') &&
+          text().includes('Recorded range: 0.25–0.50s'),
+        'Short punch missing coverage/warning',
+      );
+      check(
+        !!document.querySelector('a[download="SESSION Punch 3.wav"]'),
+        'Short recording not downloadable',
+      );
+      await range();
+      await click('Use Punch 3 for this section');
+      check(
+        timeline() === punched && text().includes('continuous sections'),
+        'Uncovered short donor accepted',
+      );
+      captureMode = 'disconnect';
+      await range();
+      await click('Record this section');
+      await click('Enable microphone');
+      await click('Start recording');
+      check(
+        text().includes('Simulated microphone disconnect'),
+        'Disconnect not reported',
+      );
+      await click('Back to takes');
+      check(
+        timeline() === punched && previewURL() === prepared,
+        'Disconnect changed comp',
+      );
+      await range();
+      await click('Record this section');
+      await click('Back to takes');
+      check(timeline() === punched, 'Cancel punch changed comp');
+      setGranted(false);
+      await new Promise((r) => setTimeout(r, 30));
+      check(
+        button('Record this section')?.disabled && !!previewURL(),
+        'Revocation allowed punch or lost prepared audio',
+      );
+      setShow(false);
+      await wait(() => !button('Add comp to project'));
+      const seedSamples = new Float32Array(48000).fill(0.2);
+      const encoded = await encodeWave(
+        {
+          length: 48000,
+          sampleRate: 48000,
+          numberOfChannels: 1,
+          getChannelData: () => seedSamples,
+        },
+        32,
+        { channels: 1 },
+      );
+      await open({
+        blob: encoded.blob,
+        seconds: 1,
+        offset: 12.5,
+        peak: 0.2,
+        sampleRate: 48000,
+        depth: 32,
+        name: 'Saved vocal',
+      });
+      check(
+        button('Discard selected take')?.disabled &&
+          !button('Record another take'),
+        'Seed can be discarded or replaced with arbitrary length',
+      );
+      captureMode = 'full';
+      await range();
+      await click('Record this section');
+      await click('Enable microphone');
+      await click('Start recording');
+      await click('Stop and review');
+      await wait(() => !!button('Apply comp to selected clip'));
+      await click('Apply comp to selected clip');
+      await wait(() => kept.length === 1);
+      check(
+        kept[0].seconds === 1 && kept[0].offset === 12.5,
+        'Seed replacement changed vocal boundaries',
+      );
+      const pcm = await takePCM(kept[0]);
+      check(
+        Math.abs(pcm[1000] - 0.2) < 1e-6 && Math.abs(pcm[47000] - 0.2) < 1e-6,
+        'Seed punch changed surrounding audio',
+      );
+      setShow(false);
+      await wait(() => !button('Done with takes'));
+      setLog(
+        'PASS: ' +
+          checks +
+          ' punch, exact-range, Undo/Redo, partial-retention, cancellation, permission and selected-clip UI assertions.',
+      );
+    } catch (e) {
+      setLog('FAIL: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      captureMode = 'full';
+      setBusy(false);
+    }
+  }
   return (
     <main style={{ maxWidth: 880, margin: '30px auto', padding: 20 }}>
       <h1>SESSION multiple takes verification</h1>
@@ -274,6 +461,13 @@ function App() {
         uploaded music.
       </p>
       <div className="actions">
+        <button
+          disabled={busy}
+          className="button primary"
+          onClick={() => void runPunch()}
+        >
+          Run punch workflow checks
+        </button>
         <button
           disabled={busy}
           onClick={() => void run()}
@@ -316,6 +510,7 @@ function App() {
         <RecordTake
           key={key}
           data={data}
+          seed={seed}
           offset={12.5}
           canEdit={granted}
           createCapture={factory}

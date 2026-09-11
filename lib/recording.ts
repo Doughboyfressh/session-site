@@ -249,6 +249,7 @@ export class TakeCapture {
     offset: number,
     bars: number,
     maxSeconds = 120,
+    exact?: { frames: number; sampleRate: number },
   ) {
     if (this.phase !== 'ready' || !this.c || !this.node) return;
     const token = this.epoch,
@@ -267,6 +268,17 @@ export class TakeCapture {
         maxSeconds > 120
       )
         throw new Error('Choose a valid recording position and tempo.');
+      if (
+        exact &&
+        (exact.sampleRate !== c.sampleRate ||
+          !Number.isSafeInteger(exact.frames) ||
+          exact.frames < Math.ceil(c.sampleRate * 0.1) ||
+          exact.frames / c.sampleRate >
+            Math.min(maxSeconds, 300 - offset) + 1e-9)
+      )
+        throw new Error(
+          'The microphone sample rate or recording limit does not match this punch. Your current vocal is unchanged.',
+        );
       this.offset = offset;
       this.beat = 60 / arrangement.bpm;
       const lead = bars * 4 * this.beat + 0.35;
@@ -293,7 +305,9 @@ export class TakeCapture {
       this.node!.port.postMessage({
         type: 'arm',
         start: firstFrame,
-        limit: Math.floor(Math.min(maxSeconds, 300 - offset) * c.sampleRate),
+        limit:
+          exact?.frames ??
+          Math.floor(Math.min(maxSeconds, 300 - offset) * c.sampleRate),
       });
       for (let n = 0; n < bars * 4; n++) {
         const when = this.startTime - (bars * 4 - n) * this.beat;
