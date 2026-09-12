@@ -1,5 +1,5 @@
 import type { Arrangement, MixerTrack, Note } from './audio';
-import { validateArrangement } from './arrangement-validation';
+import { applyNotePatch, checkNotes } from './note-edit';
 
 export type MidiEvent =
   | { kind: 'on'; channel: number; pitch: number; velocity: number }
@@ -43,7 +43,12 @@ export function midiPlan(
   start: number,
   beats: number,
 ): MidiPlan {
-  if (!track.notes || track.fileId || track.sequence || track.demo)
+  if (
+    !track.notes ||
+    (track.fileId && !track.sample) ||
+    track.sequence ||
+    track.demo
+  )
     throw Error('Select an instrument track to record MIDI.');
   if (track.trimStart || track.trimEnd || track.splitFrom)
     throw Error(
@@ -65,6 +70,16 @@ export function midiPlan(
       'Choose a recording range within 32 beats and the five-minute project limit.',
     );
   const capacity = 256 - track.notes.length;
+  checkNotes(track, bpm, track.notes);
+  const sourceEnd =
+    (Math.max(8, start + beats, ...track.notes.map((n) => n.start + n.length)) *
+      60) /
+      bpm +
+    0.5;
+  if (sourceEnd > 300 || track.offset + sourceEnd > 300)
+    throw Error(
+      'This recording range and instrument tail must stay within the five-minute project limit.',
+    );
   if (capacity <= 0)
     throw Error(
       'This instrument already has 256 notes. Remove notes or use a new instrument.',
@@ -220,6 +235,7 @@ export function keepMidi(
     JSON.stringify([
       t.notes,
       t.sound || 'keys',
+      t.sample,
       t.offset,
       t.trimStart,
       t.trimEnd,
@@ -238,23 +254,7 @@ export function keepMidi(
     );
   if (!notes.length)
     throw Error('Play at least one note before keeping the performance.');
-  const next = {
-    ...data,
-    tracks: data.tracks.map((t) =>
-      t.id === target.id
-        ? {
-            ...t,
-            notes: [...(t.notes || []), ...notes],
-            peaks: undefined,
-            duration: undefined,
-          }
-        : t,
-    ),
-  };
-  validateArrangement(next, true);
-  if (JSON.stringify(next).length > 250000)
-    throw Error(
-      'This project is too large. Download this MIDI take and use a new project.',
-    );
-  return next;
+  return applyNotePatch(data, original.bpm, target, {
+    notes: [...(current.notes || []), ...notes],
+  });
 }

@@ -18,8 +18,14 @@ function describe(value: unknown): string {
   if ('time' in item && 'value' in item)
     return `${item.time} seconds → ${Math.round(Number(item.value) * 100)}%`;
   return Object.entries(item)
-    .filter(([key]) => !['id', 'fileId', 'demo'].includes(key))
-    .map(([key, v]) => key + ': ' + describe(v))
+    .filter(
+      ([key]) =>
+        !['id', 'demo'].includes(key) && (key !== 'fileId' || !!item.sample),
+    )
+    .map(
+      ([key, v]) =>
+        (key === 'fileId' ? 'Audio file reference' : key) + ': ' + describe(v),
+    )
     .join('\n');
 }
 export default function ConflictValues({

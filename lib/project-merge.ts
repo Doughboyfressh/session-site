@@ -134,6 +134,13 @@ export function mergeProject(
         .filter((k) => (t as any)[k] !== undefined)
         .map((k) => [k, (t as any)[k]]),
     );
+  const sourceKeys = ['fileId', 'sample', 'notes', 'sound', 'demo', 'sequence'];
+  const source = (t: MixerTrack) =>
+    Object.fromEntries(
+      sourceKeys
+        .filter((k) => (t as any)[k] !== undefined)
+        .map((k) => [k, (t as any)[k]]),
+    );
   for (const id of [
     ...new Set([...bm.keys(), ...lm.keys(), ...rm.keys()]),
   ].sort()) {
@@ -155,10 +162,26 @@ export function mergeProject(
           ),
         ),
       } as MixerTrack;
+      // A sample region belongs to its file. Never combine a replacement asset
+      // with a concurrent zone edit, or merge half of an instrument-mode change.
+      const sampled = b.sample || l.sample || r.sample;
+      if (sampled)
+        Object.assign(
+          merged,
+          structuredClone(
+            pick(
+              source(b),
+              source(l),
+              source(r),
+              label + ' · instrument source and notes',
+            ),
+          ),
+        );
       for (const key of [
         ...new Set([...Object.keys(b), ...Object.keys(l), ...Object.keys(r)]),
       ].sort()) {
-        if (geometry.includes(key)) continue;
+        if (geometry.includes(key) || (sampled && sourceKeys.includes(key)))
+          continue;
         const value = pick(
           (b as any)[key],
           (l as any)[key],

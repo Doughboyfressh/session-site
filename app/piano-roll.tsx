@@ -1,5 +1,7 @@
 'use client';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import { useInstrumentAudition } from './use-instrument-audition';
+import SampleControls from './sample-controls';
 import { useNoteGesture } from './use-note-gesture';
 import {
   checkNotes,
@@ -9,14 +11,7 @@ import {
 } from '@/lib/note-edit';
 import { Plus, Download, Trash2, Music2, Play } from 'lucide-react';
 import { Pick, Range } from './helpers';
-import {
-  context,
-  playNote,
-  midiFile,
-  download,
-  type MixerTrack,
-  type Note,
-} from '@/lib/audio';
+import { midiFile, download, type MixerTrack, type Note } from '@/lib/audio';
 const names = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
 export function noteName(p: number) {
   return names[p % 12] + (Math.floor(p / 12) - 1);
@@ -28,6 +23,7 @@ export default function PianoRoll({
   onAdd,
   onRecord,
   onGestureActivity,
+  onLoadSample,
   disabled = false,
 }: {
   track?: MixerTrack;
@@ -36,6 +32,7 @@ export default function PianoRoll({
   onAdd: () => void;
   onRecord?: () => void;
   onGestureActivity?: (active: boolean) => void;
+  onLoadSample?: (file: File) => void;
   disabled?: boolean;
 }) {
   const [selection, setSelection] = useState<{ track: string; ids: string[] }>({
@@ -52,6 +49,8 @@ export default function PianoRoll({
     [start, setStart] = useState(0),
     [length, setLength] = useState('0.5'),
     [keyboardRange, setKeyboardRange] = useState('48');
+  const sampleInput = useRef<HTMLInputElement>(null);
+  const audition = useInstrumentAudition(track, disabled, setError);
   const notes = track?.notes || [],
     selected =
       selection.track === track?.id
@@ -119,19 +118,7 @@ export default function PianoRoll({
     };
     if (!commit([...notes, n])) return;
     select([n.id]);
-    context()
-      .resume()
-      .then(() =>
-        playNote(
-          context(),
-          context().destination,
-          p,
-          context().currentTime,
-          0.2,
-          0.4,
-          track?.sound,
-        ),
-      );
+    void audition(p, 0.2, 0.4);
   }
   function edit(p: Partial<Note>) {
     commit(notes.map((n) => (n.id === selected[0] ? { ...n, ...p } : n)));
@@ -273,12 +260,19 @@ export default function PianoRoll({
           />
           <Pick
             label="Instrument"
-            value={track.sound || 'keys'}
+            value={track.sample ? 'sample' : track.sound || 'keys'}
             onChange={(v) => {
-              if (disabled) return;
+              if (
+                disabled ||
+                !['keys', 'bass', 'pad'].includes(v) ||
+                (!track.sample && v === (track.sound || 'keys'))
+              )
+                return;
               try {
                 onChange({
                   sound: v as any,
+                  sample: undefined,
+                  fileId: undefined,
                   peaks: undefined,
                   duration: undefined,
                 });
@@ -288,6 +282,9 @@ export default function PianoRoll({
               }
             }}
             options={[
+              ...(track.sample
+                ? [{ value: 'sample', label: 'Your sample' }]
+                : []),
               { value: 'keys', label: 'Soft keys' },
               { value: 'bass', label: 'Analog bass' },
               { value: 'pad', label: 'Warm pad' },
@@ -312,7 +309,44 @@ export default function PianoRoll({
           <button className="button secondary" onClick={onAdd}>
             <Plus size={15} /> New instrument
           </button>
+          {onLoadSample && (
+            <>
+              <button
+                className="button secondary"
+                onClick={() => sampleInput.current?.click()}
+              >
+                {track.sample ? 'Replace sample' : 'Load sample'}
+              </button>
+              <input
+                ref={sampleInput}
+                className="sr-only"
+                type="file"
+                aria-label="Choose instrument sample"
+                accept="audio/*,.wav,.mp3,.ogg,.flac,.webm,.m4a"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (file && !disabled) onLoadSample(file);
+                }}
+              />
+            </>
+          )}
         </div>
+        {onLoadSample && !track.sample && (
+          <p className="small-note">
+            Load your own sound to play it across the keyboard. Use mono or
+            stereo audio up to 30 seconds and 25 MB.
+          </p>
+        )}
+        {track.sample && (
+          <SampleControls
+            key={track.fileId + JSON.stringify(track.sample)}
+            track={track}
+            disabled={disabled}
+            onChange={onChange}
+            audition={audition}
+          />
+        )}
         <div className="note-selection">
           <div className="actions">
             <button
@@ -507,21 +541,7 @@ export default function PianoRoll({
                 <button
                   key={p}
                   className={noteName(p).includes('♯') ? 'black-key' : ''}
-                  onClick={() => {
-                    context()
-                      .resume()
-                      .then(() =>
-                        playNote(
-                          context(),
-                          context().destination,
-                          p,
-                          context().currentTime,
-                          0.3,
-                          0.5,
-                          track.sound,
-                        ),
-                      );
-                  }}
+                  onClick={() => void audition(p)}
                   aria-label={'Audition ' + noteName(p)}
                 >
                   {noteName(p)}

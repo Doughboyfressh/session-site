@@ -204,7 +204,7 @@ export async function createAudioExport(
       report('Checking ' + selected[i].name, i);
       const notes = selected[i].notes;
       if (
-        !selected[i].fileId &&
+        (!selected[i].fileId || selected[i].sample) &&
         notes &&
         (Math.max(8, ...notes.map((note) => note.start + note.length)) * 60) /
           data.bpm +

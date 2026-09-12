@@ -61,6 +61,7 @@ export function useNoteGesture(options: {
     t?.id,
     t?.notes,
     t?.sound,
+    t?.sample,
     t?.offset,
     t?.trimStart,
     t?.trimEnd,

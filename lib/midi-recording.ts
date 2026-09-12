@@ -1,11 +1,13 @@
 import {
   channel,
   playMix,
+  sampleBuffer,
   type Arrangement,
   type MixerTrack,
   type Note,
   type StudioOutput,
 } from './audio';
+import { playSample } from './sample-instrument';
 import {
   midiEvent,
   MidiPerformance,
@@ -53,6 +55,7 @@ export class MidiRecorder {
   private master: GainNode | null = null;
   private releaseOutput: (() => void) | undefined;
   private voices = new Map<string, Voice>();
+  private sampleAudio: AudioBuffer | null = null;
   private releasing = new Set<() => void>();
   private pedal = new Set<number>();
   private clicks = new Set<OscillatorNode>();
@@ -103,6 +106,7 @@ export class MidiRecorder {
     this.backing?.stop();
     this.backing = null;
     this.clearVoices();
+    this.sampleAudio = null;
     for (const o of this.clicks) {
       try {
         o.stop();
@@ -154,6 +158,15 @@ export class MidiRecorder {
       this.c = c;
       await c.resume();
       if (!this.current(epoch)) return;
+      if (this.target.sample) {
+        const sample = await sampleBuffer(this.target, {
+          sampleRate: c.sampleRate,
+          signal: this.control.signal,
+          revalidate: true,
+        });
+        if (!this.current(epoch)) return;
+        this.sampleAudio = sample;
+      }
       const access = await this.deps.access();
       if (!this.current(epoch)) return;
       this.access = access;
@@ -288,6 +301,37 @@ export class MidiRecorder {
       } else {
         stop(key);
         if (this.voices.size >= 32) stop(this.voices.keys().next().value!);
+        if (this.target.sample && this.sampleAudio) {
+          const c = this.c;
+          const voice = playSample(
+            c,
+            this.monitor.input,
+            this.sampleAudio,
+            this.target.sample,
+            event.pitch,
+            c.currentTime,
+            120,
+            event.velocity,
+            () => {
+              if (this.voices.get(key)?.stop === release)
+                this.voices.delete(key);
+              this.releasing.delete(voice.stop);
+            },
+          );
+          const release = () => {
+            voice.release();
+            this.releasing.add(voice.stop);
+            if (this.releasing.size > 64)
+              this.releasing.values().next().value!();
+          };
+          this.voices.set(key, {
+            channel: event.channel,
+            down: true,
+            stop: release,
+          });
+          this.hooks.activity(event.pitch, this.voices.size);
+          return;
+        }
         const c = this.c,
           o = c.createOscillator(),
           g = c.createGain(),
@@ -355,6 +399,15 @@ export class MidiRecorder {
     heldPedals.forEach((channel) => this.pedal.add(channel));
     this.set('preparing');
     try {
+      if (this.target.sample) {
+        const sample = await sampleBuffer(this.target, {
+          sampleRate: c.sampleRate,
+          signal: this.control.signal,
+          revalidate: true,
+        });
+        if (!this.current(epoch)) return;
+        this.sampleAudio = sample;
+      }
       const backing = await playMix(structuredClone(data), undefined, {
         audioContext: c,
         from: plan.timeline,

@@ -23,6 +23,7 @@ export function applyNotePatch(
     JSON.stringify([
       t.notes,
       t.sound,
+      t.sample,
       t.offset,
       t.trimStart,
       t.trimEnd,
@@ -40,6 +41,12 @@ export function applyNotePatch(
       'This instrument changed. Select the notes again in the updated project.',
     );
   if (patch.notes) checkNotes(current, data.bpm, patch.notes);
+  const musicalValue = (track: MixerTrack) => {
+    const { peaks: _peaks, duration: _duration, ...value } = track;
+    return JSON.stringify(value);
+  };
+  if (musicalValue(current) === musicalValue({ ...current, ...patch }))
+    return data;
   const sourceBeats = (notes: Note[]) =>
     Math.max(8, ...notes.map((n) => n.start + n.length));
   const followNewEnd =
@@ -76,7 +83,12 @@ export function checkNotes(
   bpm: number,
   notes: Note[],
 ): Note[] {
-  if (!track.notes || track.fileId || track.sequence || track.demo)
+  if (
+    !track.notes ||
+    (track.fileId && !track.sample) ||
+    track.sequence ||
+    track.demo
+  )
     throw Error('Choose an instrument track to edit notes.');
   const ids = new Set<string>();
   for (const note of notes) {

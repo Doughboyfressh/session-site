@@ -45,6 +45,7 @@ import RecordMidi from './record-midi';
 import ImportMidi from './import-midi';
 import { appendMidi } from '@/lib/midi-import';
 import { applyNotePatch } from '@/lib/note-edit';
+import { checkSampleBuffer, defaultSample } from '@/lib/sample-instrument';
 import { keepMidi, midiPlan } from '@/lib/midi-notes';
 import type { RestoredBank } from '@/lib/take-bank';
 import type { RecordedTake } from '@/lib/recording';
@@ -176,6 +177,7 @@ export default function Studio({
   } | null>(null);
   const recording = !!recordSnapshot || !!midiSnapshot || !!importSnapshot;
   const seedJob = useRef<AbortController | null>(null);
+  const sampleJob = useRef<AbortController | null>(null);
   const projectIdRef = useRef(id);
   projectIdRef.current = id;
   const editEpoch = useRef(0);
@@ -212,6 +214,7 @@ export default function Studio({
       stop();
       editEpoch.current++;
       seedJob.current?.abort();
+      sampleJob.current?.abort();
       endGesture();
     },
     prepareCreation: async (creation, baseline) => {
@@ -243,6 +246,7 @@ export default function Studio({
   useEffect(() => {
     if (!roomAllowed) {
       seedJob.current?.abort();
+      sampleJob.current?.abort();
       endGesture();
       setAutosave(false);
       stop();
@@ -291,6 +295,7 @@ export default function Studio({
     return () => {
       alive.current = false;
       seedJob.current?.abort();
+      sampleJob.current?.abort();
       generation.current++;
       playback.current?.stop();
       editEpoch.current++;
@@ -337,7 +342,9 @@ export default function Studio({
           ? {
               ...t,
               ...p,
-              ...(['notes', 'sequence', 'sound', 'fileId'].some((k) => k in p)
+              ...(['notes', 'sequence', 'sound', 'fileId', 'sample'].some(
+                (k) => k in p,
+              )
                 ? { peaks: undefined, duration: undefined }
                 : {}),
             }
@@ -381,6 +388,7 @@ export default function Studio({
         (t) =>
           t.id +
           JSON.stringify(t.notes || t.sequence || []) +
+          JSON.stringify(t.sample || null) +
           (t.sound || '') +
           (t.fileId || '') +
           !!t.peaks,
@@ -635,6 +643,72 @@ export default function Studio({
       setBusy('');
     }
   }
+  async function loadSample(file: File) {
+    if (
+      !editAllowed.current ||
+      structuralLocked ||
+      !focus?.notes ||
+      sampleJob.current
+    )
+      return;
+    const target = structuredClone(focus),
+      originalBpm = data.bpm,
+      projectId = projectIdRef.current,
+      permission = editEpoch.current,
+      controller = new AbortController();
+    sampleJob.current = controller;
+    const check = () => {
+      if (
+        controller.signal.aborted ||
+        !alive.current ||
+        !editAllowed.current ||
+        permission !== editEpoch.current ||
+        projectIdRef.current !== projectId
+      )
+        throw new Error(
+          'Sample loading was cancelled or editing access ended.',
+        );
+      // Also protects the upload against source changes during async decoding.
+      applyNotePatch(tracksRef.current, originalBpm, target, {});
+    };
+    setBusy('Loading sample');
+    try {
+      if (!file.size || file.size > 25 * 1024 * 1024)
+        throw new Error('Choose a sample smaller than 25 MB.');
+      check();
+      const decoder = new OfflineAudioContext(2, 1, 44100);
+      const buffer = await decoder.decodeAudioData(await file.arrayBuffer());
+      checkSampleBuffer(buffer);
+      const sample = {
+        ...defaultSample(buffer.duration),
+        name: file.name.slice(0, 100) || 'Uploaded sample',
+      };
+      check();
+      const uploaded = await upload(file, 'audio', {
+        signal: controller.signal,
+        projectId,
+      });
+      check();
+      mutate((d) =>
+        applyNotePatch(d, originalBpm, target, {
+          fileId: uploaded.id,
+          sample,
+          sound: undefined,
+        }),
+      );
+      notify(
+        'Sample loaded. Set its root note and region, then play or add notes. Save the project to share it with collaborators.',
+      );
+    } catch (e) {
+      if (alive.current)
+        notify(
+          e instanceof Error ? e.message : 'The sample could not be loaded.',
+        );
+    } finally {
+      if (sampleJob.current === controller) sampleJob.current = null;
+      if (alive.current) setBusy('');
+    }
+  }
   function record() {
     if (!canEdit || busy || recording) return;
     if (data.tracks.length >= 32)
@@ -644,7 +718,14 @@ export default function Studio({
     setRecordSnapshot(structuredClone({ data, offset, projectId: id }));
   }
   async function recordSelected() {
-    if (!focus?.fileId || !canEdit || structuralLocked || seedJob.current)
+    if (
+      !focus?.fileId ||
+      focus.notes ||
+      focus.sample ||
+      !canEdit ||
+      structuralLocked ||
+      seedJob.current
+    )
       return;
     const target = structuredClone(focus),
       backing = structuredClone(data),
@@ -1159,6 +1240,14 @@ export default function Studio({
               className="master-meter"
             />
             <div className="save-state">
+              {sampleJob.current && (
+                <button
+                  className="button secondary"
+                  onClick={() => sampleJob.current?.abort()}
+                >
+                  Cancel sample loading
+                </button>
+              )}
               {busy && (
                 <>
                   <Loader2 className="spin" size={15} />
@@ -1313,7 +1402,13 @@ export default function Studio({
               <div className="clip-tool-actions">
                 <button
                   className="button secondary"
-                  disabled={!canEdit || !focus?.fileId || structuralLocked}
+                  disabled={
+                    !canEdit ||
+                    !focus?.fileId ||
+                    !!focus?.notes ||
+                    !!focus?.sample ||
+                    structuralLocked
+                  }
                   onClick={() => void recordSelected()}
                 >
                   Punch in selected vocal
@@ -1622,6 +1717,7 @@ export default function Studio({
               bpm={data.bpm}
               disabled={!canEdit || pianoLocked}
               onGestureActivity={setNoteGesturing}
+              onLoadSample={(file) => void loadSample(file)}
               onRecord={() => {
                 if (!editAllowed.current || structuralLocked || !focus?.notes)
                   return;

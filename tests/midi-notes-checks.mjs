@@ -160,7 +160,9 @@ scenario('Quantization never moves notes before or beyond the capture range',()=
 });
 scenario('Plan maps source beats to project seconds and remaining capacity',()=>{
   const t=track({offset:20,notes:[note()]}); eq(midiPlan(t,120,4,8),{start:4,beats:8,bpm:120,capacity:255,timeline:22});
-  const p=midiPlan(track({offset:236}),240,224,32); close(p.timeline,292); eq(p.beats,32);
+  // The generated source retains its half-second release tail at the boundary.
+  const p=midiPlan(track({offset:235.5}),240,224,32); close(p.timeline,291.5); eq(p.beats,32);
+  rejects(()=>midiPlan(track({offset:236}),240,224,32));
 });
 scenario('Plan rejects noninstrument, trimmed, split, full and impossible ranges',()=>{
   for(const patch of [{notes:undefined},{fileId:'audio'},{sequence:[[0]]},{demo:'demo-1'},

@@ -1,4 +1,5 @@
 import { GROUP_IDS, validateRouting } from './mixer-routing';
+import { sampleSettings } from './sample-instrument';
 function fail(message: string): never {
   throw Object.assign(new Error(message), { status: 400 });
 }
@@ -60,6 +61,24 @@ export function validateArrangement(d: any, draft = false) {
     }
     if (t.fileId && typeof t.fileId !== 'string')
       fail('Invalid audio reference.');
+    if (t.sample !== undefined) {
+      if (
+        typeof t.fileId !== 'string' ||
+        !t.fileId ||
+        t.fileId.length > 128 ||
+        !Array.isArray(t.notes) ||
+        t.demo ||
+        t.sequence
+      )
+        fail('A sampled instrument needs one audio file and a note sequence.');
+      try {
+        sampleSettings(t.sample);
+      } catch (e) {
+        fail((e as Error).message);
+      }
+    }
+    if (t.fileId && t.notes && !t.sample)
+      fail('Choose a sample instrument before combining audio and notes.');
     if (t.groupId !== undefined && !GROUP_IDS.includes(t.groupId))
       fail('Choose an available mixer group or Main.');
     if (

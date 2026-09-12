@@ -439,3 +439,10 @@
 .note-selection-box{position:absolute;border:1px solid #d5ff90;background:#c2f65a25;pointer-events:none;z-index:2}
 .piano-editor .note-gesture-status{min-height:38px;margin:12px 0 8px;color:#bedb9d;line-height:1.5}
 .piano-grid.note-gesturing{user-select:none}
+
+.sample-controls{margin:20px 0;border:1px solid #4a6539;border-radius:8px;padding:18px;background:#21311a}
+.sample-controls .section-title{margin:0;gap:15px;flex-wrap:wrap}
+.sample-controls h3{font-size:17px;color:#d6e8c7}
+.sample-controls .piano-tools{margin:16px 0}
+.sample-controls .small-note{line-height:1.65}
+@media(max-width:600px){.sample-controls{padding:14px}.sample-controls .piano-tools .field{min-width:110px;max-width:none}.sample-controls .button{width:100%}}

@@ -2,6 +2,7 @@ import type { Arrangement } from './audio';
 import { validateArrangement } from './arrangement-validation';
 import { validCreation, type ProjectCreation } from './project-creation';
 import { cleanRouting, validateRouting } from './mixer-routing';
+import { sampleSettings } from './sample-instrument';
 
 export const MAX_DRAFTS = 20;
 export const MAX_DRAFT_BYTES = 600 * 1024;
@@ -31,6 +32,7 @@ const fields = [
   'sequence',
   'notes',
   'sound',
+  'sample',
   'volume',
   'pan',
   'muted',
@@ -82,6 +84,7 @@ export function recoverySnapshot(value: any): DraftSnapshot {
         throw new Error('Invalid demonstration reference.');
       if (t.sound !== undefined && !['keys', 'bass', 'pad'].includes(t.sound))
         throw new Error('Invalid instrument in draft.');
+      if (t.sample !== undefined) t.sample = sampleSettings(t.sample);
       if (t.sequence !== undefined) {
         if (!Array.isArray(t.sequence) || t.sequence.length !== 3)
           throw new Error('Invalid drum pattern.');

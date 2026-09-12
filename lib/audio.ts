@@ -1,4 +1,11 @@
 import { defaultPattern, type Track } from './catalog';
+import {
+  checkSampleBuffer,
+  playSample,
+  sampleSettings,
+  type SampleSettings,
+} from './sample-instrument';
+import { validateArrangement } from './arrangement-validation';
 import { loopSegments, type RecordingLoop } from './loop-recording';
 import {
   routingFor,
@@ -22,6 +29,7 @@ export type MixerTrack = {
   sequence?: number[][];
   notes?: Note[];
   sound?: 'keys' | 'bass' | 'pad';
+  sample?: SampleSettings;
   volume: number;
   pan: number;
   muted: boolean;
@@ -228,15 +236,49 @@ export async function bufferFor(
   } = {},
 ) {
   const sampleRate = options.sampleRate || 44100;
+  if (t.sample) validateArrangement({ bpm, tracks: [t] }, true);
   const key =
-    (t.fileId ||
-      `${t.demo || 'seq'}-${bpm}-${t.sound}-${JSON.stringify(t.notes ?? t.sequence ?? [])}`) +
+    (t.sample
+      ? `sample-${t.fileId}-${bpm}-${JSON.stringify(t.sample)}-${JSON.stringify(t.notes)}`
+      : t.fileId ||
+        `${t.demo || 'seq'}-${bpm}-${t.sound}-${JSON.stringify(t.notes ?? t.sequence ?? [])}`) +
     ':' +
     (options.sampleRate || 'playback');
   const cached = cache.get(key);
+  if (options.signal?.aborted)
+    throw new DOMException('Playback cancelled.', 'AbortError');
   if (cached && !(t.fileId && options.revalidate)) return cached;
   let b: AudioBuffer;
-  if (t.fileId) {
+  if (t.sample) {
+    sampleSettings(t.sample);
+    if (!t.fileId || !t.notes || t.demo || t.sequence)
+      throw new Error('This sampled instrument is incomplete.');
+    const source = await sampleBuffer(t, options);
+    if (cached) return cached;
+    const duration =
+      (Math.max(8, ...t.notes.map((n) => n.start + n.length)) * 60) / bpm + 0.5;
+    if (duration > 300)
+      throw new Error(
+        'These notes extend beyond the five-minute instrument limit.',
+      );
+    const c = new OfflineAudioContext(
+      2,
+      Math.ceil(duration * sampleRate),
+      sampleRate,
+    );
+    for (const n of t.notes)
+      playSample(
+        c,
+        c.destination,
+        source,
+        t.sample,
+        n.pitch,
+        (n.start * 60) / bpm,
+        (n.length * 60) / bpm,
+        n.velocity,
+      );
+    b = await c.startRendering();
+  } else if (t.fileId) {
     const r = await fetch('/api/file/' + t.fileId, {
       signal: options.signal,
       cache: 'no-store',
@@ -286,6 +328,25 @@ export async function bufferFor(
     bytes -= old.length * old.numberOfChannels * 4;
     cache.delete(first);
   }
+  return b;
+}
+export async function sampleBuffer(
+  t: MixerTrack,
+  options: {
+    sampleRate?: number;
+    signal?: AbortSignal;
+    revalidate?: boolean;
+  } = {},
+) {
+  if (!t.sample || !t.fileId) throw new Error('Load a sample first.');
+  const b = await bufferFor(
+    { ...t, sample: undefined, notes: undefined },
+    120,
+    options,
+  );
+  if (options.signal?.aborted)
+    throw new DOMException('Playback cancelled.', 'AbortError');
+  checkSampleBuffer(b, t.sample);
   return b;
 }
 export function peaks(b: AudioBuffer) {
@@ -688,6 +749,7 @@ export async function playMix(
       b: await bufferFor(t, data.bpm, {
         signal: options.signal,
         sampleRate: c.sampleRate,
+        revalidate: !!t.sample,
       }),
     })),
   );

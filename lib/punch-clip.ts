@@ -4,6 +4,8 @@ import { encodeWave, type Samples } from './audio-files';
 import { sameProject } from './project-merge';
 
 export function checkPunchTarget(data: Arrangement, target: MixerTrack) {
+  if (target.sample || target.notes || target.sequence || target.demo)
+    throw new Error('Choose a recorded audio clip for vocal punch-in.');
   const current = data.tracks.find((t) => t.id === target.id);
   if (
     !current ||
@@ -24,6 +26,10 @@ export async function punchSeed(
   const seconds = audio.length / audio.sampleRate;
   if (
     !target.fileId ||
+    target.sample ||
+    target.notes ||
+    target.sequence ||
+    target.demo ||
     target.trimStart ||
     target.trimEnd ||
     audio.numberOfChannels !== 1 ||

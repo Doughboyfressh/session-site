@@ -175,6 +175,10 @@ export function validateBank(value: unknown): BankData {
     const seed = takes.find((t) => t.id === 'original-clip');
     if (
       !target.fileId ||
+      target.sample ||
+      target.notes ||
+      target.sequence ||
+      target.demo ||
       target.trimStart ||
       target.trimEnd ||
       !seed ||
