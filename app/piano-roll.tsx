@@ -264,7 +264,15 @@ export default function PianoRoll({
             onChange={(v) => {
               if (
                 disabled ||
-                !['keys', 'bass', 'pad'].includes(v) ||
+                ![
+                  'keys',
+                  'bass',
+                  'pad',
+                  'lead',
+                  'pluck',
+                  'organ',
+                  'bell',
+                ].includes(v) ||
                 (!track.sample && v === (track.sound || 'keys'))
               )
                 return;
@@ -288,6 +296,10 @@ export default function PianoRoll({
               { value: 'keys', label: 'Soft keys' },
               { value: 'bass', label: 'Analog bass' },
               { value: 'pad', label: 'Warm pad' },
+              { value: 'lead', label: 'Bright lead' },
+              { value: 'pluck', label: 'Plucked synth' },
+              { value: 'organ', label: 'Electric organ' },
+              { value: 'bell', label: 'Glass bell' },
             ]}
           />
           <Pick

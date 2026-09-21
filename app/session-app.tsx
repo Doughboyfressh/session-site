@@ -117,6 +117,7 @@ export default function SessionApp({
   const [takesOpen, setTakesOpen] = useState(false);
   const studioWorkspaceBusy = useRef(false);
   const workspaceRequest = useRef(0);
+  const remixPending = useRef(false);
   const playback = useRef<any>(null),
     roomDrafts = useRef(new Map<string, any>()),
     roomWorkspaceBusy = useRef(false),
@@ -428,8 +429,8 @@ export default function SessionApp({
       return notify('This track is available for listening only.');
     const mt = trackFrom(t);
     if (appendMode.current) {
-      if (draft.current.data.tracks.length >= 32)
-        return notify('This session has reached 32 tracks.');
+      if (draft.current.data.tracks.length >= 48)
+        return notify('This session has reached the track limit.');
       draft.current = {
         ...draft.current,
         dirty: true,
@@ -449,13 +450,43 @@ export default function SessionApp({
     setDetail(null);
     go('Studio');
   }
-  function openProject(p: any) {
-    const roomDraft = roomDrafts.current.get(p.id);
-    draft.current = roomDraft?.dirty
-      ? { ...roomDraft, canEdit: p.canEdit, canManage: p.canManage }
-      : p;
-    setStudioKey((k) => k + 1);
-    go('Studio');
+  async function remix(t: Track) {
+    if (!signIn() || remixPending.current) return;
+    const request = ++workspaceRequest.current;
+    remixPending.current = true;
+    try {
+      const created = await action({ action: 'remix', id: t.id });
+      if (request !== workspaceRequest.current) return;
+      const project = await action({ action: 'projectRead', id: created.id });
+      if (request !== workspaceRequest.current) return;
+      setDetail(null);
+      await openProject(project);
+      notify('Remix started — the beat is loaded. Add your parts and save.');
+    } catch (e: any) {
+      if (request === workspaceRequest.current) notify(e.message);
+    } finally {
+      remixPending.current = false;
+    }
+  }
+  async function openProject(p: any) {
+    const request = ++workspaceRequest.current;
+    try {
+      if (!p.data) p = await action({ action: 'projectRead', id: p.id });
+      if (
+        request !== workspaceRequest.current ||
+        studioWorkspaceBusy.current ||
+        roomWorkspaceBusy.current
+      )
+        return;
+      const roomDraft = roomDrafts.current.get(p.id);
+      draft.current = roomDraft?.dirty
+        ? { ...roomDraft, canEdit: p.canEdit, canManage: p.canManage }
+        : p;
+      setStudioKey((k) => k + 1);
+      go('Studio');
+    } catch (e: any) {
+      if (request === workspaceRequest.current) notify(e.message);
+    }
   }
   function blankProject() {
     draft.current = {
@@ -1062,7 +1093,8 @@ export default function SessionApp({
                       </div>
                       <h3>{p.title}</h3>
                       <p>
-                        {p.data.tracks.length} tracks · {p.data.bpm} BPM
+                        {p.trackCount ?? p.data?.tracks.length ?? 0} tracks ·{' '}
+                        {p.bpm ?? p.data?.bpm} BPM
                       </p>
                       <small>
                         Updated {new Date(p.updated).toLocaleDateString()}
@@ -1231,6 +1263,7 @@ export default function SessionApp({
               key={studioKey}
               initial={draft.current}
               onDraft={(p) => {
+                workspaceRequest.current++;
                 draft.current = p;
                 if (p.id) roomDrafts.current.set(p.id, p);
                 recovery.capture(p);
@@ -1361,6 +1394,7 @@ export default function SessionApp({
         onClose={() => setDetail(null)}
         onPlay={playPreview}
         onUse={useTrack}
+        onRemix={remix}
         onSave={saveTrack}
         onRefresh={refresh}
         notify={notify}

@@ -3,10 +3,11 @@ import { validateArrangement } from './arrangement-validation';
 import { validCreation, type ProjectCreation } from './project-creation';
 import { cleanRouting, validateRouting } from './mixer-routing';
 import { sampleSettings } from './sample-instrument';
+import { SOUNDS } from './instruments';
 
-export const MAX_DRAFTS = 20;
+export const MAX_DRAFTS = 40;
 export const MAX_DRAFT_BYTES = 600 * 1024;
-export const MAX_ACCOUNT_BYTES = 12 * 1024 * 1024;
+export const MAX_ACCOUNT_BYTES = 24 * 1024 * 1024;
 export type DraftSnapshot = { title: string; data: Arrangement };
 export type RecoveryDraft = DraftSnapshot & {
   version: 1;
@@ -55,6 +56,19 @@ const fields = [
   'groupId',
   'sendReverb',
   'sendDelay',
+  'drive',
+  'driveType',
+  'mod',
+  'modType',
+  'modRate',
+  'limiter',
+  'pump',
+  'denoise',
+  'autoPitch',
+  'pitchKey',
+  'pitchMinor',
+  'pitchShift',
+  'stretch',
 ];
 function identity(value: unknown) {
   return typeof value === 'string' && value.length > 0 && value.length <= 128;
@@ -65,7 +79,7 @@ export function recoverySnapshot(value: any): DraftSnapshot {
     typeof value.title !== 'string' ||
     value.title.length > 120 ||
     !Array.isArray(value.data?.tracks) ||
-    value.data.tracks.length > 32
+    value.data.tracks.length > 48
   )
     throw new Error('This draft has invalid project details.');
   const data: Arrangement = {
@@ -82,7 +96,7 @@ export function recoverySnapshot(value: any): DraftSnapshot {
         throw new Error('Invalid audio reference in draft.');
       if (t.demo !== undefined && !identity(t.demo))
         throw new Error('Invalid demonstration reference.');
-      if (t.sound !== undefined && !['keys', 'bass', 'pad'].includes(t.sound))
+      if (t.sound !== undefined && !SOUNDS.includes(t.sound))
         throw new Error('Invalid instrument in draft.');
       if (t.sample !== undefined) t.sample = sampleSettings(t.sample);
       if (t.sequence !== undefined) {

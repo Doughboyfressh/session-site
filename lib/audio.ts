@@ -13,6 +13,9 @@ import {
   type GroupId,
   type MixerRouting,
 } from './mixer-routing';
+import { buildInsertFx, type DriveType, type ModType } from './effects';
+import { voiceFor } from './instruments';
+import { schedulePump } from './pump';
 export type Note = {
   id: string;
   pitch: number;
@@ -28,7 +31,7 @@ export type MixerTrack = {
   demo?: string;
   sequence?: number[][];
   notes?: Note[];
-  sound?: 'keys' | 'bass' | 'pad';
+  sound?: 'keys' | 'bass' | 'pad' | 'lead' | 'pluck' | 'organ' | 'bell';
   sample?: SampleSettings;
   volume: number;
   pan: number;
@@ -54,6 +57,19 @@ export type MixerTrack = {
   groupId?: GroupId;
   sendReverb?: number;
   sendDelay?: number;
+  drive?: number;
+  driveType?: DriveType;
+  mod?: number;
+  modType?: ModType;
+  modRate?: number;
+  limiter?: number;
+  pump?: number;
+  denoise?: number;
+  autoPitch?: number;
+  pitchKey?: number;
+  pitchMinor?: boolean;
+  pitchShift?: number;
+  stretch?: number;
 };
 export type Arrangement = {
   bpm: number;
@@ -158,22 +174,26 @@ export function playNote(
   velocity = 0.75,
   sound = 'keys',
 ) {
+  const v = voiceFor(sound);
   const oscillator = c.createOscillator(),
     gain = c.createGain(),
     filter = c.createBiquadFilter();
-  oscillator.type =
-    sound === 'bass' ? 'sawtooth' : sound === 'pad' ? 'triangle' : 'sine';
+  oscillator.type = v.type;
   oscillator.frequency.value = 440 * Math.pow(2, (pitch - 69) / 12);
   filter.type = 'lowpass';
-  filter.frequency.value =
-    sound === 'bass' ? 650 : sound === 'pad' ? 1800 : 8000;
+  filter.frequency.value = v.cutoff;
   gain.gain.setValueAtTime(0, time);
-  gain.gain.linearRampToValueAtTime(
-    velocity * 0.2,
-    time + (sound === 'pad' ? 0.08 : 0.008),
-  );
-  gain.gain.setTargetAtTime(velocity * 0.13, time + 0.09, 0.2);
-  gain.gain.setTargetAtTime(0.00001, time + Math.max(0.1, length - 0.04), 0.04);
+  gain.gain.linearRampToValueAtTime(velocity * 0.2, time + v.attack);
+  if (v.pluck) {
+    gain.gain.setTargetAtTime(0.00001, time + v.attack, v.release || 0.12);
+  } else {
+    gain.gain.setTargetAtTime(velocity * 0.13, time + 0.09, 0.2);
+    gain.gain.setTargetAtTime(
+      0.00001,
+      time + Math.max(0.1, length - 0.04),
+      0.04,
+    );
+  }
   oscillator.connect(filter).connect(gain).connect(dest);
   oscillator.start(time);
   oscillator.stop(time + length + 0.4);
@@ -207,14 +227,20 @@ export async function synth(
         if (pattern[row]?.[i])
           instrument(c, master, row, (bar * 16 + i) * step, 0.8, random);
   if (demo) {
-    const roots =
-      demo === 'demo-1'
-        ? [41, 37, 44, 39]
-        : demo === 'demo-3'
-          ? [38, 36, 41, 36]
-          : demo === 'demo-4'
-            ? [33, 36, 38, 36]
-            : [36, 39, 34, 37];
+    const rootsFor: Record<string, number[]> = {
+      'demo-1': [41, 37, 44, 39],
+      'demo-2': [36, 39, 34, 37],
+      'demo-3': [38, 36, 41, 36],
+      'demo-4': [33, 36, 38, 36],
+      'demo-5': [43, 38, 45, 40],
+      'demo-6': [45, 40, 43, 38],
+      'demo-7': [40, 35, 43, 38],
+      'demo-8': [38, 33, 41, 36],
+      'demo-9': [41, 36, 44, 39],
+      'demo-10': [36, 43, 39, 34],
+    };
+    const roots = rootsFor[demo] || rootsFor['demo-2'];
+    const richer = !['demo-1', 'demo-2', 'demo-3', 'demo-4'].includes(demo);
     for (let bar = 0; bar < 8; bar++) {
       const at = bar * 16 * step,
         root = roots[bar % 4];
@@ -222,6 +248,17 @@ export async function synth(
         playNote(c, master, root + interval, at, 16 * step, 0.22, 'pad');
       for (let beat = 0; beat < 4; beat++)
         playNote(c, master, root, at + beat * 4 * step, 3 * step, 0.6, 'bass');
+      if (richer)
+        for (let s = 0; s < 8; s++)
+          playNote(
+            c,
+            master,
+            root + 24 + [0, 7, 12, 7, 15, 12, 7, 0][s],
+            at + s * 2 * step,
+            2 * step,
+            0.16,
+            'pluck',
+          );
     }
   }
   return c.startRendering();
@@ -236,6 +273,10 @@ export async function bufferFor(
   } = {},
 ) {
   const sampleRate = options.sampleRate || 44100;
+  if (t.fileId && !t.sample && t.autoPitch)
+    throw new Error(
+      'AutoPitch is unavailable while its audio quality is being improved. Turn it off in Vocal effects to play or export.',
+    );
   if (t.sample) validateArrangement({ bpm, tracks: [t] }, true);
   const key =
     (t.sample
@@ -243,7 +284,15 @@ export async function bufferFor(
       : t.fileId ||
         `${t.demo || 'seq'}-${bpm}-${t.sound}-${JSON.stringify(t.notes ?? t.sequence ?? [])}`) +
     ':' +
-    (options.sampleRate || 'playback');
+    (options.sampleRate || 'playback') +
+    (t.denoise || t.autoPitch
+      ? `-v${t.denoise || 0},${t.autoPitch || 0},${t.pitchKey || 0},${
+          t.pitchMinor ? 1 : 0
+        }`
+      : '') +
+    (t.pitchShift || (t.stretch && t.stretch !== 1)
+      ? `-t${t.pitchShift || 0},${t.stretch || 1}`
+      : '');
   const cached = cache.get(key);
   if (options.signal?.aborted)
     throw new DOMException('Playback cancelled.', 'AbortError');
@@ -293,6 +342,24 @@ export async function bufferFor(
       ? new OfflineAudioContext(2, 1, sampleRate)
       : context();
     b = await decoder.decodeAudioData(await r.arrayBuffer());
+    if (
+      b.duration > 300 ||
+      b.duration * (t.stretch || 1) > 300 ||
+      b.numberOfChannels > 2 ||
+      b.length * b.numberOfChannels * 4 > 120 * 1024 * 1024
+    )
+      throw new Error(
+        'Use mono or stereo audio up to five minutes long, including time stretching. Shorten this source before importing.',
+      );
+    if (
+      t.denoise ||
+      t.autoPitch ||
+      t.pitchShift ||
+      (t.stretch && t.stretch !== 1)
+    ) {
+      const { processInWorker } = await import('./audio-processing');
+      b = await processInWorker(b, t, options.signal);
+    }
   } else if (t.notes) {
     const beats = Math.max(8, ...t.notes.map((n) => n.start + n.length));
     const c = new OfflineAudioContext(
@@ -340,7 +407,15 @@ export async function sampleBuffer(
 ) {
   if (!t.sample || !t.fileId) throw new Error('Load a sample first.');
   const b = await bufferFor(
-    { ...t, sample: undefined, notes: undefined },
+    {
+      ...t,
+      sample: undefined,
+      notes: undefined,
+      denoise: undefined,
+      autoPitch: undefined,
+      pitchShift: undefined,
+      stretch: undefined,
+    },
     120,
     options,
   );
@@ -408,6 +483,7 @@ export function channel(
   t: MixerTrack,
   dest: AudioNode,
   metering = false,
+  bpm = 120,
 ) {
   const output = c.createGain();
   output.connect(dest);
@@ -422,14 +498,9 @@ export function channel(
     pan = c.createStereoPanner(),
     gain = c.createGain(),
     auto = c.createGain();
-  input
-    .connect(eqs[0])
-    .connect(eqs[1])
-    .connect(eqs[2])
-    .connect(pan)
-    .connect(gain)
-    .connect(auto)
-    .connect(output);
+  const fx = buildInsertFx(c);
+  input.connect(eqs[0]).connect(eqs[1]).connect(eqs[2]).connect(fx.input);
+  fx.output.connect(pan).connect(gain).connect(auto).connect(output);
   let compressor = c.createDynamicsCompressor();
   const convolver = c.createConvolver(),
     wet = c.createGain(),
@@ -462,8 +533,8 @@ export function channel(
         compressor.knee.value = 12;
         compressor.attack.value = 0.012;
         compressor.release.value = 0.18;
-        eqs[2].connect(compressor).connect(pan);
-      } else eqs[2].connect(pan);
+        eqs[2].connect(compressor).connect(fx.input);
+      } else eqs[2].connect(fx.input);
       compressionEnabled = enableCompression;
     }
     compressor.threshold.value = next.compression
@@ -472,17 +543,20 @@ export function channel(
     compressor.ratio.value = next.compression ? 2 + next.compression * 8 : 1;
     set(wet.gain, next.reverb || 0, 0.02);
     set(echo.gain, next.delay || 0, 0.02);
+    fx.update(next, set);
   };
   update(t, false, true);
   return {
     input,
     auto,
+    bpm,
     update,
     level: () => {
       return meter?.level() || 0;
     },
     dispose: () => {
       meter?.dispose();
+      fx.dispose();
       [
         input,
         ...eqs,
@@ -646,7 +720,7 @@ export function scheduleClip(
   c: BaseAudioContext,
   t: MixerTrack,
   b: AudioBuffer,
-  ch: { input: AudioNode; auto: GainNode },
+  ch: { input: AudioNode; auto: GainNode; bpm?: number },
   when: number,
   from: number,
   to: number,
@@ -664,13 +738,15 @@ export function scheduleClip(
   if (last <= first) return null;
   const source = c.createBufferSource(),
     fade = c.createGain(),
-    fadeOut = c.createGain();
+    fadeOut = c.createGain(),
+    pump = c.createGain();
   source.buffer = b;
-  source.connect(fade).connect(fadeOut).connect(ch.input);
+  source.connect(fade).connect(fadeOut).connect(pump).connect(ch.input);
   const at = startFrame / c.sampleRate,
     dur = (endFrame - startFrame) / c.sampleRate,
     relative = first - t.offset,
     fadeElapsed = t.trimStart + relative - (t.fadeStart ?? t.trimStart);
+  if (t.pump) schedulePump(pump.gain, at, first, last, ch.bpm || 120, t.pump);
   fade.gain.value = t.fadeIn
     ? Math.max(0, Math.min(1, fadeElapsed / t.fadeIn))
     : 1;
@@ -725,8 +801,28 @@ export function scheduleClip(
     source.disconnect();
     fade.disconnect();
     fadeOut.disconnect();
+    pump.disconnect();
   };
   return source;
+}
+async function loadArrangementBuffers(
+  data: Arrangement,
+  options: { sampleRate: number; signal?: AbortSignal; revalidate: boolean },
+) {
+  const loaded: { t: MixerTrack; b: AudioBuffer }[] = [];
+  const unique = new Set<AudioBuffer>();
+  let bytes = 0;
+  for (const t of data.tracks) {
+    const b = await bufferFor(t, data.bpm, options);
+    if (!unique.has(b)) bytes += b.length * b.numberOfChannels * 4;
+    unique.add(b);
+    if (bytes > 180 * 1024 * 1024)
+      throw new Error(
+        'This session exceeds the playback memory limit. Shorten the source audio or remove some tracks.',
+      );
+    loaded.push({ t, b });
+  }
+  return loaded;
 }
 export async function playMix(
   data: Arrangement,
@@ -743,16 +839,11 @@ export async function playMix(
   if (options.signal?.aborted)
     throw new DOMException('Playback cancelled.', 'AbortError');
   if (!data.tracks.length) throw new Error('Add a track to play.');
-  const loaded = await Promise.all(
-    data.tracks.map(async (t) => ({
-      t,
-      b: await bufferFor(t, data.bpm, {
-        signal: options.signal,
-        sampleRate: c.sampleRate,
-        revalidate: !!t.sample,
-      }),
-    })),
-  );
+  const loaded = await loadArrangementBuffers(data, {
+    signal: options.signal,
+    sampleRate: c.sampleRate,
+    revalidate: true,
+  });
   if (options.signal?.aborted)
     throw new DOMException('Playback cancelled.', 'AbortError');
   for (const { t, b } of loaded)
@@ -798,6 +889,7 @@ export async function playMix(
         },
         routing.inputs.get(t.id)!,
         true,
+        data.bpm,
       ),
     ]),
   );
@@ -952,13 +1044,9 @@ export async function playMix(
   };
 }
 export async function renderBuffer(data: Arrangement) {
-  const loaded = await Promise.all(
-    data.tracks
-      .filter((t) => audibleTrack(data, t))
-      .map(async (t) => ({
-        t,
-        b: await bufferFor(t, data.bpm, { sampleRate: 44100 }),
-      })),
+  const loaded = await loadArrangementBuffers(
+    { ...data, tracks: data.tracks.filter((t) => audibleTrack(data, t)) },
+    { sampleRate: 44100, revalidate: true },
   );
   if (!loaded.length) throw new Error('Add or unmute a track first.');
   const duration = Math.min(
@@ -976,7 +1064,7 @@ export async function renderBuffer(data: Arrangement) {
   master.connect(c.destination);
   const routing = routingGraph(c, data, master);
   const channels = loaded.map(({ t, b }) => {
-    const input = channel(c, t, routing.inputs.get(t.id)!);
+    const input = channel(c, t, routing.inputs.get(t.id)!, false, data.bpm);
     scheduleClip(c, t, b, input, 0, 0, duration);
     return input;
   });

@@ -38,9 +38,9 @@ export function splitClip(
   at: number,
   newId: string,
 ): Arrangement {
-  if (data.tracks.length >= 32)
+  if (data.tracks.length >= 48)
     throw new Error(
-      'Splitting needs a free track. This session has reached 32 tracks.',
+      'Splitting needs a free track. This session has reached the track limit.',
     );
   const index = data.tracks.findIndex((t) => t.id === id);
   if (index < 0 || data.tracks.some((t) => t.id === newId))
@@ -90,8 +90,8 @@ export function duplicateClip(
   id: string,
   newId: string,
 ): Arrangement {
-  if (data.tracks.length >= 32)
-    throw new Error('This session has reached 32 tracks.');
+  if (data.tracks.length >= 48)
+    throw new Error('This session has reached the track limit.');
   const track = data.tracks.find((t) => t.id === id);
   if (!track || data.tracks.some((t) => t.id === newId))
     throw new Error('Select a clip to duplicate.');

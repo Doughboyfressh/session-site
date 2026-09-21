@@ -336,25 +336,28 @@ export class MidiRecorder {
           o = c.createOscillator(),
           g = c.createGain(),
           f = c.createBiquadFilter();
-        o.type =
-          this.target.sound === 'bass'
-            ? 'sawtooth'
-            : this.target.sound === 'pad'
-              ? 'triangle'
-              : 'sine';
+        const voice = voiceFor(this.target.sound);
+        o.type = voice.type;
         o.frequency.value = 440 * 2 ** ((event.pitch - 69) / 12);
         f.type = 'lowpass';
-        f.frequency.value =
-          this.target.sound === 'bass'
-            ? 650
-            : this.target.sound === 'pad'
-              ? 1800
-              : 8000;
+        f.frequency.value = voice.cutoff;
         g.gain.setValueAtTime(0, c.currentTime);
         g.gain.linearRampToValueAtTime(
-          event.velocity * 0.16,
-          c.currentTime + (this.target.sound === 'pad' ? 0.08 : 0.008),
+          event.velocity * 0.2,
+          c.currentTime + voice.attack,
         );
+        if (voice.pluck)
+          g.gain.setTargetAtTime(
+            0.00001,
+            c.currentTime + voice.attack,
+            voice.release || 0.12,
+          );
+        else
+          g.gain.setTargetAtTime(
+            event.velocity * 0.13,
+            c.currentTime + 0.09,
+            0.2,
+          );
         o.connect(f).connect(g).connect(this.monitor.input);
         let ended = false;
         const dispose = () => {
@@ -501,3 +504,4 @@ export class MidiRecorder {
     }
   }
 }
+import { voiceFor } from './instruments';

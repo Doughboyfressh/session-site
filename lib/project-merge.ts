@@ -271,12 +271,12 @@ export function mergeProject(
     } as MixerRouting;
   }
   // A union can exceed the server limit even when both input projects are valid.
-  const tooManyTracks = project.data.tracks.length > 32;
+  const tooManyTracks = project.data.tracks.length > 48;
   const tooLarge =
     JSON.stringify(project.data).length > 250000 ||
     new TextEncoder().encode(JSON.stringify(project)).length > 290000;
   const overflow = tooManyTracks || tooLarge;
-  if (tooManyTracks) conflicts.push('Combined project exceeds 32 tracks');
+  if (tooManyTracks) conflicts.push('Combined project exceeds 48 tracks');
   if (tooLarge)
     conflicts.push('Combined arrangement exceeds the save size limit');
   return { project, conflicts: [...new Set(conflicts)], details, overflow };

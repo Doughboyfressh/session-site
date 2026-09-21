@@ -1,5 +1,6 @@
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { uploadBankTake } from '@/lib/take-bank-server';
+import { uploadForm } from '@/lib/upload-body';
 import {
   one,
   run,
@@ -8,6 +9,7 @@ import {
   fail,
   projectEditCondition,
   str,
+  limit,
 } from '@/lib/server';
 export async function POST(req: Request) {
   try {
@@ -18,9 +20,8 @@ export async function POST(req: Request) {
       req.headers.get('origin') !== new URL(req.url).origin
     )
       fail('Request not allowed.', 403);
-    if (Number(req.headers.get('content-length')) > 26 * 1024 * 1024)
-      fail('Choose a file smaller than 25 MB.', 413);
-    const form = await req.formData(),
+    await limit(user.userId, 'upload', 30);
+    const form = await uploadForm(req),
       file = form.get('file');
     const purpose = choice(form.get('purpose'), ['audio', 'avatar', 'take']);
     if (!(file instanceof File) || file.size === 0) fail('Choose a file.');

@@ -36,7 +36,7 @@ export default function ArrangementTimeline({
     <div className="timeline-scroll" aria-label="Arrangement timeline">
       <div className="timeline-content" style={{ width: `${zoom * 100}%` }}>
         <div className="timeline-ruler">
-          <span>TRACKS · {tracks.length}/32</span>
+          <span>TRACKS · {tracks.length}/48</span>
           <button
             className="timeline-seek"
             aria-label="Set playhead on timeline"

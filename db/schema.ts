@@ -98,6 +98,7 @@ export const projects = sqliteTable(
     revision: integer().notNull().default(0),
     updatedBy: text(),
     lastSaveId: text(),
+    forkedFrom: text(),
   },
   (t) => [index('idx_projects_owner').on(t.owner)],
 );

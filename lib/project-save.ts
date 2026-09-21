@@ -97,6 +97,10 @@ export async function saveProject(b: any, uid: string, now: number) {
   validateArrangement(b.data);
   const title = str(b.title),
     data = JSON.stringify(b.data);
+  const forkedFrom =
+    typeof b.forkedFrom === 'string' && b.forkedFrom.length <= 128
+      ? b.forkedFrom
+      : null;
   if (data.length > 250000) fail('This arrangement is too large.');
   const files = [
     ...new Set(b.data.tracks.map((t: any) => t.fileId).filter(Boolean)),
@@ -140,7 +144,7 @@ export async function saveProject(b: any, uid: string, now: number) {
           )
       : db
           .prepare(
-            `INSERT INTO projects (id,owner,title,data,updated,revision,updatedBy,lastSaveId) SELECT ?,?,?,?,?,?,?,? WHERE ${sources} ${creation ? 'AND NOT EXISTS (SELECT 1 FROM project_creations WHERE owner=? AND creationKey=?)' : ''} RETURNING id`,
+            `INSERT INTO projects (id,owner,title,data,updated,revision,updatedBy,lastSaveId,forkedFrom) SELECT ?,?,?,?,?,?,?,?,? WHERE ${sources} ${creation ? 'AND NOT EXISTS (SELECT 1 FROM project_creations WHERE owner=? AND creationKey=?)' : ''} RETURNING id`,
           )
           .bind(
             id,
@@ -151,6 +155,7 @@ export async function saveProject(b: any, uid: string, now: number) {
             revision,
             uid,
             receipt,
+            forkedFrom,
             JSON.stringify(files),
             uid,
             id,

@@ -154,7 +154,7 @@ assert(
   mergeProject(b, make(['a', 'c']), make(['b', 'a', 'c'])).conflicts.length,
 );
 checks++;
-const full = make(Array.from({ length: 31 }, (_, i) => String(i)));
+const full = make(Array.from({ length: 47 }, (_, i) => String(i)));
 assert.equal(
   mergeProject(
     full,

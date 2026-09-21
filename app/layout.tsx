@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import './advanced.css';
@@ -14,7 +14,24 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'SESSION — Make music together', description: 'A shared creative space for artists, producers and engineers. Discover beats, record music and collaborate in private studio rooms.',
+  title: 'SESSION — Make music together',
+  description:
+    'A shared creative space for artists, producers and engineers. Discover beats, record music and collaborate in private studio rooms.',
+  applicationName: 'SESSION',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'SESSION',
+  },
+  icons: { icon: '/favicon.svg', apple: '/favicon.svg' },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#0b0d0b',
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({
@@ -32,4 +49,3 @@ export default function RootLayout({
     </html>
   );
 }
-

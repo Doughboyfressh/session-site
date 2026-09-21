@@ -141,7 +141,7 @@ export async function zipAudio(
 ) {
   checkCancelled(signal);
   if (!files.length || files.length > 64)
-    throw new Error('Choose up to 32 tracks for the package.');
+    throw new Error('Choose between 1 and 64 files for the package.');
   const names = new Set<string>(),
     entries: BlobPart[] = [],
     directory: BlobPart[] = [];

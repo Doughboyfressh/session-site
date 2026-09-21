@@ -110,7 +110,7 @@ fails(() =>
   splitClip(
     {
       bpm: 120,
-      tracks: Array.from({ length: 32 }, (_, i) => ({
+      tracks: Array.from({ length: 48 }, (_, i) => ({
         ...source,
         id: String(i),
       })),

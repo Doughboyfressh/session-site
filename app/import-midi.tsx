@@ -307,6 +307,10 @@ export default function ImportMidi({
                             { value: 'keys', label: 'Keys' },
                             { value: 'bass', label: 'Bass' },
                             { value: 'pad', label: 'Pad' },
+                            { value: 'lead', label: 'Lead' },
+                            { value: 'pluck', label: 'Pluck' },
+                            { value: 'organ', label: 'Organ' },
+                            { value: 'bell', label: 'Bell' },
                           ]}
                           onChange={(v) =>
                             change(() =>

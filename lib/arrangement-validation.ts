@@ -1,11 +1,12 @@
 import { GROUP_IDS, validateRouting } from './mixer-routing';
 import { sampleSettings } from './sample-instrument';
+import { SOUNDS } from './instruments';
 function fail(message: string): never {
   throw Object.assign(new Error(message), { status: 400 });
 }
 export function validateArrangement(d: any, draft = false) {
-  if (!d || !Array.isArray(d.tracks) || d.tracks.length > 32)
-    fail('Keep projects within 32 tracks.');
+  if (!d || !Array.isArray(d.tracks) || d.tracks.length > 48)
+    fail('Keep projects within 48 tracks.');
   if (!Number.isFinite(d.bpm) || d.bpm < 40 || d.bpm > 240)
     fail('Tempo must be 40–240 BPM.');
   if (d.routing !== undefined) validateRouting(d.routing, draft);
@@ -15,6 +16,8 @@ export function validateArrangement(d: any, draft = false) {
     if (typeof t.id !== 'string' || ids.has(t.id))
       fail('Each track needs a unique identity.');
     ids.add(t.id);
+    if (t.sound !== undefined && !SOUNDS.includes(t.sound))
+      fail('Choose an available instrument.');
     if (
       typeof t.name !== 'string' ||
       t.name.length > 100 ||
@@ -48,6 +51,16 @@ export function validateArrangement(d: any, draft = false) {
       ['sendReverb', 0, 1],
       ['sendDelay', 0, 1],
       ['compression', 0, 1],
+      ['drive', 0, 1],
+      ['mod', 0, 1],
+      ['modRate', 0, 1],
+      ['limiter', 0, 1],
+      ['pump', 0, 1],
+      ['denoise', 0, 1],
+      ['autoPitch', 0, 1],
+      ['pitchKey', 0, 11],
+      ['pitchShift', -12, 12],
+      ['stretch', 0.5, 2],
       ['fadeIn', 0, 30],
       ['fadeOut', 0, 30],
       ['fadeStart', 0, 300],
@@ -81,6 +94,20 @@ export function validateArrangement(d: any, draft = false) {
       fail('Choose a sample instrument before combining audio and notes.');
     if (t.groupId !== undefined && !GROUP_IDS.includes(t.groupId))
       fail('Choose an available mixer group or Main.');
+    if (
+      t.driveType !== undefined &&
+      !['soft', 'hard', 'fuzz'].includes(t.driveType)
+    )
+      fail('Invalid drive character.');
+    if (
+      t.modType !== undefined &&
+      !['chorus', 'flanger', 'phaser'].includes(t.modType)
+    )
+      fail('Invalid modulation type.');
+    if (t.pitchMinor !== undefined && typeof t.pitchMinor !== 'boolean')
+      fail('Invalid key scale.');
+    if (t.pitchKey !== undefined && !Number.isInteger(t.pitchKey))
+      fail('Choose a whole-note key.');
     if (
       t.splitFrom !== undefined &&
       (typeof t.splitFrom !== 'string' ||

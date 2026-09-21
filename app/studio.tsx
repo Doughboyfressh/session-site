@@ -58,6 +58,7 @@ import {
 import type { RoomAudio } from '@/lib/room-audio';
 import ArrangementTimeline from './arrangement-timeline';
 import MixerBoard from './mixer-board';
+import ChannelFx from './channel-fx';
 import { routingFor } from '@/lib/mixer-routing';
 import {
   clipLength,
@@ -342,45 +343,56 @@ export default function Studio({
           ? {
               ...t,
               ...p,
-              ...(['notes', 'sequence', 'sound', 'fileId', 'sample'].some(
-                (k) => k in p,
-              )
+              ...([
+                'notes',
+                'sequence',
+                'sound',
+                'fileId',
+                'sample',
+                'denoise',
+                'autoPitch',
+                'pitchKey',
+                'pitchMinor',
+                'pitchShift',
+                'stretch',
+              ].some((k) => k in p)
                 ? { peaks: undefined, duration: undefined }
                 : {}),
             }
           : t,
       ),
     }));
-  async function enrich(t: MixerTrack) {
-    const b = await bufferFor(t, data.bpm);
+  async function enrich(t: MixerTrack, signal?: AbortSignal) {
+    const b = await bufferFor(t, data.bpm, { signal });
     if (b.duration > 300)
       throw new Error('Use audio up to 5 minutes long in this studio.');
     return { ...t, duration: b.duration, peaks: peaks(b) };
   }
   useEffect(() => {
     let cancelled = false;
-    Promise.all(
-      data.tracks
-        .filter((t) => !t.peaks)
-        .map(async (t) => {
-          try {
-            const next = await enrich(t);
-            if (!cancelled)
-              setData((d) => ({
-                ...d,
-                tracks: d.tracks.map((x) =>
-                  x.id === t.id
-                    ? { ...x, duration: next.duration, peaks: next.peaks }
-                    : x,
-                ),
-              }));
-          } catch (e: any) {
-            notify(e.message);
-          }
-        }),
-    );
+    const controller = new AbortController();
+    void (async () => {
+      for (const t of data.tracks.filter((track) => !track.peaks)) {
+        if (cancelled) break;
+        try {
+          const next = await enrich(t, controller.signal);
+          if (!cancelled)
+            setData((d) => ({
+              ...d,
+              tracks: d.tracks.map((x) =>
+                x.id === t.id
+                  ? { ...x, duration: next.duration, peaks: next.peaks }
+                  : x,
+              ),
+            }));
+        } catch (e: any) {
+          if (!cancelled) notify(e.message);
+        }
+      }
+    })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [
     data.tracks
@@ -391,6 +403,14 @@ export default function Studio({
           JSON.stringify(t.sample || null) +
           (t.sound || '') +
           (t.fileId || '') +
+          JSON.stringify([
+            t.denoise,
+            t.autoPitch,
+            t.pitchKey,
+            t.pitchMinor,
+            t.pitchShift,
+            t.stretch,
+          ]) +
           !!t.peaks,
       )
       .join(','),
@@ -438,8 +458,8 @@ export default function Studio({
     setHistoryTick((x) => x + 1);
   }
   function addInstrument() {
-    if (data.tracks.length >= 32)
-      return notify('This session has reached 32 tracks.');
+    if (data.tracks.length >= 48)
+      return notify('This session has reached the track limit.');
     const t = {
       ...defaults(
         'Instrument ' + (data.tracks.filter((t) => t.notes).length + 1),
@@ -606,8 +626,8 @@ export default function Studio({
   }
   async function addFile(file: File) {
     if (!editAllowed.current) return;
-    if (data.tracks.length >= 32) {
-      notify('This session has reached 32 tracks.');
+    if (data.tracks.length >= 48) {
+      notify('This session has reached the track limit.');
       return;
     }
     setBusy('Importing audio');
@@ -711,8 +731,8 @@ export default function Studio({
   }
   function record() {
     if (!canEdit || busy || recording) return;
-    if (data.tracks.length >= 32)
-      return notify('This session has reached 32 tracks.');
+    if (data.tracks.length >= 48)
+      return notify('This session has reached the track limit.');
     const offset = Math.min(299, Math.max(0, position));
     stop();
     setRecordSnapshot(structuredClone({ data, offset, projectId: id }));
@@ -798,9 +818,9 @@ export default function Studio({
           snapshot.target.fileId!,
           [],
         );
-      else if (tracksRef.current.tracks.length >= 32)
+      else if (tracksRef.current.tracks.length >= 48)
         throw new Error(
-          'This session has reached 32 tracks. Download this take or remove a track before adding it.',
+          'This session has reached the track limit. Download this take or remove a track before adding it.',
         );
     };
     check();
@@ -858,8 +878,8 @@ export default function Studio({
     setExportSnapshot(structuredClone({ title, data }));
   }
   async function addSequence() {
-    if (data.tracks.length >= 32)
-      return notify('This session has reached 32 tracks.');
+    if (data.tracks.length >= 48)
+      return notify('This session has reached the track limit.');
     setBusy('Building drums');
     try {
       const t = await enrich({
@@ -992,7 +1012,7 @@ export default function Studio({
                 onClick={async () => {
                   if (
                     !editAllowed.current ||
-                    tracksRef.current.tracks.length >= 32
+                    tracksRef.current.tracks.length >= 48
                   )
                     return notify('This project cannot accept another track.');
                   const epoch = editEpoch.current;
@@ -1279,7 +1299,7 @@ export default function Studio({
                 disabled={
                   !canEdit ||
                   !focus?.duration ||
-                  data.tracks.length >= 32 ||
+                  data.tracks.length >= 48 ||
                   structuralLocked
                 }
                 onClick={duplicate}
@@ -1467,7 +1487,7 @@ export default function Studio({
                   disabled={
                     !canEdit ||
                     !focus?.duration ||
-                    data.tracks.length >= 32 ||
+                    data.tracks.length >= 48 ||
                     structuralLocked
                   }
                   onClick={split}
@@ -1607,6 +1627,11 @@ export default function Studio({
                         onChange={(v) => patch(focus.id, { [k]: v })}
                       />
                     ))}
+                    <ChannelFx
+                      track={focus}
+                      onPatch={patch}
+                      disabled={!canEdit || structuralLocked}
+                    />
                     <div className="mixer-divider">CLIP FADES</div>
                     {(['fadeIn', 'fadeOut'] as const).map((k) => (
                       <label className="field" key={k}>

@@ -16,6 +16,11 @@ import {
   type WaveDepth,
   type Samples,
 } from './audio-files';
+import {
+  masterStereo,
+  MASTER_PRESET_IDS,
+  type MasterPreset,
+} from './mastering';
 
 export type ExportOptions = {
   kind: 'mix' | 'tracks';
@@ -27,50 +32,15 @@ export type ExportOptions = {
   gainDb: number;
   dither: boolean;
   includeMix: boolean;
+  master?: MasterPreset;
 };
 export type ExportProgress = {
   message: string;
   completed: number;
   total: number;
 };
-const latencyCache = new Map<number, Promise<number>>();
-export function compressorLatency(sampleRate: number) {
-  if (!latencyCache.has(sampleRate)) {
-    const task = (async () => {
-      const c = new OfflineAudioContext(
-        1,
-        Math.ceil(sampleRate * 0.1),
-        sampleRate,
-      );
-      const source = c.createBufferSource(),
-        compressor = c.createDynamicsCompressor();
-      source.buffer = c.createBuffer(1, 1, sampleRate);
-      source.buffer.getChannelData(0)[0] = 0.1;
-      compressor.ratio.value = 1;
-      compressor.threshold.value = 0;
-      compressor.knee.value = 0;
-      source.connect(compressor).connect(c.destination);
-      source.start();
-      try {
-        const data = (await c.startRendering()).getChannelData(0);
-        let peak = 0;
-        for (let i = 1; i < data.length; i++)
-          if (Math.abs(data[i]) > Math.abs(data[peak])) peak = i;
-        if (data[peak] < 0.01 || peak > sampleRate * 0.02)
-          throw new Error(
-            'This browser could not verify export timing. Try another browser.',
-          );
-        return peak;
-      } finally {
-        source.disconnect();
-        compressor.disconnect();
-      }
-    })();
-    latencyCache.set(sampleRate, task);
-    void task.catch(() => latencyCache.delete(sampleRate));
-  }
-  return latencyCache.get(sampleRate)!;
-}
+import { compressorLatency } from './audio-latency';
+export { compressorLatency } from './audio-latency';
 export function exportEnd(t: MixerTrack, duration: number) {
   const end = t.offset + duration - t.trimStart - t.trimEnd;
   if (
@@ -91,6 +61,13 @@ export function exportEnd(t: MixerTrack, duration: number) {
     );
   return end;
 }
+export function exportSource(
+  track: MixerTrack,
+  processing: ExportOptions['processing'],
+): MixerTrack {
+  // Time and pitch edits define the clip itself; dry stems bypass vocal effects.
+  return processing === 'dry' ? { ...track, denoise: 0, autoPitch: 0 } : track;
+}
 export async function renderExportTrack(
   t: MixerTrack,
   source: AudioBuffer,
@@ -101,8 +78,9 @@ export async function renderExportTrack(
 ): Promise<Samples> {
   checkCancelled(signal);
   const latency =
-    options.processing === 'processed' && t.compression
-      ? await compressorLatency(options.sampleRate)
+    options.processing === 'processed' && (t.compression || t.limiter)
+      ? (await compressorLatency(options.sampleRate)) *
+        (Number(Boolean(t.compression)) + Number(Boolean(t.limiter)))
       : 0;
   checkCancelled(signal);
   const c = new OfflineAudioContext(2, frames + latency, options.sampleRate);
@@ -122,7 +100,13 @@ export async function renderExportTrack(
       : null;
   const input =
     options.processing === 'processed'
-      ? channel(c, track, routed?.inputs.get(track.id) || output)
+      ? channel(
+          c,
+          track,
+          routed?.inputs.get(track.id) || output,
+          false,
+          arrangement?.bpm || 120,
+        )
       : (() => {
           const gain = c.createGain();
           gain.connect(output);
@@ -130,7 +114,9 @@ export async function renderExportTrack(
         })();
   scheduleClip(
     c,
-    options.processing === 'dry' ? { ...track, automation: [] } : track,
+    options.processing === 'dry'
+      ? { ...track, automation: [], pump: 0 }
+      : track,
     source,
     input,
     0,
@@ -171,6 +157,7 @@ export async function createAudioExport(
   try {
     const data = structuredClone(arrangement),
       settings = structuredClone(options);
+    const master: MasterPreset = settings.master ?? 'off';
     checkCancelled(signal);
     if (
       ![44100, 48000].includes(settings.sampleRate) ||
@@ -182,14 +169,15 @@ export async function createAudioExport(
       settings.tail > 5 ||
       !Number.isFinite(settings.gainDb) ||
       settings.gainDb > 0 ||
-      settings.gainDb < -36
+      settings.gainDb < -36 ||
+      !MASTER_PRESET_IDS.includes(master)
     )
       throw new Error('Choose valid export settings.');
     const ids = new Set(settings.trackIds),
       selected = data.tracks.filter((t) => ids.has(t.id));
     if (
       !selected.length ||
-      selected.length > 32 ||
+      selected.length > 48 ||
       selected.length !== ids.size
     )
       throw new Error('Choose at least one available track.');
@@ -215,11 +203,15 @@ export async function createAudioExport(
           selected[i].name +
             ' has notes beyond the five-minute instrument limit. Move or shorten those notes before exporting.',
         );
-      const b = await bufferFor(selected[i], data.bpm, {
-        sampleRate: settings.sampleRate,
-        signal,
-        revalidate: true,
-      });
+      const b = await bufferFor(
+        exportSource(selected[i], settings.processing),
+        data.bpm,
+        {
+          sampleRate: settings.sampleRate,
+          signal,
+          revalidate: true,
+        },
+      );
       checkCancelled(signal);
       end = Math.max(end, exportEnd(selected[i], b.duration));
     }
@@ -242,11 +234,15 @@ export async function createAudioExport(
     for (let i = 0; i < selected.length; i++) {
       const track = selected[i];
       report('Rendering ' + track.name, selected.length + i);
-      const b = await bufferFor(track, data.bpm, {
-        sampleRate: settings.sampleRate,
-        signal,
-        revalidate: true,
-      });
+      const b = await bufferFor(
+        exportSource(track, settings.processing),
+        data.bpm,
+        {
+          sampleRate: settings.sampleRate,
+          signal,
+          revalidate: true,
+        },
+      );
       checkCancelled(signal);
       const rendered = await renderExportTrack(
         track,
@@ -280,15 +276,19 @@ export async function createAudioExport(
         peaks.push({ name, peak: encoded.peak });
       }
     }
+    const mixChannels =
+      sum && master !== 'off'
+        ? await masterStereo(sum, settings.sampleRate, master)
+        : sum;
     report('Encoding stereo mix', total - 2);
     let mix: Awaited<ReturnType<typeof encodeWave>> | undefined;
-    if (sum)
+    if (mixChannels)
       mix = await encodeWave(
         {
           length: frames,
           sampleRate: settings.sampleRate,
           numberOfChannels: 2,
-          getChannelData: (ch) => sum[ch],
+          getChannelData: (ch) => mixChannels[ch],
         },
         settings.depth,
         { signal, dither: settings.dither },
@@ -326,7 +326,9 @@ export async function createAudioExport(
       settings.processing === 'dry'
         ? 'Dry tracks preserve clip offsets, trims and fades. Mixer volume, pan, automation, EQ, compression, reverb and delay are bypassed.'
         : 'Processed tracks preserve clip offsets, trims, fades, volume, pan, automation, channel effects, group gain/pan and their contribution to shared reverb/delay. Compressor lookahead is compensated.',
-      'No master compressor or normalization is applied. A reference file is the sum of the selected exported tracks before WAV quantization.',
+      master !== 'off'
+        ? `A master chain was applied to the mix (${master} preset: tonal EQ, glue compression and a limiter). The reference file is the mastered mix.`
+        : 'No master compressor or normalization is applied. A reference file is the sum of the selected exported tracks before WAV quantization.',
       'The selected tracks are exported even if track/group mute or solo excludes them in the studio. Shared return levels are included in processed exports. Dry exports bypass groups and shared returns. Loop and metronome are excluded.',
       'Audio source quality is unchanged by selecting a higher output sample rate or bit depth. Exporting does not change the permissions attached to the music.',
       '',

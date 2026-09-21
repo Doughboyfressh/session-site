@@ -15,6 +15,7 @@ import {
 } from '@/lib/audio-export';
 import type { Arrangement } from '@/lib/audio';
 import { audibleTrack } from '@/lib/mixer-routing';
+import { MASTER_PRESETS } from '@/lib/mastering';
 
 export default function ExportAudio({
   title,
@@ -38,6 +39,7 @@ export default function ExportAudio({
     gainDb: 0,
     dither: true,
     includeMix: true,
+    master: 'off',
   });
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [running, setRunning] = useState(false),
@@ -201,10 +203,21 @@ export default function ExportAudio({
                 label: v === 0 ? '0 dB · unchanged' : v + ' dB',
               }))}
             />
+            {(options.kind === 'mix' || options.includeMix) && (
+              <Pick
+                label="Master"
+                value={options.master || 'off'}
+                onChange={(v) => change('master', v as ExportOptions['master'])}
+                options={MASTER_PRESETS.map((p) => ({
+                  value: p.id,
+                  label: p.name,
+                }))}
+              />
+            )}
           </div>
           <p className="export-note">
             {options.processing === 'dry'
-              ? 'Dry audio keeps positions, trims and fades. Mixer volume, pan, automation, groups and effects are bypassed.'
+              ? 'Dry audio keeps positions, trims, fades and time/pitch edits. Mixer volume, pan, automation, groups, vocal processing and channel effects are bypassed.'
               : 'Channel effects, group levels/pan and each track’s share of reverb/delay returns are included. Exports leave out the playback safety compressor.'}{' '}
             Export gain applies equally to every file.
           </p>

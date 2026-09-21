@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { DatabaseSync } from 'node:sqlite';
+import { loadTS } from './load-ts.mjs';
 const db = new DatabaseSync(':memory:');
 db.exec(
   `CREATE TABLE files(id TEXT PRIMARY KEY,owner TEXT,name TEXT,mime TEXT,size INTEGER,purpose TEXT,created INTEGER);CREATE TABLE projects(id TEXT PRIMARY KEY,owner TEXT);CREATE TABLE rooms(id TEXT PRIMARY KEY,owner TEXT,project TEXT);CREATE TABLE members(room TEXT,user TEXT);CREATE TABLE room_editors(room TEXT,project TEXT,user TEXT,grantedBy TEXT);INSERT INTO projects VALUES('project','owner');INSERT INTO rooms VALUES('room','owner','project');INSERT INTO members VALUES('room','editor'),('room','listener');INSERT INTO room_editors VALUES('room','project','editor','owner');`,
@@ -29,6 +30,7 @@ vm.runInNewContext(
   { exports: serverExports, require: () => ({ env: {} }) },
 );
 const server = {
+  limit: async () => {}, // Rate limiting is exercised against real SQL in backend-checks.
   fail,
   projectEditCondition: serverExports.projectEditCondition,
   str: serverExports.str,
@@ -62,9 +64,11 @@ const code = ts.transpileModule(
 vm.runInNewContext(code, {
   exports,
   require: (id) =>
-    id.includes('chatgpt-auth')
-      ? { getChatGPTUser: async () => (user ? { userId: user } : null) }
-      : server,
+    id.includes('upload-body')
+      ? loadTS('lib/upload-body.ts')
+      : id.includes('chatgpt-auth')
+        ? { getChatGPTUser: async () => (user ? { userId: user } : null) }
+        : server,
   File,
   Response,
   Request,

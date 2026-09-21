@@ -202,6 +202,48 @@ export async function POST(req: Request) {
         result = await saveProject(b, uid, now);
         break;
       }
+      case 'remix': {
+        const src = await one(
+          "SELECT * FROM tracks WHERE id=? AND visibility='public'",
+          str(b.id),
+        );
+        if (!src) fail('This beat is no longer available to remix.', 404);
+        if (src.permission !== 'collaborate')
+          fail(
+            'This beat is listen-only. Ask the producer for collaboration access before remixing.',
+            403,
+          );
+        const arrangement = {
+          bpm: src.bpm,
+          tracks: [
+            {
+              id: crypto.randomUUID(),
+              name: (src.title + ' (beat)').slice(0, 100),
+              fileId: src.fileId,
+              volume: 0.8,
+              pan: 0,
+              muted: false,
+              solo: false,
+              offset: 0,
+              trimStart: 0,
+              trimEnd: 0,
+              low: 0,
+              mid: 0,
+              high: 0,
+            },
+          ],
+        };
+        result = await saveProject(
+          {
+            data: arrangement,
+            title: (src.title + ' — remix').slice(0, 120),
+            forkedFrom: src.id,
+          },
+          uid,
+          now,
+        );
+        break;
+      }
       case 'deleteProject': {
         const p = await one(
           'SELECT * FROM projects WHERE id=? AND owner=?',

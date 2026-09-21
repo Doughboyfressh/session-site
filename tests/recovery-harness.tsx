@@ -19,6 +19,7 @@ const track = {
   ...defaults('Synth'),
   id: 'track',
   fileId: 'private-file',
+  sample: { rootPitch: 60, start: 0, end: 3, attack: 0.005, release: 0.08 },
   duration: 3,
   peaks: [0.1, 0.5],
   notes: [{ id: 'n', pitch: 60, start: 0, length: 1, velocity: 0.5 }],
@@ -221,7 +222,18 @@ function App() {
       sequence[0].audio = new Blob(['hidden']);
       const pattern = recoveryRecord('A', {
         ...make(),
-        data: { bpm: 120, tracks: [{ ...track, sequence }] },
+        data: {
+          bpm: 120,
+          tracks: [
+            {
+              ...track,
+              fileId: undefined,
+              sample: undefined,
+              notes: undefined,
+              sequence,
+            },
+          ],
+        },
       });
       check(
         !('audio' in pattern.data.tracks[0].sequence!) &&
@@ -232,7 +244,18 @@ function App() {
       await fails(() =>
         recoveryRecord('A', {
           ...make(),
-          data: { bpm: 120, tracks: [{ ...track, sequence }] },
+          data: {
+            bpm: 120,
+            tracks: [
+              {
+                ...track,
+                fileId: undefined,
+                sample: undefined,
+                notes: undefined,
+                sequence,
+              },
+            ],
+          },
         }),
       );
       await fails(() =>
@@ -344,13 +367,13 @@ function App() {
         !(await b.put(recoveryRecord('A', make('resurrect')), on.generation)),
         'Queued write resurrected deleted project',
       );
-      for (let i = 0; i < 20; i++)
+      for (let i = 0; i < 40; i++)
         await a.put(recoveryRecord('A', make('cap-' + i, '')), on.generation);
       await fails(() =>
         a.put(recoveryRecord('A', make('overflow', '')), on.generation),
       );
       check(
-        (await a.list('A')).drafts.length === 20,
+        (await a.list('A')).drafts.length === 40,
         'Full store evicted existing work',
       );
       check(
@@ -385,7 +408,7 @@ function App() {
       });
       const mixed = await a.list('A');
       check(
-        mixed.drafts.length === 20 && mixed.unreadable === 1,
+        mixed.drafts.length === 40 && mixed.unreadable === 1,
         'Corrupt copy blocked other drafts',
       );
       check(
@@ -415,7 +438,7 @@ function App() {
       );
       await a.removeUnreadable('A');
       check(
-        (await a.list('A')).drafts.length === 20 &&
+        (await a.list('A')).drafts.length === 40 &&
           (await a.list('A')).unreadable === 0,
         'Damaged entry removal harmed good copies',
       );
@@ -442,7 +465,7 @@ function App() {
       );
       const closing = a.close();
       check(
-        (await a.list('A')).drafts.length === 20,
+        (await a.list('A')).drafts.length === 40,
         'Close interrupted a new connection',
       );
       await closing;
@@ -450,7 +473,7 @@ function App() {
       const opening = a.open(),
         pendingClose = a.close();
       check(
-        (await a.list('A')).drafts.length === 20,
+        (await a.list('A')).drafts.length === 40,
         'Closing a pending open interrupted its replacement',
       );
       await opening;
@@ -459,7 +482,7 @@ function App() {
       forced.close();
       forced.dispatchEvent(new Event('close'));
       check(
-        (await a.list('A')).drafts.length === 20,
+        (await a.list('A')).drafts.length === 40,
         'Unexpected closure could not reopen',
       );
       const large = {

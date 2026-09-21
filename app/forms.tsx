@@ -424,6 +424,7 @@ export function TrackDetail({
   onClose,
   onPlay,
   onUse,
+  onRemix,
   saved,
   onSave,
   user,
@@ -434,6 +435,7 @@ export function TrackDetail({
   onClose: () => void;
   onPlay: (t: Track) => void;
   onUse: (t: Track) => void;
+  onRemix: (t: Track) => void;
   saved: boolean;
   onSave: (t: Track) => void;
   user: any;
@@ -528,6 +530,17 @@ export function TrackDetail({
                   <ArrowUpRight size={17} />
                 </button>
               )}
+              {!track.demo &&
+                track.kind === 'beat' &&
+                track.permission === 'collaborate' &&
+                track.owner !== user?.id && (
+                  <button
+                    className="button secondary"
+                    onClick={() => onRemix(track)}
+                  >
+                    Start a tracked remix
+                  </button>
+                )}
               {track.owner === user?.id && (
                 <div className="actions">
                   <button

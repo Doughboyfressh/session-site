@@ -16,7 +16,10 @@ export type MidiDocument = {
   variableTempo: boolean;
   warnings: string[];
 };
-export type MidiChoice = { id: string; sound: 'keys' | 'bass' | 'pad' };
+export type MidiChoice = {
+  id: string;
+  sound: 'keys' | 'bass' | 'pad' | 'lead' | 'pluck' | 'organ' | 'bell';
+};
 type Event = {
   tick: number;
   track: number;
@@ -380,7 +383,13 @@ export function appendMidi(
   const bpm = useFileTempo ? document.bpm : data.bpm;
   const added = choices.map((c) => {
     const p = document.parts.find((p) => p.id === c.id);
-    if (!p || p.issue || !['keys', 'bass', 'pad'].includes(c.sound))
+    if (
+      !p ||
+      p.issue ||
+      !['keys', 'bass', 'pad', 'lead', 'pluck', 'organ', 'bell'].includes(
+        c.sound,
+      )
+    )
       throw Error('Select an available MIDI part and sound.');
     const duration =
       (Math.max(8, ...p.notes.map((n) => n.start + n.length)) * 60) / bpm + 0.5;
