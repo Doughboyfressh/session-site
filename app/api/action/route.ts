@@ -2,6 +2,7 @@ import { saveProject, resolveProjectCreation } from '@/lib/project-save';
 import { takeBankAction } from '@/lib/take-bank-server';
 import { setRoomEditor } from '@/lib/room-editors';
 import { privacyAction } from '@/lib/privacy';
+import { notifyUser } from '@/lib/social-server';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import {
   all,
@@ -163,35 +164,63 @@ export async function POST(req: Request) {
           ))
         )
           fail('Profile unavailable.');
-        if (b.value)
-          await run(
+        if (b.value) {
+          const followed = await run(
             'INSERT OR IGNORE INTO follows (user,target) VALUES (?,?)',
             uid,
             b.id,
           );
-        else
+          if (
+            Number(
+              (followed as { meta?: { changes?: number } })?.meta?.changes || 0,
+            ) > 0
+          )
+            await notifyUser({
+              user: b.id,
+              actor: uid,
+              kind: 'follow',
+              resourceType: 'profile',
+              resourceId: uid,
+              body: 'started following you',
+              uniqueKey: `follow:${uid}:${b.id}`,
+              created: now,
+            });
+        } else
           await run('DELETE FROM follows WHERE user=? AND target=?', uid, b.id);
         break;
       }
       case 'comments': {
-        if (
-          !(await one(
-            "SELECT id FROM tracks WHERE id=? AND (visibility='public' OR owner=?)",
-            b.id,
-            uid,
-          )) &&
-          !String(b.id).startsWith('demo-')
-        )
+        const commentedTrack = String(b.id).startsWith('demo-')
+          ? null
+          : await one(
+              "SELECT id,owner FROM tracks WHERE id=? AND (visibility='public' OR owner=?)",
+              b.id,
+              uid,
+            );
+        if (!commentedTrack && !String(b.id).startsWith('demo-'))
           fail('Track unavailable.');
-        if (b.body)
+        if (b.body) {
+          const commentId = crypto.randomUUID();
           await run(
             'INSERT INTO comments (id,track,user,body,created) VALUES (?,?,?,?,?)',
-            crypto.randomUUID(),
+            commentId,
             b.id,
             uid,
             str(b.body, 1000),
             now,
           );
+          if (commentedTrack)
+            await notifyUser({
+              user: commentedTrack.owner,
+              actor: uid,
+              kind: 'comment',
+              resourceType: 'track',
+              resourceId: b.id,
+              body: 'commented on your track',
+              uniqueKey: `comment:${commentId}`,
+              created: now,
+            });
+        }
         result = await all(
           "SELECT c.*,COALESCE(p.name,'Creator') AS name FROM comments c LEFT JOIN profiles p ON p.id=c.user WHERE c.track=? ORDER BY c.created DESC LIMIT 50",
           b.id,

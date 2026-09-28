@@ -13,6 +13,7 @@ export type Track = {
   demo?: boolean;
   color?: string;
   likes?: number;
+  created?: number;
 };
 export const demos: Track[] = [
   {

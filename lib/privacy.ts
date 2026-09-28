@@ -1,4 +1,4 @@
-import { all, one, run, database, bucket, fail } from './server';
+import { all, one, database, bucket, fail } from './server';
 export async function privacyAction(b: any, uid: string) {
   if (b.action === 'projectVersions') {
     const p = await one(
@@ -20,7 +20,7 @@ export async function privacyAction(b: any, uid: string) {
   if (b.action === 'exportData') {
     const result: any = {
       exportedAt: new Date().toISOString(),
-      format: 'SESSION account export v1',
+      format: 'SESSION account export v2',
     };
     for (const [key, sql] of Object.entries({
       profile: 'SELECT * FROM profiles WHERE id=?',
@@ -44,6 +44,27 @@ export async function privacyAction(b: any, uid: string) {
         'SELECT room,project,grantedBy,created FROM room_editors WHERE user=?',
     }))
       result[key] = await all(sql, uid);
+    result.activity = await all(
+      'SELECT * FROM notifications WHERE user=? ORDER BY created DESC',
+      uid,
+    );
+    result.collaborationRequests = await all(
+      'SELECT * FROM collaboration_requests WHERE sender=? OR recipient=? ORDER BY updated DESC',
+      uid,
+      uid,
+    );
+    result.collaborationMessages = await all(
+      `SELECT d.* FROM direct_messages d
+       JOIN collaboration_requests r ON r.id=d.request
+       WHERE r.sender=? OR r.recipient=?
+       ORDER BY d.created ASC`,
+      uid,
+      uid,
+    );
+    result.blockedMembers = await all(
+      'SELECT target,created FROM user_blocks WHERE user=? ORDER BY created DESC',
+      uid,
+    );
     return result;
   }
   if (b.action === 'eraseFile') {

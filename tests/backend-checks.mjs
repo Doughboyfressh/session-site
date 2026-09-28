@@ -363,3 +363,279 @@ assert.equal(
 );
 checks++;
 console.log('Production API checks passed:', checks);
+
+// Private social loop: notifications, request authorization, accepted messaging,
+// retry deduplication, and blocking all run through the real route code.
+const socialRoute = load('app/api/social/route.ts');
+const socialRecipient = 'engineer_' + now.toString(36);
+const socialOutsider = 'outsider_' + now.toString(36);
+db.prepare(
+  "INSERT INTO profiles(id,username,name,roles,bio,location,visibility,created) VALUES (?,?,?,?,'','','public',?)",
+).run(
+  socialRecipient,
+  socialRecipient.slice(0, 24),
+  'Mix Engineer',
+  JSON.stringify(['Engineer']),
+  now,
+);
+const socialTrack = crypto.randomUUID();
+db.prepare(
+  'INSERT INTO tracks (id,owner,title,kind,genre,bpm,musicalKey,visibility,permission,fileId,created) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+).run(
+  socialTrack,
+  socialRecipient,
+  'Midnight Mix',
+  'song',
+  'R&B',
+  92,
+  'C minor',
+  'public',
+  'collaborate',
+  fileId,
+  now,
+);
+db.prepare(
+  "INSERT INTO profiles(id,username,name,roles,bio,location,visibility,created) VALUES (?,?,?,?,'','','public',?)",
+).run(
+  artist,
+  artist.slice(0, 24),
+  'Test Artist',
+  JSON.stringify(['Artist']),
+  now,
+);
+
+async function socialPost(
+  userId,
+  body,
+  status = 200,
+  origin = 'https://app.local',
+) {
+  currentHeaders = userId
+    ? {
+        'oai-authenticated-user-id': userId,
+        'oai-authenticated-user-email': userId + '@example.test',
+      }
+    : {};
+  const response = await socialRoute.POST(
+    new Request('https://app.local/api/social', {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  );
+  const text = await response.text();
+  assert.equal(response.status, status, JSON.stringify(body) + ': ' + text);
+  assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  checks += 2;
+  return JSON.parse(text);
+}
+
+async function socialGet(userId, query, status = 200) {
+  currentHeaders = userId
+    ? {
+        'oai-authenticated-user-id': userId,
+        'oai-authenticated-user-email': userId + '@example.test',
+      }
+    : {};
+  const response = await socialRoute.GET(
+    new Request('https://app.local/api/social?' + query),
+  );
+  const text = await response.text();
+  assert.equal(response.status, status, query + ': ' + text);
+  assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  checks += 2;
+  return JSON.parse(text);
+}
+
+await act(artist, { action: 'follow', id: socialRecipient, value: true });
+let activity = await socialGet(socialRecipient, 'view=activity');
+assert.equal(activity.unread, 1);
+assert.equal(activity.items[0].kind, 'follow');
+checks += 2;
+await socialPost(socialRecipient, { action: 'notificationRead' });
+await act(artist, { action: 'follow', id: socialRecipient, value: true });
+activity = await socialGet(socialRecipient, 'view=activity');
+assert.equal(
+  activity.unread,
+  0,
+  'a retried follow does not become unread again',
+);
+checks++;
+await act(artist, {
+  action: 'comments',
+  id: socialTrack,
+  body: 'The vocal space sounds great.',
+});
+activity = await socialGet(socialRecipient, 'view=activity');
+assert.ok(
+  activity.items.some(
+    (item) => item.kind === 'comment' && item.resourceId === socialTrack,
+  ),
+  'a track comment notifies its owner',
+);
+checks++;
+
+const createdRequest = await socialPost(artist, {
+  action: 'collaborationRequest',
+  recipient: socialRecipient,
+  role: 'Engineer',
+  message: 'I would like your mix perspective on a new R&B record.',
+});
+assert.ok(createdRequest.id);
+checks++;
+await socialPost(
+  artist,
+  {
+    action: 'collaborationRequest',
+    recipient: socialRecipient,
+    role: 'Engineer',
+    message: 'Too short',
+  },
+  400,
+);
+await socialPost(
+  artist,
+  {
+    action: 'collaborationRequest',
+    recipient: socialRecipient,
+    role: 'Engineer',
+    message: 'This should not create a duplicate active request.',
+  },
+  409,
+);
+await socialPost(
+  socialRecipient,
+  {
+    action: 'collaborationRequest',
+    recipient: artist,
+    role: 'Artist',
+    message: 'Let me send the same profile connection in reverse.',
+  },
+  409,
+);
+const withdrawnRequest = await socialPost(artist, {
+  action: 'collaborationRequest',
+  recipient: socialRecipient,
+  track: socialTrack,
+  role: 'Engineer',
+  message: 'Can you review this specific mix when you have time?',
+});
+await socialPost(
+  socialRecipient,
+  {
+    action: 'collaborationStatus',
+    id: withdrawnRequest.id,
+    status: 'closed',
+  },
+  409,
+);
+await socialPost(artist, {
+  action: 'collaborationStatus',
+  id: withdrawnRequest.id,
+  status: 'closed',
+});
+
+const inbox = await socialGet(socialRecipient, 'view=inbox');
+assert.equal(
+  inbox.requests.find((request) => request.id === createdRequest.id)?.status,
+  'pending',
+);
+assert.equal(
+  inbox.requests.find((request) => request.id === withdrawnRequest.id)?.status,
+  'closed',
+);
+checks += 2;
+await socialGet(socialOutsider, 'view=thread&id=' + createdRequest.id, 404);
+await socialPost(
+  artist,
+  { action: 'collaborationStatus', id: createdRequest.id, status: 'accepted' },
+  409,
+);
+await socialPost(socialRecipient, {
+  action: 'collaborationStatus',
+  id: createdRequest.id,
+  status: 'accepted',
+});
+
+const messageClientId = crypto.randomUUID();
+const firstMessage = await socialPost(artist, {
+  action: 'message',
+  id: createdRequest.id,
+  message: 'Here is the direction and the reference mix.',
+  clientId: messageClientId,
+});
+const retriedMessage = await socialPost(artist, {
+  action: 'message',
+  id: createdRequest.id,
+  message: 'Here is the direction and the reference mix.',
+  clientId: messageClientId,
+});
+assert.equal(
+  retriedMessage.id,
+  firstMessage.id,
+  'a retried message returns the canonical stored id',
+);
+const thread = await socialGet(
+  socialRecipient,
+  'view=thread&id=' + createdRequest.id,
+);
+assert.equal(thread.messages.length, 1, 'retried message is stored once');
+assert.equal(
+  thread.messages[0].body,
+  'Here is the direction and the reference mix.',
+);
+checks += 3;
+
+activity = await socialGet(socialRecipient, 'view=activity');
+assert.ok(activity.items.some((item) => item.kind === 'collaboration_request'));
+assert.ok(activity.items.some((item) => item.kind === 'message'));
+checks += 2;
+await socialPost(socialRecipient, { action: 'notificationRead' });
+assert.equal((await socialGet(socialRecipient, 'view=activity')).unread, 0);
+checks++;
+
+await socialPost(socialRecipient, {
+  action: 'block',
+  target: artist,
+  value: true,
+});
+await socialPost(
+  artist,
+  {
+    action: 'message',
+    id: createdRequest.id,
+    message: 'Blocked message',
+    clientId: crypto.randomUUID(),
+  },
+  403,
+);
+const blockedInbox = await socialGet(socialRecipient, 'view=inbox');
+assert.equal(blockedInbox.requests[0].status, 'closed');
+assert.equal(blockedInbox.blocks[0].target, artist);
+checks += 2;
+await socialPost(
+  artist,
+  {
+    action: 'collaborationRequest',
+    recipient: socialRecipient,
+    role: 'Engineer',
+    message: 'Blocked request should fail clearly.',
+  },
+  403,
+);
+await socialPost(socialRecipient, {
+  action: 'block',
+  target: artist,
+  value: false,
+});
+assert.equal((await socialGet(socialRecipient, 'view=inbox')).blocks.length, 0);
+checks++;
+await socialPost(
+  artist,
+  { action: 'notificationRead' },
+  403,
+  'https://unrelated.example',
+);
+await socialGet(null, 'view=activity', 401);
+
+console.log('Social collaboration backend checks passed:', checks);

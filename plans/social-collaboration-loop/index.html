@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<!-- lavish plan artifact — social-collaboration-loop — 2026-09-27 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan — social-collaboration-loop</title>
+<style>
+  :root{
+    --bg:#101211; --surface:#191c1a; --surface-2:#202421; --border:#303631;
+    --text:#f4f7f2; --muted:#9aa39c; --primary:#c2f65a; --ok:#c2f65a;
+    --warn:#f0bd5c; --danger:#ff7777;
+    --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"Cascadia Code",Consolas,monospace;
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.55}
+  main{max-width:880px;margin:0 auto;padding:32px 24px 96px}
+  header{border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:28px}
+  h1{font-size:26px;margin:0 0 4px}
+  .meta{color:var(--muted);font-size:13px}
+  .meta .badge{display:inline-block;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:999px;padding:1px 10px;margin-right:8px;color:var(--warn)}
+  section{margin:28px 0}
+  h2{font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+    border-bottom:1px solid var(--border);padding-bottom:6px}
+  [contenteditable]{border:1px dashed transparent;border-radius:6px;padding:2px 6px;margin:0 -6px;outline:none}
+  [contenteditable]:hover{border-color:var(--border)}
+  [contenteditable]:focus{border-color:var(--primary);background:var(--surface)}
+  .hint{color:var(--muted);font-size:13px;font-style:italic}
+  ul.plain{list-style:none;padding:0;margin:8px 0}
+  ul.plain li{padding:6px 8px;border-left:2px solid var(--border);margin:6px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+  .card h3{margin:0 0 6px;font-size:15px}
+  .card p{margin:0;color:var(--muted);font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{color:var(--muted);text-align:left;font-weight:500;font-size:12px;
+    text-transform:uppercase;letter-spacing:.06em;padding:6px 8px;border-bottom:1px solid var(--border)}
+  td{padding:8px;border-bottom:1px solid var(--border);vertical-align:top}
+  td.num{color:var(--muted);font-family:var(--mono);font-size:12px;white-space:nowrap}
+  input[type=checkbox]{width:16px;height:16px;accent-color:var(--ok)}
+  .done [contenteditable]{text-decoration:line-through;color:var(--muted)}
+  .risk{display:flex;gap:10px;align-items:baseline;padding:8px;border-left:2px solid var(--warn);margin:6px 0}
+  .risk .sev{font-size:11px;font-family:var(--mono);color:var(--warn);white-space:nowrap}
+  .decision{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:14px;margin:10px 0}
+  .decision .q{font-weight:600}
+  .choices{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+  .choices label{display:flex;gap:6px;align-items:center;background:var(--surface-2);
+    border:1px solid var(--border);border-radius:999px;padding:4px 12px;font-size:13px;cursor:pointer}
+  textarea{width:100%;min-height:52px;background:var(--bg);color:var(--text);
+    border:1px solid var(--border);border-radius:8px;padding:8px;font-family:var(--font);font-size:13px;resize:vertical}
+  .savebar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);
+    border-top:1px solid var(--border);padding:10px 24px;display:flex;gap:14px;align-items:center}
+  .savebar button{background:var(--primary);border:none;color:#101211;font-weight:700;
+    border-radius:8px;padding:8px 18px;cursor:pointer;font-size:14px}
+  .savebar .status{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>SESSION social collaboration loop</h1>
+    <div class="meta"><span class="badge">release validated</span>social-collaboration-loop · 2026-09-27 · annotate below, then hit “Save annotations”</div>
+  </header>
+
+  <section>
+    <h2>Goal</h2>
+    <div data-id="goal" contenteditable>Help artists, producers, and engineers move from discovering relevant music to starting a private collaboration and following its progress without leaving SESSION. The loop works when a member can find a suitable public track, send a role-specific request, accept it, exchange messages, and see each important event in one activity inbox.</div>
+  </section>
+
+  <section>
+    <h2>Non-goals</h2>
+    <ul class="plain">
+      <li data-id="nongoal-1" contenteditable>Payments, subscriptions, licensing checkout, royalty accounting, and music distribution.</li>
+      <li data-id="nongoal-2" contenteditable>Public livestreaming, message attachments, group chats, and an opaque machine-learning recommendation service.</li>
+      <li data-id="nongoal-3" contenteditable>Expanding the browser DAW or changing existing studio-room audio and video behavior.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Screens &amp; flows</h2>
+    <p class="hint">Duplicate a card per screen or flow. Sketch the shape in words; wireframes can come later.</p>
+    <div class="grid">
+      <div class="card"><h3 data-id="screen-1-title" contenteditable>Discover music</h3>
+        <p data-id="screen-1-desc" contenteditable>For You, Following, and New tabs rank public tracks with a clear reason such as “From someone you follow” or “Matches your saved R&amp;B tracks.” Existing search and role filters remain available.</p></div>
+      <div class="card"><h3 data-id="screen-2-title" contenteditable>Request collaboration</h3>
+        <p data-id="screen-2-desc" contenteditable>A track or creator opens a focused request form with the intended role, optional public-track context, and a concise introduction. The sender sees the request as pending immediately.</p></div>
+      <div class="card"><h3 data-id="screen-3-title" contenteditable>Collaboration inbox</h3>
+        <p data-id="screen-3-desc" contenteditable>Incoming and sent requests show pending, accepted, declined, or closed status. Accepted requests become private text conversations tied to their original track and participants.</p></div>
+      <div class="card"><h3 data-id="screen-4-title" contenteditable>Activity</h3>
+        <p data-id="screen-4-desc" contenteditable>A compact timeline covers follows, comments, requests, decisions, and new messages. Unread counts appear in navigation; members can mark one item or all items read.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Tasks</h2>
+    <table>
+      <thead><tr><th></th><th>#</th><th>Task</th><th>Est</th></tr></thead>
+      <tbody>
+        <tr class="task done"><td><input type="checkbox" data-id="task-1" checked></td><td class="num">1</td>
+          <td contenteditable data-id="task-1-text">Add append-only D1 migrations for notifications, collaboration requests, and messages with query indexes.</td>
+          <td contenteditable data-id="task-1-est" class="num">~0.5d</td></tr>
+        <tr class="task done"><td><input type="checkbox" data-id="task-2" checked></td><td class="num">2</td>
+          <td contenteditable data-id="task-2-text">Add authenticated social APIs with participant checks, status transitions, validation, limits, and private no-store responses.</td>
+          <td contenteditable data-id="task-2-est" class="num">~1d</td></tr>
+        <tr class="task done"><td><input type="checkbox" data-id="task-3" checked></td><td class="num">3</td>
+          <td contenteditable data-id="task-3-text">Generate server-side activity events for follows, comments, requests, decisions, and messages.</td>
+          <td contenteditable data-id="task-3-est" class="num">~0.5d</td></tr>
+        <tr class="task done"><td><input type="checkbox" data-id="task-4" checked></td><td class="num">4</td>
+          <td contenteditable data-id="task-4-text">Build the Activity screen, unread navigation badge, mark-read controls, and useful deep links.</td>
+          <td contenteditable data-id="task-4-est" class="num">~0.5d</td></tr>
+        <tr class="task done"><td><input type="checkbox" data-id="task-5" checked></td><td class="num">5</td>
+          <td contenteditable data-id="task-5-text">Build request compose, incoming/sent inbox, accept or decline actions, and accepted conversation UI.</td>
+          <td contenteditable data-id="task-5-est" class="num">~1d</td></tr>
+        <tr class="task done"><td><input type="checkbox" data-id="task-6" checked></td><td class="num">6</td>
+          <td contenteditable data-id="task-6-text">Add transparent For You, Following, and New discovery modes using existing follows, saves, genres, collaboration permission, engagement, and recency.</td>
+          <td contenteditable data-id="task-6-est" class="num">~1d</td></tr>
+        <tr class="task done"><td><input type="checkbox" data-id="task-7" checked></td><td class="num">7</td>
+          <td contenteditable data-id="task-7-text">Verify mobile behavior, keyboard access, empty/loading/error states, API authorization, and migration safety.</td>
+          <td contenteditable data-id="task-7-est" class="num">~0.5d</td></tr>
+        <tr class="task"><td><input type="checkbox" data-id="task-8"></td><td class="num">8</td>
+          <td contenteditable data-id="task-8-text">Update product documentation, run release checks and hostile review, then publish to the existing custom audience.</td>
+          <td contenteditable data-id="task-8-est" class="num">~0.5d</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Risks</h2>
+    <div class="risk"><span class="sev">HIGH</span><span data-id="risk-1" contenteditable>Private messages could leak through weak authorization. Every read and write checks the signed-in user against request participants, and all social responses use private no-store caching.</span></div>
+    <div class="risk"><span class="sev">MED</span><span data-id="risk-2" contenteditable>Activity events could duplicate or become noisy. Events use stable dedupe keys for repeatable actions, suppress self-notifications, and keep bounded copy.</span></div>
+    <div class="risk"><span class="sev">MED</span><span data-id="risk-3" contenteditable>Feed ranking could feel arbitrary. SESSION returns one plain-language reason for each recommendation and offers chronological Following and New alternatives.</span></div>
+  </section>
+
+  <section>
+    <h2>Decisions already made</h2>
+    <div class="decision">
+      <div class="q" data-id="q-1-text" contenteditable>When can members exchange private messages?</div>
+      <div class="choices">
+        <label><input type="radio" name="q-1" data-id="q-1" value="accepted-only" checked> After a request is accepted</label>
+        <label><input type="radio" name="q-1" data-id="q-1" value="open"> Open direct messages</label>
+      </div>
+      <textarea data-id="q-1-comment">The request introduction is visible before acceptance. Free conversation starts only after acceptance.</textarea>
+    </div>
+    <div class="decision">
+      <div class="q" data-id="q-2-text" contenteditable>How should For You recommendations work in this release?</div>
+      <div class="choices">
+        <label><input type="radio" name="q-2" data-id="q-2" value="transparent" checked> Transparent deterministic score</label>
+        <label><input type="radio" name="q-2" data-id="q-2" value="ml"> Opaque ML model</label>
+      </div>
+      <textarea data-id="q-2-comment">Use follows, saved-track genre affinity, collaboration permission, engagement, and recency; display a recommendation reason.</textarea>
+    </div>
+    <div class="decision">
+      <div class="q" data-id="q-3-text" contenteditable>What audience receives this release?</div>
+      <div class="choices">
+        <label><input type="radio" name="q-3" data-id="q-3" value="existing" checked> Existing custom audience</label>
+        <label><input type="radio" name="q-3" data-id="q-3" value="public"> Change to public</label>
+      </div>
+      <textarea data-id="q-3-comment">Preserve the current Sites access policy exactly.</textarea>
+    </div>
+  </section>
+</main>
+
+<div class="savebar">
+  <button onclick="save()">Save annotations</button>
+  <span class="status" id="status">edits stay in this page — save writes annotations.json</span>
+</div>
+
+<script>
+function collect(){
+  const out = {};
+  document.querySelectorAll('[data-id]').forEach(el => {
+    const id = el.dataset.id;
+    if (el.type === 'checkbox') out[id] = {kind:'check', value: el.checked};
+    else if (el.type === 'radio') { if (el.checked) out[id] = {kind:'decision', value: el.value}; }
+    else if (el.tagName === 'TEXTAREA') out[id] = {kind:'comment', value: el.value};
+    else if (el.isContentEditable) out[id] = {kind:'text', value: el.innerText};
+  });
+  document.querySelectorAll('tr.task').forEach(tr => {
+    const cb = tr.querySelector('input[type=checkbox]');
+    if (cb) tr.classList.toggle('done', cb.checked);
+  });
+  out._savedAt = new Date().toISOString();
+  return out;
+}
+async function save(){
+  const data = collect(), status = document.getElementById('status');
+  try {
+    const r = await fetch('/save', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
+    if (!r.ok) throw 0;
+    status.textContent = 'saved to annotations.json ✓ ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+    a.download = 'annotations.json'; a.click();
+    status.textContent = 'not served — downloaded annotations.json; put it next to index.html';
+  }
+}
+async function restore(){
+  try {
+    const r = await fetch('annotations.json'); if (!r.ok) return;
+    const data = await r.json();
+    for (const [id, rec] of Object.entries(data)) {
+      if (id.startsWith('_')) continue;
+      const el = document.querySelector('[data-id="'+id+'"]');
+      if (!el) continue;
+      if (rec.kind==='check') el.checked = rec.value;
+      else if (rec.kind==='decision'){
+        const radio = document.querySelector('input[type=radio][data-id="'+id+'"][value="'+rec.value+'"]');
+        if (radio) radio.checked = true;
+      }
+      else if (rec.kind==='comment') el.value = rec.value;
+      else if (rec.kind==='text') el.innerText = rec.value;
+    }
+    document.getElementById('status').textContent = 'restored annotations from disk';
+  } catch (e) {}
+}
+document.addEventListener('DOMContentLoaded', restore);
+document.addEventListener('keydown', e => { if ((e.ctrlKey||e.metaKey) && e.key==='s'){ e.preventDefault(); save(); } });
+</script>
+</body>
+</html>

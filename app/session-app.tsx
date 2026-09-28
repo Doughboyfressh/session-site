@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AudioLines,
   Compass,
@@ -20,12 +20,13 @@ import {
   ArrowRight,
   LockKeyhole,
   ChevronRight,
-  Upload,
-  Globe,
   Trash2,
   Check,
   X,
   Loader2,
+  Bell,
+  MessagesSquare,
+  Handshake,
 } from 'lucide-react';
 import {
   Sidebar,
@@ -61,6 +62,12 @@ import { loadBank } from './take-bank-client';
 import { bankProject } from '@/lib/take-bank';
 import { recoveredProject, type RecoveryDraft } from '@/lib/draft-recovery';
 import { creationHash } from '@/lib/project-creation';
+import {
+  ActivityView,
+  CollaborationInbox,
+  CollaborationRequestDialog,
+  type CollaborationTarget,
+} from './social';
 const empty = {
   profile: null,
   tracks: [],
@@ -69,6 +76,7 @@ const empty = {
   rooms: [],
   saved: [],
   follows: [],
+  unreadNotifications: 0,
 } as any;
 const captions: Record<string, string> = {
   Discover:
@@ -80,6 +88,8 @@ const captions: Record<string, string> = {
   'Studio rooms': 'Your creative circle, in the same room. Wherever you are.',
   'My projects': 'From a voice memo of an idea to the final bounce.',
   'Saved tracks': 'The sounds you want to come back to.',
+  Activity: 'Follows, comments, requests, and messages in one place.',
+  Collaborations: 'Private requests and conversations with your next team.',
   'My profile': 'Let the community meet the person behind the sound.',
   Upload: 'Give your next idea a place to land.',
   'Rights & privacy': 'Clear permissions. Room to create.',
@@ -110,6 +120,15 @@ export default function SessionApp({
     [roomProject, setRoomProject] = useState('none'),
     [roomBusy, setRoomBusy] = useState(false),
     [selectedProfile, setSelectedProfile] = useState<any>(null),
+    [feedMode, setFeedMode] = useState('For You'),
+    [requestTarget, setRequestTarget] = useState<CollaborationTarget | null>(
+      null,
+    ),
+    [requestTrack, setRequestTrack] = useState<{
+      id: string;
+      title: string;
+    } | null>(null),
+    [socialVersion, setSocialVersion] = useState(0),
     [deleteProject, setDeleteProject] = useState(''),
     [studioKey, setStudioKey] = useState(0);
   const recovery = useDraftRecovery(user?.id);
@@ -134,6 +153,12 @@ export default function SessionApp({
     clearTimeout(noticeTimer.current);
     noticeTimer.current = setTimeout(() => setNotice(''), 7500);
   };
+  const updateUnreadNotifications = useCallback((count: number) => {
+    setState((current: typeof empty) => ({
+      ...current,
+      unreadNotifications: count,
+    }));
+  }, []);
   async function refresh() {
     try {
       const r = await fetch('/api/state');
@@ -511,6 +536,32 @@ export default function SessionApp({
       notify(e.message);
     }
   }
+  function requestCollaboration(
+    target: CollaborationTarget,
+    track: Track | null = null,
+  ) {
+    if (!signIn()) return;
+    if (!state.profile) {
+      notify('Set up your creative profile before sending a request.');
+      go('My profile');
+      return;
+    }
+    setRequestTarget(target);
+    setRequestTrack(track ? { id: track.id, title: track.title } : null);
+  }
+  function requestFromTrack(track: Track) {
+    if (!track.owner) return notify('This starter is ready to use directly.');
+    const profile = state.profiles.find((item: any) => item.id === track.owner);
+    requestCollaboration(
+      profile || {
+        id: track.owner,
+        name: track.creator,
+        username: 'creator',
+        roles: track.kind === 'song' ? ['Artist'] : ['Producer'],
+      },
+      track,
+    );
+  }
   function enterRoom(id: string) {
     if (!signIn()) return;
     setRoomId(id);
@@ -518,7 +569,16 @@ export default function SessionApp({
     window.history.replaceState(null, '', '?room=' + id);
   }
   const allTracks: Track[] = [...state.tracks, ...demos];
-  const filtered = allTracks.filter(
+  const savedGenres = useMemo(
+    () =>
+      new Set<string>(
+        state.tracks
+          .filter((track: Track) => state.saved.includes(track.id))
+          .map((track: Track) => track.genre),
+      ),
+    [state.saved, state.tracks],
+  );
+  const baseFiltered = allTracks.filter(
     (t) =>
       (genre === 'All genres' || genre === t.genre) &&
       `${t.title} ${t.creator} ${t.genre}`
@@ -532,6 +592,57 @@ export default function SessionApp({
             ? t.kind === 'beat'
             : true),
   );
+  const usesDiscoveryFeed = [
+    'Discover',
+    'Beat library',
+    'Songs to engineer',
+  ].includes(view);
+  const newestTrackCreated = Math.max(
+    0,
+    ...allTracks.map((track: Track) => track.created || 0),
+  );
+  const filtered = usesDiscoveryFeed
+    ? baseFiltered
+        .filter(
+          (track) =>
+            feedMode !== 'Following' ||
+            (!!track.owner && state.follows.includes(track.owner)),
+        )
+        .slice()
+        .sort((a, b) => {
+          if (feedMode === 'New') return (b.created || 0) - (a.created || 0);
+          if (feedMode === 'Following')
+            return (b.created || 0) - (a.created || 0);
+          const score = (track: Track) =>
+            (track.owner && state.follows.includes(track.owner) ? 1000 : 0) +
+            (savedGenres.has(track.genre) ? 400 : 0) +
+            (track.permission === 'collaborate' ? 140 : 0) +
+            Number(track.likes || 0) * 12 +
+            (track.demo ? 0 : 35) +
+            Math.max(
+              0,
+              120 -
+                Math.floor(
+                  (newestTrackCreated - (track.created || 0)) / 86400000,
+                ) *
+                  4,
+            );
+          return score(b) - score(a);
+        })
+    : baseFiltered;
+  function recommendationReason(track: Track) {
+    if (track.visibility === 'private') return 'Your private upload';
+    if (feedMode === 'Following') return 'From someone you follow';
+    if (feedMode === 'New')
+      return track.demo ? 'SESSION starter' : 'Recently shared';
+    if (track.owner && state.follows.includes(track.owner))
+      return 'From someone you follow';
+    if (savedGenres.has(track.genre))
+      return `Matches your saved ${track.genre}`;
+    if (track.permission === 'collaborate') return 'Open to collaboration';
+    if (track.likes) return 'Saved by SESSION creators';
+    return track.demo ? 'SESSION starter' : 'New to the community';
+  }
   function cards(tracks: Track[]) {
     return (
       <div className="beat-grid">
@@ -579,6 +690,11 @@ export default function SessionApp({
               </button>
             </div>
             <p>{t.creator}</p>
+            {usesDiscoveryFeed && (
+              <span className="discovery-reason">
+                <span className="status-dot" /> {recommendationReason(t)}
+              </span>
+            )}
             <div className="track-meta">
               <span>
                 {t.bpm} BPM <span>·</span> {t.musicalKey}
@@ -609,6 +725,25 @@ export default function SessionApp({
           ))}
         </TabsList>
       </Tabs>
+    );
+  }
+  function discoveryTabs() {
+    return (
+      <div className="discovery-tabs">
+        <span>YOUR MUSIC FEED</span>
+        <Tabs
+          value={feedMode}
+          onValueChange={(value) => setFeedMode(String(value))}
+        >
+          <TabsList>
+            {['For You', 'Following', 'New'].map((mode) => (
+              <TabsTrigger value={mode} key={mode}>
+                {mode}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </div>
     );
   }
   const signin = (
@@ -660,6 +795,8 @@ export default function SessionApp({
             items={[
               [FolderClosed, 'My projects'],
               [Heart, 'Saved tracks'],
+              [Bell, 'Activity', state.unreadNotifications],
+              [MessagesSquare, 'Collaborations'],
             ]}
           />
           <div className="sidebar-note">
@@ -844,6 +981,7 @@ export default function SessionApp({
                     View all <ArrowRight size={16} />
                   </button>
                 </div>
+                {discoveryTabs()}
                 {genreTabs()}
                 {filtered.length ? (
                   cards(filtered.slice(0, 8))
@@ -1000,6 +1138,7 @@ export default function SessionApp({
                 </Tabs>
                 <span>{filtered.length} sounds</span>
               </div>
+              {view !== 'Saved tracks' && discoveryTabs()}
               {genreTabs()}
               {filtered.length ? (
                 cards(filtered)
@@ -1008,12 +1147,16 @@ export default function SessionApp({
                   title={
                     view === 'Saved tracks'
                       ? 'Keep the sounds that stay with you.'
-                      : 'A fresh space for a fresh sound.'
+                      : feedMode === 'Following'
+                        ? 'Follow creators to tune this feed.'
+                        : 'A fresh space for a fresh sound.'
                   }
                   text={
                     view === 'Saved tracks'
                       ? 'Tap the heart on any track to find it here.'
-                      : 'No matching uploads yet. Try another filter or upload the first track.'
+                      : feedMode === 'Following'
+                        ? 'Find artists, producers, and engineers you want to hear from.'
+                        : 'No matching uploads yet. Try another filter or upload the first track.'
                   }
                   actionLabel="Explore beats"
                   action={() => go('Beat library')}
@@ -1024,6 +1167,42 @@ export default function SessionApp({
                 freely. Community uploads follow their creator’s permissions.
               </p>
             </>
+          ) : view === 'Activity' ? (
+            user ? (
+              <ActivityView
+                onUnreadChange={updateUnreadNotifications}
+                onOpen={(item) => {
+                  if (item.resourceType === 'collaboration')
+                    go('Collaborations');
+                  else if (item.resourceType === 'track') {
+                    const track = allTracks.find(
+                      (candidate) => candidate.id === item.resourceId,
+                    );
+                    if (track) setDetail(track);
+                    else go('Discover');
+                  } else {
+                    const profile = state.profiles.find(
+                      (candidate: any) => candidate.id === item.resourceId,
+                    );
+                    if (profile) setSelectedProfile(profile);
+                    else go('Find collaborators');
+                  }
+                }}
+              />
+            ) : (
+              signin
+            )
+          ) : view === 'Collaborations' ? (
+            user ? (
+              <CollaborationInbox
+                key={socialVersion}
+                userId={user.id}
+                notify={notify}
+                onChanged={() => void refresh()}
+              />
+            ) : (
+              signin
+            )
           ) : view === 'Upload' ? (
             user ? (
               <UploadForm
@@ -1395,6 +1574,7 @@ export default function SessionApp({
         onPlay={playPreview}
         onUse={useTrack}
         onRemix={remix}
+        onRequest={requestFromTrack}
         onSave={saveTrack}
         onRefresh={refresh}
         notify={notify}
@@ -1474,14 +1654,28 @@ export default function SessionApp({
               </DialogDescription>
               <p>{selectedProfile.bio}</p>
               <p>{selectedProfile.location}</p>
-              <button
-                className="button primary"
-                onClick={() => follow(selectedProfile)}
-              >
-                {state.follows.includes(selectedProfile.id)
-                  ? 'Following'
-                  : 'Follow creator'}
-              </button>
+              {selectedProfile.id !== user?.id && (
+                <div className="actions">
+                  <button
+                    className="button primary"
+                    onClick={() => follow(selectedProfile)}
+                  >
+                    {state.follows.includes(selectedProfile.id)
+                      ? 'Following'
+                      : 'Follow creator'}
+                  </button>
+                  <button
+                    className="button secondary"
+                    onClick={() => {
+                      const target = selectedProfile;
+                      setSelectedProfile(null);
+                      requestCollaboration(target);
+                    }}
+                  >
+                    <Handshake size={16} /> Request collaboration
+                  </button>
+                </div>
+              )}
               <h3>Public music</h3>
               {state.tracks
                 .filter(
@@ -1506,6 +1700,24 @@ export default function SessionApp({
           )}
         </DialogContent>
       </Dialog>
+      <CollaborationRequestDialog
+        key={`${requestTarget?.id || 'none'}:${requestTrack?.id || 'none'}`}
+        open={!!requestTarget}
+        target={requestTarget}
+        track={requestTrack}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRequestTarget(null);
+            setRequestTrack(null);
+          }
+        }}
+        onSent={() => {
+          setSocialVersion((version) => version + 1);
+          void refresh();
+          go('Collaborations');
+        }}
+        notify={notify}
+      />
       <Confirm
         open={!!deleteProject}
         onClose={() => setDeleteProject('')}
@@ -1563,7 +1775,7 @@ function NavItems({
   const { setOpenMobile } = useSidebar();
   return (
     <SidebarMenu>
-      {items.map(([Icon, label]) => (
+      {items.map(([Icon, label, badge]) => (
         <SidebarMenuItem key={label}>
           <SidebarMenuButton
             isActive={view === label}
@@ -1574,6 +1786,11 @@ function NavItems({
           >
             <Icon />
             <span>{label}</span>
+            {Number(badge) > 0 && (
+              <span className="nav-badge" aria-label={`${badge} unread`}>
+                {Number(badge) > 99 ? '99+' : badge}
+              </span>
+            )}
             {label === 'Studio rooms' && <span className="status-dot" />}
           </SidebarMenuButton>
         </SidebarMenuItem>

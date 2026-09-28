@@ -43,6 +43,20 @@
       "when": 1789352145941,
       "tag": "0005_flashy_marvex",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790574424132,
+      "tag": "0006_wild_leopardon",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790576233599,
+      "tag": "0007_melted_professor_monster",
+      "breakpoints": true
     }
   ]
 }

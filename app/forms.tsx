@@ -13,6 +13,7 @@ import {
   ArrowUpRight,
   Check,
   Trash2,
+  Handshake,
 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
@@ -425,6 +426,7 @@ export function TrackDetail({
   onPlay,
   onUse,
   onRemix,
+  onRequest,
   saved,
   onSave,
   user,
@@ -436,6 +438,7 @@ export function TrackDetail({
   onPlay: (t: Track) => void;
   onUse: (t: Track) => void;
   onRemix: (t: Track) => void;
+  onRequest: (t: Track) => void;
   saved: boolean;
   onSave: (t: Track) => void;
   user: any;
@@ -530,6 +533,16 @@ export function TrackDetail({
                   <ArrowUpRight size={17} />
                 </button>
               )}
+              {!track.demo &&
+                track.permission === 'collaborate' &&
+                track.owner !== user?.id && (
+                  <button
+                    className="button secondary"
+                    onClick={() => onRequest(track)}
+                  >
+                    <Handshake size={16} /> Request collaboration
+                  </button>
+                )}
               {!track.demo &&
                 track.kind === 'beat' &&
                 track.permission === 'collaborate' &&

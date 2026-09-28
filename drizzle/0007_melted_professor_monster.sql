@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX `idx_collaboration_active_track_unique` ON `collaboration_requests` (`sender`,`recipient`,`track`) WHERE "collaboration_requests"."status" IN ('pending','accepted') AND "collaboration_requests"."track" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_collaboration_active_profile_unique` ON `collaboration_requests` (`sender`,`recipient`) WHERE "collaboration_requests"."status" IN ('pending','accepted') AND "collaboration_requests"."track" IS NULL;

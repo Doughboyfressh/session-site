@@ -26,7 +26,9 @@ This browser studio does not yet match FL Studio, Logic Pro, or Pro Tools. Nativ
 
 ## Community and rooms
 
-Profiles, usernames, avatars, roles, public/private visibility, protected uploads, saved tracks, follows, and comments are supported. Public listen-only access is distinct from open-collaboration access to private working versions. SESSION does not sell licenses, clear samples, distribute music, collect royalties, or accept payments.
+Profiles, usernames, avatars, roles, public/private visibility, protected uploads, saved tracks, follows, and comments are supported. Music discovery has transparent For You, Following, and New views; each recommendation explains its strongest signal. For You uses follows, saved-genre affinity, collaboration permission, saves, and recency rather than an opaque model.
+
+Members can send a role-specific private request from a public profile or a public track that is open to collaboration. The request note is visible before acceptance; private text messaging opens only after the recipient accepts. Incoming and sent requests retain pending, accepted, declined, and closed status. Blocking prevents new requests and messages and closes active connections. The activity inbox covers follows, comments, collaboration decisions, and messages with unread controls. Messages do not support files, group chat, or public posting. Public listen-only access remains distinct from open-collaboration access to private working versions. SESSION does not sell licenses, clear samples, distribute music, collect royalties, or accept payments.
 
 Four-member invite-only rooms include expiring/revocable invitations, host removal, chat, camera/mic participation, and separately chosen screen/tab-audio sharing. Membership and active media sessions are separate. A new call from one account replaces its old session. Signals carry both session identities; retries are deduplicated and stale signals rejected. Perfect negotiation, bounded ICE recovery, and manual renegotiation support reconnecting. Route, round-trip time, jitter, and loss are displayed.
 
@@ -38,7 +40,7 @@ Sites access remains restricted to the owner and the previously authorized exter
 
 Rights & privacy contains full, nonoperative drafts of Terms, Privacy Notice, Copyright notices/counter-notices and repeat infringement, and Collaboration Permissions and Credits. The user will provide operator, territory, contact, and jurisdiction details after development. Draft acceptance is not collected. The proposed adult/US scope is not an active age or territory gate.
 
-Authenticated account JSON export, file listing/download, and explicit permanent file erasure are available. Erasure removes the hosted original and project access links; it cannot recall downloaded/cached copies. Listing deletion is separate. Account deletion and staffed legal/privacy operations remain unfinished. Reports are stored without external notifications. Room events are hidden after 24 hours and pruned on later message activity; closing a room deletes them. This is not a scheduled retention guarantee.
+Authenticated account JSON export, file listing/download, and explicit permanent file erasure are available. Erasure removes the hosted original and project access links; it cannot recall downloaded/cached copies. Listing deletion is separate. Account deletion and staffed legal/privacy operations remain unfinished. Reports are stored without external notifications. Collaboration requests, messages, activity, and blocks are stored in D1; participant checks protect every conversation read and write, and social responses use private no-store caching. Room events are hidden after 24 hours and pruned on later message activity; closing a room deletes them. Social-message and activity retention are not yet governed by a scheduled cleanup policy.
 
 ## Development and validation
 
@@ -54,11 +56,13 @@ Loop verification: tests/loop-recording-checks.mjs exercises the actual worklet 
 
 Saved-take verification: tests/take-bank-server-checks.mjs uses actual migration 0004, in-memory SQLite, and fake R2 (147 assertions). tests/take-bank-harness.html checks save/retry/reopen audio, recorder controls, dirty project preservation, conflicting saves, and safe close (31 browser assertions). The HTTP stack and real iPhone/Safari persistence still need the final release review. Policy text remains a nonoperative draft pending the operator information promised after development.
 
-Use the committed lockfile. npm run dev runs the local preview; npm run build creates the Worker output. Production identity relies on trusted Sites dispatcher headers. Do not expose the Worker outside that boundary. D1 migrations are append-only; 0000 is preserved and 0001 adds media sessions, revisions/history, rate limits, and signal deduplication.
+Use the committed lockfile. npm run dev runs the local preview; npm run build creates the Worker output. Production identity relies on trusted Sites dispatcher headers. Do not expose the Worker outside that boundary. D1 migrations are append-only; 0000 is preserved, and migration 0006 adds notifications, collaboration requests, direct messages, deduplicated message retries, and member blocks.
 
 Connection check runs the real studio renderer and PeerLink class with generated media. It tests exports and automation, two local peers, received audio before silent speaker output, decoded video, mute/unmute, ICE restart, a second stream, and durable disconnect. It does not access hardware or send media to another person.
 
 The local production API suite has 171 assertions covering privacy, revision conflicts, version ownership, invitations/member access, media-session replacement, duplicate/stale signals, export isolation, erasure authorization/revocation, and upload validation. The unrelated-Origin check exercises Wrangler's local rejection rather than production dispatcher's CSRF behavior. Cross-device, cross-network/TURN, real capture, browser compatibility, sustained load, and long-session tests remain separate release requirements.
+
+The backend suite adds 77 social-loop assertions for request ownership and transitions, participant-only threads, accepted-only messaging, retry deduplication, activity unread state, blocking and unblocking, origin checks, and private cache headers. Desktop and 390 × 844 browser checks cover discovery reasons, populated activity, accepted conversations, and the request form. Final iPhone/Safari testing remains part of the end-of-development review.
 
 ## Release readiness
 

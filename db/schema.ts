@@ -6,6 +6,7 @@ import {
   index,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 export const profiles = sqliteTable('profiles', {
   id: text().primaryKey(),
   username: text().notNull().unique(),
@@ -181,6 +182,84 @@ export const comments = sqliteTable(
     created: integer().notNull(),
   },
   (t) => [index('idx_comments_track').on(t.track)],
+);
+export const notifications = sqliteTable(
+  'notifications',
+  {
+    id: text().primaryKey(),
+    user: text().notNull(),
+    actor: text(),
+    kind: text().notNull(),
+    resourceType: text().notNull(),
+    resourceId: text().notNull(),
+    body: text().notNull(),
+    created: integer().notNull(),
+    readAt: integer(),
+    uniqueKey: text().notNull(),
+  },
+  (t) => [
+    index('idx_notifications_user_created').on(t.user, t.created),
+    index('idx_notifications_user_read').on(t.user, t.readAt, t.created),
+    uniqueIndex('idx_notifications_unique').on(t.uniqueKey),
+  ],
+);
+export const collaborationRequests = sqliteTable(
+  'collaboration_requests',
+  {
+    id: text().primaryKey(),
+    sender: text().notNull(),
+    recipient: text().notNull(),
+    track: text(),
+    role: text().notNull(),
+    message: text().notNull(),
+    status: text().notNull().default('pending'),
+    created: integer().notNull(),
+    updated: integer().notNull(),
+  },
+  (t) => [
+    index('idx_collaboration_recipient').on(t.recipient, t.status, t.updated),
+    index('idx_collaboration_sender').on(t.sender, t.updated),
+    index('idx_collaboration_track').on(t.track),
+    uniqueIndex('idx_collaboration_active_track_unique')
+      .on(t.sender, t.recipient, t.track)
+      .where(
+        sql`${t.status} IN ('pending','accepted') AND ${t.track} IS NOT NULL`,
+      ),
+    uniqueIndex('idx_collaboration_active_profile_unique')
+      .on(t.sender, t.recipient)
+      .where(sql`${t.status} IN ('pending','accepted') AND ${t.track} IS NULL`),
+  ],
+);
+export const directMessages = sqliteTable(
+  'direct_messages',
+  {
+    id: text().primaryKey(),
+    request: text().notNull(),
+    sender: text().notNull(),
+    body: text().notNull(),
+    created: integer().notNull(),
+    clientId: text().notNull(),
+  },
+  (t) => [
+    index('idx_direct_messages_request').on(t.request, t.created),
+    uniqueIndex('idx_direct_messages_dedup').on(
+      t.request,
+      t.sender,
+      t.clientId,
+    ),
+  ],
+);
+export const userBlocks = sqliteTable(
+  'user_blocks',
+  {
+    user: text().notNull(),
+    target: text().notNull(),
+    created: integer().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.user, t.target] }),
+    index('idx_user_blocks_target').on(t.target),
+  ],
 );
 export const reports = sqliteTable('reports', {
   id: text().primaryKey(),
