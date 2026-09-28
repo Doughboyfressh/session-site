@@ -6,6 +6,7 @@ import {
   AUTOMATION_TARGETS,
   MAX_AUTOMATION_POINTS_PER_LANE,
   MAX_AUTOMATION_POINTS_PER_TRACK,
+  automationPointCount,
   type AutomationTarget,
 } from './automation';
 function fail(message: string): never {
@@ -182,17 +183,11 @@ export function validateArrangement(d: any, draft = false) {
       const keys = Object.keys(t.automationLanes);
       if (keys.some((key) => !AUTOMATION_TARGETS.includes(key as any)))
         fail('Choose an available automation target.');
-      let total = Object.prototype.hasOwnProperty.call(
-        t.automationLanes,
-        'volume',
-      )
-        ? 0
-        : t.automation?.length || 0;
       for (const target of AUTOMATION_TARGETS)
         if (Object.prototype.hasOwnProperty.call(t.automationLanes, target)) {
           validateAutomationLane(t.automationLanes[target], target);
-          total += t.automationLanes[target].length;
         }
+      const total = automationPointCount(t);
       if (total > MAX_AUTOMATION_POINTS_PER_TRACK)
         fail(
           `Use up to ${MAX_AUTOMATION_POINTS_PER_TRACK} automation points per track.`,

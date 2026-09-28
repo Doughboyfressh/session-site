@@ -8,6 +8,7 @@ import {
   AUTOMATION_TARGETS,
   MAX_AUTOMATION_POINTS_PER_LANE,
   MAX_AUTOMATION_POINTS_PER_TRACK,
+  automationPointCount,
 } from './automation';
 
 export const MAX_DRAFTS = 40;
@@ -153,12 +154,6 @@ export function recoverySnapshot(value: any): DraftSnapshot {
           )
         )
           throw new Error('Invalid automation lanes in draft.');
-        let total = Object.prototype.hasOwnProperty.call(
-          t.automationLanes,
-          'volume',
-        )
-          ? 0
-          : t.automation?.length || 0;
         t.automationLanes = Object.fromEntries(
           AUTOMATION_TARGETS.filter((target) =>
             Object.prototype.hasOwnProperty.call(t.automationLanes, target),
@@ -169,7 +164,6 @@ export function recoverySnapshot(value: any): DraftSnapshot {
               points.length > MAX_AUTOMATION_POINTS_PER_LANE
             )
               throw new Error('Too many automation points in draft.');
-            total += points.length;
             return [
               target,
               points.map((p: any) => ({
@@ -180,6 +174,14 @@ export function recoverySnapshot(value: any): DraftSnapshot {
             ];
           }),
         );
+        if (
+          t.automation !== undefined &&
+          Object.prototype.hasOwnProperty.call(t.automationLanes, 'volume')
+        ) {
+          t.automationLanes.volume = t.automation;
+          delete t.automation;
+        }
+        const total = automationPointCount(t);
         if (total > MAX_AUTOMATION_POINTS_PER_TRACK)
           throw new Error('Too many automation points in draft.');
       }

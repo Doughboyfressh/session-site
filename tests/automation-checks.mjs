@@ -67,9 +67,21 @@ equal(activeAutomationTargets(legacy), ['volume']);
 equal(automationPointCount(legacy), 2);
 equal(
   automationLane({ ...legacy, automationLanes: { volume: [] } }, 'volume'),
-  [],
+  legacy.automation,
 );
 checks += 4;
+
+const olderClientHybrid = track({
+  automation: [{ time: 0, value: 0.2 }],
+  automationLanes: {
+    volume: [{ time: 0, value: 0.8 }],
+    pan: [{ time: 0, value: -0.25 }],
+  },
+});
+equal(automationLane(olderClientHybrid, 'volume'), olderClientHybrid.automation);
+equal(automationPointCount(olderClientHybrid), 2);
+validateArrangement({ bpm: 120, tracks: [olderClientHybrid] });
+checks++;
 
 const unsorted = [
   { time: 2, value: 1 },
@@ -356,6 +368,15 @@ const recovered = recoverySnapshot({
 equal(recovered.data.tracks[0].automationLanes, {
   pan: [{ time: 0.5, value: -0.25, curve: 'hold' }],
 });
+const recoveredHybrid = recoverySnapshot({
+  title: 'Recovered older-client edit',
+  data: { bpm: 120, tracks: [olderClientHybrid] },
+});
+equal(recoveredHybrid.data.tracks[0].automation, undefined);
+equal(recoveredHybrid.data.tracks[0].automationLanes, {
+  volume: [{ time: 0, value: 0.2 }],
+  pan: [{ time: 0, value: -0.25 }],
+});
 rejects(
   () =>
     recoverySnapshot({
@@ -433,6 +454,45 @@ equal(
   mergeProject(legacyBase, migratedLocal, legacyRemote, 'remote').project.data
     .tracks[0].automationLanes,
   { volume: [{ time: 0, value: 0.2 }] },
+);
+
+const explicitBase = project(
+  track({ automationLanes: { volume: [{ time: 0, value: 0.8 }] } }),
+);
+const olderClientEdit = structuredClone(explicitBase);
+olderClientEdit.data.tracks[0].automation = [{ time: 0, value: 0.2 }];
+const mergedOlderEdit = mergeProject(
+  explicitBase,
+  olderClientEdit,
+  structuredClone(explicitBase),
+);
+equal(mergedOlderEdit.conflicts, []);
+equal(mergedOlderEdit.project.data.tracks[0].automation, undefined);
+equal(mergedOlderEdit.project.data.tracks[0].automationLanes, {
+  volume: [{ time: 0, value: 0.2 }],
+});
+
+const concurrentExplicitEdit = structuredClone(explicitBase);
+concurrentExplicitEdit.data.tracks[0].automationLanes.volume = [
+  { time: 0, value: 1.1 },
+];
+const hybridConflict = mergeProject(
+  explicitBase,
+  olderClientEdit,
+  concurrentExplicitEdit,
+);
+equal(hybridConflict.conflicts, ['Lead vocal · volume automation']);
+equal(hybridConflict.project.data.tracks[0].automationLanes, {
+  volume: [{ time: 0, value: 0.2 }],
+});
+equal(
+  mergeProject(
+    explicitBase,
+    olderClientEdit,
+    concurrentExplicitEdit,
+    'remote',
+  ).project.data.tracks[0].automationLanes,
+  { volume: [{ time: 0, value: 1.1 }] },
 );
 
 console.log(

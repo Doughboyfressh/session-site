@@ -114,12 +114,17 @@ export function automationLane(
   track: AutomationTrack,
   target: AutomationTarget,
 ) {
+  // An older client can preserve an unknown explicit volume lane while writing
+  // the legacy field it understands. In that hybrid, legacy is the newer edit;
+  // current editing and recovery migrate it back to the explicit lane.
+  if (target === 'volume' && track.automation !== undefined)
+    return track.automation;
   if (
     track.automationLanes &&
     Object.prototype.hasOwnProperty.call(track.automationLanes, target)
   )
     return track.automationLanes[target] || [];
-  return target === 'volume' ? track.automation || [] : [];
+  return [];
 }
 
 export function activeAutomationTargets(track: AutomationTrack) {
