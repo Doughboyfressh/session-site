@@ -180,6 +180,125 @@ function load(file) {
 
 const route = load('app/api/action/route.ts');
 let checks = 0;
+
+// Upgrade safety: 0008 must backfill real scopes and public identity snapshots
+// before its unique active-scope index is created. The older schema can contain
+// distinct active requests and a reverse-direction profile request pair.
+const migrationDb = new DatabaseSync(':memory:');
+for (const file of fs
+  .readdirSync(path.join(root, 'drizzle'))
+  .filter((file) => file.endsWith('.sql') && file < '0008_')
+  .sort())
+  migrationDb.exec(fs.readFileSync(path.join(root, 'drizzle', file), 'utf8'));
+for (const [id, username, name, visibility, avatar] of [
+  ['migration-a', 'migration-a', 'Migration Artist', 'public', 'avatar-a'],
+  ['migration-b', 'migration-b', 'Migration Producer', 'public', 'avatar-b'],
+  ['migration-c', 'migration-c', 'Hidden Engineer', 'private', 'avatar-c'],
+  ['migration-d', 'migration-d', 'Migration Engineer', 'public', 'avatar-d'],
+])
+  migrationDb
+    .prepare(
+      "INSERT INTO profiles(id,username,name,roles,visibility,avatar,created) VALUES (?,?,?,'[]',?,?,1)",
+    )
+    .run(id, username, name, visibility, avatar);
+migrationDb
+  .prepare(
+    "INSERT INTO tracks(id,owner,title,kind,genre,bpm,musicalKey,visibility,permission,fileId,created) VALUES ('migration-track','migration-d','Legacy mix','song','R&B',92,'C minor','public','collaborate','migration-file',1)",
+  )
+  .run();
+const insertLegacyRequest = migrationDb.prepare(
+  'INSERT INTO collaboration_requests(id,sender,recipient,track,role,message,status,created,updated) VALUES (?,?,?,?,?,?,?,?,?)',
+);
+insertLegacyRequest.run(
+  'migration-profile-keeper',
+  'migration-a',
+  'migration-b',
+  null,
+  'Producer',
+  'Original profile request',
+  'pending',
+  1,
+  1,
+);
+insertLegacyRequest.run(
+  'migration-profile-reverse',
+  'migration-b',
+  'migration-a',
+  null,
+  'Artist',
+  'Concurrent reverse request',
+  'accepted',
+  2,
+  2,
+);
+insertLegacyRequest.run(
+  'migration-track-request',
+  'migration-c',
+  'migration-d',
+  'migration-track',
+  'Engineer',
+  'Legacy track request',
+  'accepted',
+  3,
+  3,
+);
+insertLegacyRequest.run(
+  'migration-closed',
+  'migration-d',
+  'migration-c',
+  null,
+  'Artist',
+  'Closed history',
+  'declined',
+  4,
+  4,
+);
+migrationDb.exec(
+  fs.readFileSync(
+    path.join(root, 'drizzle', '0008_freezing_rafael_vega.sql'),
+    'utf8',
+  ),
+);
+const migratedProfile = migrationDb
+  .prepare(
+    'SELECT status,scopeKey,senderName,recipientName,recipientAvatar FROM collaboration_requests WHERE id=?',
+  )
+  .get('migration-profile-keeper');
+const migratedReverse = migrationDb
+  .prepare(
+    'SELECT status,scopeKey,operationId FROM collaboration_requests WHERE id=?',
+  )
+  .get('migration-profile-reverse');
+const migratedTrack = migrationDb
+  .prepare(
+    'SELECT scopeKey,trackTitle,senderName,recipientName FROM collaboration_requests WHERE id=?',
+  )
+  .get('migration-track-request');
+assert.equal(migratedProfile.status, 'pending');
+assert.equal(migratedProfile.scopeKey, migratedReverse.scopeKey);
+assert.equal(migratedReverse.status, 'closed');
+assert.match(migratedReverse.operationId, /^migration-scope-dedupe:/);
+assert.deepEqual(
+  [
+    migratedProfile.senderName,
+    migratedProfile.recipientName,
+    migratedProfile.recipientAvatar,
+  ],
+  ['Migration Artist', 'Migration Producer', 'avatar-b'],
+);
+assert.deepEqual(
+  [
+    migratedTrack.trackTitle,
+    migratedTrack.senderName,
+    migratedTrack.recipientName,
+  ],
+  ['Legacy mix', 'SESSION member', 'Migration Engineer'],
+  'migration preserves public history while keeping private profiles generic',
+);
+assert.match(migratedTrack.scopeKey, /^track:/);
+checks += 7;
+migrationDb.close();
+
 async function act(userId, body, status = 200) {
   currentHeaders = userId
     ? {
@@ -608,6 +727,120 @@ assert.equal(
 );
 checks++;
 
+const racedBlockNotifications = db
+  .prepare(
+    "SELECT COUNT(*) AS count FROM notifications WHERE actor=? AND kind='collaboration_request'",
+  )
+  .get(atomicA).count;
+beforeBatch = () => {
+  db.prepare('INSERT INTO user_blocks(user,target,created) VALUES (?,?,?)').run(
+    atomicB,
+    atomicA,
+    now,
+  );
+};
+await socialPost(
+  atomicA,
+  {
+    action: 'collaborationRequest',
+    recipient: atomicB,
+    role: 'Engineer',
+    message: 'A concurrent block must stop this request atomically.',
+  },
+  409,
+);
+assert.equal(
+  db
+    .prepare(
+      'SELECT COUNT(*) AS count FROM collaboration_requests WHERE sender=? AND recipient=?',
+    )
+    .get(atomicA, atomicB).count,
+  0,
+  'a block committed before the request batch prevents the request',
+);
+assert.equal(
+  db
+    .prepare(
+      "SELECT COUNT(*) AS count FROM notifications WHERE actor=? AND kind='collaboration_request'",
+    )
+    .get(atomicA).count,
+  racedBlockNotifications,
+  'a rejected raced request does not create a notification',
+);
+db.prepare('DELETE FROM user_blocks WHERE user=? AND target=?').run(
+  atomicB,
+  atomicA,
+);
+
+beforeBatch = () => {
+  db.prepare("UPDATE profiles SET visibility='private' WHERE id=?").run(
+    atomicB,
+  );
+};
+await socialPost(
+  atomicA,
+  {
+    action: 'collaborationRequest',
+    recipient: atomicB,
+    role: 'Engineer',
+    message: 'A concurrent privacy change must stop this request.',
+  },
+  409,
+);
+assert.equal(
+  db
+    .prepare(
+      'SELECT COUNT(*) AS count FROM collaboration_requests WHERE sender=? AND recipient=?',
+    )
+    .get(atomicA, atomicB).count,
+  0,
+  'a profile made private before the request batch rejects the request',
+);
+db.prepare("UPDATE profiles SET visibility='public' WHERE id=?").run(atomicB);
+
+const racedTrack = crypto.randomUUID();
+db.prepare(
+  'INSERT INTO tracks (id,owner,title,kind,genre,bpm,musicalKey,visibility,permission,fileId,created) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+).run(
+  racedTrack,
+  atomicB,
+  'Race track',
+  'beat',
+  'R&B',
+  92,
+  'C minor',
+  'public',
+  'collaborate',
+  fileId,
+  now,
+);
+beforeBatch = () => {
+  db.prepare("UPDATE tracks SET permission='listen' WHERE id=?").run(
+    racedTrack,
+  );
+};
+await socialPost(
+  atomicA,
+  {
+    action: 'collaborationRequest',
+    recipient: atomicB,
+    track: racedTrack,
+    role: 'Engineer',
+    message: 'A closed collaboration permission must stop this request.',
+  },
+  409,
+);
+assert.equal(
+  db
+    .prepare(
+      'SELECT COUNT(*) AS count FROM collaboration_requests WHERE sender=? AND recipient=? AND track=?',
+    )
+    .get(atomicA, atomicB, racedTrack).count,
+  0,
+  'a track closed to collaboration before the request batch rejects the request',
+);
+checks += 4;
+
 const createdRequest = await socialPost(artist, {
   action: 'collaborationRequest',
   recipient: socialRecipient,
@@ -619,7 +852,7 @@ checks++;
 db.prepare(
   "UPDATE profiles SET name='Private new name',visibility='private' WHERE id=?",
 ).run(socialRecipient);
-let snapshotInbox = await socialGet(artist, 'view=inbox');
+const snapshotInbox = await socialGet(artist, 'view=inbox');
 assert.equal(
   snapshotInbox.requests.find((request) => request.id === createdRequest.id)
     ?.recipientName,

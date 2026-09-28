@@ -245,7 +245,23 @@ export async function POST(req: Request) {
               senderName,senderUsername,senderAvatar,
               recipientName,recipientUsername,recipientAvatar,
               created,updated,operationId)
-             VALUES (?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?)
+             SELECT ?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?
+             WHERE NOT EXISTS (
+               SELECT 1 FROM user_blocks b
+               WHERE (b.user=? AND b.target=?) OR (b.user=? AND b.target=?)
+             )
+             AND (
+               (? IS NULL AND EXISTS (
+                 SELECT 1 FROM profiles p
+                 WHERE p.id=? AND p.visibility='public'
+               ))
+               OR
+               (? IS NOT NULL AND EXISTS (
+                 SELECT 1 FROM tracks t
+                 WHERE t.id=? AND t.owner=?
+                  AND t.visibility='public' AND t.permission='collaborate'
+               ))
+             )
              ON CONFLICT DO NOTHING`,
           )
           .bind(
@@ -266,6 +282,15 @@ export async function POST(req: Request) {
             now,
             now,
             id,
+            uid,
+            recipient,
+            recipient,
+            uid,
+            track,
+            recipient,
+            track,
+            track,
+            recipient,
           );
         const createNotice = prepareNotification(
           {
@@ -283,7 +308,10 @@ export async function POST(req: Request) {
         );
         const [created] = await database().batch([createRequest, createNotice]);
         if (changeCount(created) === 0)
-          fail('You already have an active request with this creator.', 409);
+          fail(
+            'This collaboration is no longer available or already has an active request. Refresh and try again.',
+            409,
+          );
         return Response.json(
           { id, status: 'pending' },
           { headers: privateHeaders },
