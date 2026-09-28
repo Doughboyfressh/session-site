@@ -1,6 +1,6 @@
 # SESSION release readiness
 
-Updated September 21, 2026. This is a development release assessment, not a production certification or a legal compliance opinion.
+Updated September 28, 2026. This is a development release assessment, not a production certification or a legal compliance opinion.
 
 ## Status
 
@@ -8,6 +8,7 @@ SESSION is still an early-access service. The hardening changes below are suitab
 
 ## Changes in this release
 
+- Seven bounded automation lanes per track now cover volume, pan, low/mid/high EQ, reverb, and delay with Linear/Hold transitions, beat snapping, direct manipulation, precision editing, lane copy/paste, one-step gesture history, and a moving playhead. Playback, loops, processed mix/stem export, recovery, and collaboration use the same lane model. Older volume-only clients remain compatible; ambiguous hybrid saves use the legacy field as the newer old-client edit and current recovery migrates it to the explicit lane.
 - Save and browser recovery preserve all channel, vocal and time/pitch controls and all seven instrument choices. Presets always supply required EQ defaults, validate imported/local values, report storage failures and distinguish user presets from built-ins.
 - Delayed remix/project-open responses cannot replace a workspace after navigation or newer edits. Project lists retrieve summaries; full arrangements load only when opened.
 - Uploads enforce a 26 MiB total multipart-body limit even without a truthful Content-Length, plus 25 MiB audio/3 MiB photo limits, the existing atomic account quota, and 30 upload requests per account per minute.

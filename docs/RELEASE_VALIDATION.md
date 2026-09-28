@@ -1,3 +1,19 @@
+# September 28, 2026 automation release validation
+
+This records observed checks for the seven-lane Studio automation release prepared for Sites version 27. The Site audience remains `custom`, limited to the owner and the previously invited external viewer. Synthetic browser media and desktop viewport emulation do not establish physical iPhone/Safari behavior.
+
+## Automation release checks
+
+- The release runner passes all 20 suites, type checking, scoped hardening lint, and the production Worker build. The automation suite passes 66 assertions covering all seven targets, Linear/Hold scheduling, point limits, malformed data, recovery, independent-lane merges, legacy/new client compatibility, and per-target export latency.
+- The real browser export harness passes 68 Web Audio assertions at 44.1 and 48 kHz, including dry/processed/compressed alignment, automation, fades, retained effects tails, deterministic instruments, stem packaging, cancellation, and retry.
+- Desktop Studio checks covered creating and dragging points, Hold transitions, precision edits, one-step Undo/Redo, copy/clear/paste, lane switching, the arrangement automation badge, and a moving playhead during real playback. The browser console had no warnings or errors during the observed flow.
+- At a 390 × 844 desktop-emulated viewport, the document had no horizontal overflow. The 680 px automation graph remained inside its own horizontal scroller; empty-graph swipes are reserved for scrolling while point handles retain direct drag gestures. This is not an iPhone Safari pass.
+- The exact-commit validation pipeline passed at `ce9f654`, with evidence under `outputs/no-mistakes/automation-ce9f654`.
+
+## Independent automation review
+
+The hostile review found and rechecked five compatibility and interaction issues: old/new volume-envelope conflicts, upstream EQ export timing, false drag-save confirmation, blocked mobile graph panning, and canceled-pointer form drift. The final bounded review of `0b22e0b..ce9f654` reported no remaining actionable high- or medium-severity findings. This conclusion is limited to the reviewed automation release.
+
 # September 21, 2026 release validation
 
 This records observed development checks for the studio hardening release. See [production readiness](PRODUCTION_READINESS.md) for unresolved launch requirements. Synthetic browser media and local data do not establish physical-device or production-network reliability.
