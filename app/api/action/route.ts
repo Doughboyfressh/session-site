@@ -2,7 +2,7 @@ import { saveProject, resolveProjectCreation } from '@/lib/project-save';
 import { takeBankAction } from '@/lib/take-bank-server';
 import { setRoomEditor } from '@/lib/room-editors';
 import { privacyAction } from '@/lib/privacy';
-import { notifyUser } from '@/lib/social-server';
+import { prepareNotification } from '@/lib/social-server';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import {
   all,
@@ -157,6 +157,7 @@ export async function POST(req: Request) {
         break;
       }
       case 'follow': {
+        if (b.id === uid) fail('Choose another SESSION member.');
         if (
           !(await one(
             "SELECT id FROM profiles WHERE id=? AND visibility='public'",
@@ -165,26 +166,29 @@ export async function POST(req: Request) {
         )
           fail('Profile unavailable.');
         if (b.value) {
-          const followed = await run(
-            'INSERT OR IGNORE INTO follows (user,target) VALUES (?,?)',
-            uid,
-            b.id,
-          );
-          if (
-            Number(
-              (followed as { meta?: { changes?: number } })?.meta?.changes || 0,
-            ) > 0
-          )
-            await notifyUser({
-              user: b.id,
-              actor: uid,
-              kind: 'follow',
-              resourceType: 'profile',
-              resourceId: uid,
-              body: 'started following you',
-              uniqueKey: `follow:${uid}:${b.id}`,
-              created: now,
-            });
+          const eventId = crypto.randomUUID();
+          await database().batch([
+            prepareNotification(
+              {
+                user: b.id,
+                actor: uid,
+                kind: 'follow',
+                resourceType: 'profile',
+                resourceId: uid,
+                body: 'started following you',
+                uniqueKey: `follow:${uid}:${b.id}:${eventId}`,
+                created: now,
+              },
+              'NOT EXISTS (SELECT 1 FROM follows WHERE user=? AND target=?)',
+              uid,
+              b.id,
+            ),
+            database()
+              .prepare(
+                'INSERT OR IGNORE INTO follows (user,target) VALUES (?,?)',
+              )
+              .bind(uid, b.id),
+          ]);
         } else
           await run('DELETE FROM follows WHERE user=? AND target=?', uid, b.id);
         break;
@@ -201,25 +205,30 @@ export async function POST(req: Request) {
           fail('Track unavailable.');
         if (b.body) {
           const commentId = crypto.randomUUID();
-          await run(
-            'INSERT INTO comments (id,track,user,body,created) VALUES (?,?,?,?,?)',
-            commentId,
-            b.id,
-            uid,
-            str(b.body, 1000),
-            now,
-          );
+          const comment = database()
+            .prepare(
+              'INSERT INTO comments (id,track,user,body,created) VALUES (?,?,?,?,?)',
+            )
+            .bind(commentId, b.id, uid, str(b.body, 1000), now);
           if (commentedTrack)
-            await notifyUser({
-              user: commentedTrack.owner,
-              actor: uid,
-              kind: 'comment',
-              resourceType: 'track',
-              resourceId: b.id,
-              body: 'commented on your track',
-              uniqueKey: `comment:${commentId}`,
-              created: now,
-            });
+            await database().batch([
+              comment,
+              prepareNotification(
+                {
+                  user: commentedTrack.owner,
+                  actor: uid,
+                  kind: 'comment',
+                  resourceType: 'track',
+                  resourceId: b.id,
+                  body: 'commented on your track',
+                  uniqueKey: `comment:${commentId}`,
+                  created: now,
+                },
+                'EXISTS (SELECT 1 FROM comments WHERE id=?)',
+                commentId,
+              ),
+            ]);
+          else await comment.run();
         }
         result = await all(
           "SELECT c.*,COALESCE(p.name,'Creator') AS name FROM comments c LEFT JOIN profiles p ON p.id=c.user WHERE c.track=? ORDER BY c.created DESC LIMIT 50",
@@ -540,7 +549,10 @@ export async function POST(req: Request) {
           ? e.message
           : 'Could not save this change. Please try again.',
       },
-      { status: e.status || 500 },
+      {
+        status: e.status || 500,
+        headers: { 'Cache-Control': 'private, no-store' },
+      },
     );
   }
 }

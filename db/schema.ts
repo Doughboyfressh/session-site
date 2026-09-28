@@ -210,11 +210,20 @@ export const collaborationRequests = sqliteTable(
     sender: text().notNull(),
     recipient: text().notNull(),
     track: text(),
+    trackTitle: text(),
     role: text().notNull(),
     message: text().notNull(),
     status: text().notNull().default('pending'),
+    scopeKey: text().notNull().default(''),
+    senderName: text().notNull().default('SESSION member'),
+    senderUsername: text().notNull().default('member'),
+    senderAvatar: text(),
+    recipientName: text().notNull().default('SESSION member'),
+    recipientUsername: text().notNull().default('member'),
+    recipientAvatar: text(),
     created: integer().notNull(),
     updated: integer().notNull(),
+    operationId: text(),
   },
   (t) => [
     index('idx_collaboration_recipient').on(t.recipient, t.status, t.updated),
@@ -228,6 +237,9 @@ export const collaborationRequests = sqliteTable(
     uniqueIndex('idx_collaboration_active_profile_unique')
       .on(t.sender, t.recipient)
       .where(sql`${t.status} IN ('pending','accepted') AND ${t.track} IS NULL`),
+    uniqueIndex('idx_collaboration_active_scope_unique')
+      .on(t.scopeKey)
+      .where(sql`${t.status} IN ('pending','accepted')`),
   ],
 );
 export const directMessages = sqliteTable(

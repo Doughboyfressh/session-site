@@ -24,6 +24,7 @@ assert.ok(
   'migrations applied',
 );
 
+let beforeBatch;
 const D1 = {
   prepare(sql) {
     return {
@@ -44,6 +45,11 @@ const D1 = {
     };
   },
   async batch(stmts) {
+    if (beforeBatch) {
+      const hook = beforeBatch;
+      beforeBatch = null;
+      await hook(stmts);
+    }
     db.exec('BEGIN');
     try {
       const results = stmts.map((s) => ({
@@ -85,6 +91,7 @@ const R2 = {
 };
 
 let currentHeaders = {};
+let suppressExpectedErrors = 0;
 const modules = new Map();
 const globals = Object.fromEntries(
   [
@@ -111,6 +118,12 @@ const globals = Object.fromEntries(
     'console',
   ].map((key) => [key, globalThis[key]]),
 );
+globals.console = {
+  ...console,
+  error: (...args) => {
+    if (!suppressExpectedErrors) console.error(...args);
+  },
+};
 function load(file) {
   file = path.resolve(root, file);
   if (modules.has(file)) return modules.get(file).exports;
@@ -185,6 +198,7 @@ async function act(userId, body, status = 200) {
   const res = await route.POST(req);
   const text = await res.text();
   assert.equal(res.status, status, 'action ' + body.action + ': ' + text);
+  assert.equal(res.headers.get('cache-control'), 'private, no-store');
   checks++;
   try {
     return JSON.parse(text);
@@ -378,6 +392,19 @@ db.prepare(
   JSON.stringify(['Engineer']),
   now,
 );
+for (const [id, name, roles] of [
+  ['reverse_a_' + now.toString(36), 'Reverse A', ['Artist']],
+  ['reverse_b_' + now.toString(36), 'Reverse B', ['Producer']],
+  ['atomic_a_' + now.toString(36), 'Atomic A', ['Artist']],
+  ['atomic_b_' + now.toString(36), 'Atomic B', ['Engineer']],
+])
+  db.prepare(
+    "INSERT INTO profiles(id,username,name,roles,bio,location,visibility,created) VALUES (?,?,?,?,'','','public',?)",
+  ).run(id, id.slice(0, 24), name, JSON.stringify(roles), now);
+const reverseA = 'reverse_a_' + now.toString(36);
+const reverseB = 'reverse_b_' + now.toString(36);
+const atomicA = 'atomic_a_' + now.toString(36);
+const atomicB = 'atomic_b_' + now.toString(36);
 const socialTrack = crypto.randomUUID();
 db.prepare(
   'INSERT INTO tracks (id,owner,title,kind,genre,bpm,musicalKey,visibility,permission,fileId,created) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
@@ -447,6 +474,56 @@ async function socialGet(userId, query, status = 200) {
   return JSON.parse(text);
 }
 
+beforeBatch = () => {
+  db.exec(`CREATE TRIGGER fail_follow_notice
+    BEFORE INSERT ON notifications
+    BEGIN SELECT RAISE(ABORT,'notification failure'); END`);
+};
+suppressExpectedErrors++;
+try {
+  await act(atomicA, { action: 'follow', id: atomicB, value: true }, 500);
+} finally {
+  suppressExpectedErrors--;
+}
+db.exec('DROP TRIGGER fail_follow_notice');
+assert.equal(
+  db
+    .prepare('SELECT COUNT(*) AS count FROM follows WHERE user=? AND target=?')
+    .get(atomicA, atomicB).count,
+  0,
+  'follow creation rolls back when its notification fails',
+);
+checks++;
+
+beforeBatch = () => {
+  db.exec(`CREATE TRIGGER fail_comment_notice
+    BEFORE INSERT ON notifications
+    BEGIN SELECT RAISE(ABORT,'notification failure'); END`);
+};
+suppressExpectedErrors++;
+try {
+  await act(
+    atomicA,
+    {
+      action: 'comments',
+      id: socialTrack,
+      body: 'This comment must roll back with its notification.',
+    },
+    500,
+  );
+} finally {
+  suppressExpectedErrors--;
+}
+db.exec('DROP TRIGGER fail_comment_notice');
+assert.equal(
+  db
+    .prepare('SELECT COUNT(*) AS count FROM comments WHERE body LIKE ?')
+    .get('This comment must roll back%').count,
+  0,
+  'comment creation rolls back when its notification fails',
+);
+checks++;
+
 await act(artist, { action: 'follow', id: socialRecipient, value: true });
 let activity = await socialGet(socialRecipient, 'view=activity');
 assert.equal(activity.unread, 1);
@@ -475,6 +552,62 @@ assert.ok(
 );
 checks++;
 
+const reverseScope = `profile:${JSON.stringify([reverseA, reverseB].sort())}`;
+beforeBatch = () => {
+  db.prepare(
+    `INSERT INTO collaboration_requests
+     (id,sender,recipient,role,message,status,scopeKey,created,updated,operationId)
+     VALUES ('reverse-winner',?,?,'Artist','Concurrent reverse request wins.','pending',?,?,?,'reverse-winner')`,
+  ).run(reverseB, reverseA, reverseScope, now, now);
+};
+await socialPost(
+  reverseA,
+  {
+    action: 'collaborationRequest',
+    recipient: reverseB,
+    role: 'Producer',
+    message: 'Concurrent forward request should lose safely.',
+  },
+  409,
+);
+assert.equal(
+  db
+    .prepare(
+      "SELECT COUNT(*) AS count FROM collaboration_requests WHERE scopeKey=? AND status IN ('pending','accepted')",
+    )
+    .get(reverseScope).count,
+  1,
+  'reverse-direction request race leaves one active request',
+);
+checks++;
+
+beforeBatch = () => {
+  db.exec(`CREATE TRIGGER fail_social_notice
+    BEFORE INSERT ON notifications
+    BEGIN SELECT RAISE(ABORT,'notification failure'); END`);
+};
+await socialPost(
+  atomicA,
+  {
+    action: 'collaborationRequest',
+    recipient: atomicB,
+    role: 'Engineer',
+    message: 'This request must roll back with its notification.',
+  },
+  500,
+);
+db.exec('DROP TRIGGER fail_social_notice');
+assert.equal(
+  db
+    .prepare(
+      'SELECT COUNT(*) AS count FROM collaboration_requests WHERE sender=? AND recipient=?',
+    )
+    .get(atomicA, atomicB).count,
+  0,
+  'request creation rolls back when its notification fails',
+);
+checks++;
+
 const createdRequest = await socialPost(artist, {
   action: 'collaborationRequest',
   recipient: socialRecipient,
@@ -483,6 +616,32 @@ const createdRequest = await socialPost(artist, {
 });
 assert.ok(createdRequest.id);
 checks++;
+db.prepare(
+  "UPDATE profiles SET name='Private new name',visibility='private' WHERE id=?",
+).run(socialRecipient);
+let snapshotInbox = await socialGet(artist, 'view=inbox');
+assert.equal(
+  snapshotInbox.requests.find((request) => request.id === createdRequest.id)
+    ?.recipientName,
+  'Mix Engineer',
+  'inbox identity is the request-time public snapshot',
+);
+db.prepare(
+  "UPDATE profiles SET name='Private artist name',visibility='private' WHERE id=?",
+).run(artist);
+activity = await socialGet(socialRecipient, 'view=activity');
+assert.equal(
+  activity.items.find((item) => item.kind === 'follow')?.actorName,
+  'SESSION member',
+  'activity does not expose a private actor profile',
+);
+checks += 2;
+db.prepare(
+  "UPDATE profiles SET name='Mix Engineer',visibility='public' WHERE id=?",
+).run(socialRecipient);
+db.prepare(
+  "UPDATE profiles SET name='Test Artist',visibility='public' WHERE id=?",
+).run(artist);
 await socialPost(
   artist,
   {
@@ -558,6 +717,30 @@ await socialPost(socialRecipient, {
 });
 
 const messageClientId = crypto.randomUUID();
+beforeBatch = () => {
+  db.exec(`CREATE TRIGGER fail_message_notice
+    BEFORE INSERT ON notifications
+    BEGIN SELECT RAISE(ABORT,'notification failure'); END`);
+};
+await socialPost(
+  artist,
+  {
+    action: 'message',
+    id: createdRequest.id,
+    message: 'This message must roll back with its notification.',
+    clientId: crypto.randomUUID(),
+  },
+  500,
+);
+db.exec('DROP TRIGGER fail_message_notice');
+assert.equal(
+  db
+    .prepare('SELECT COUNT(*) AS count FROM direct_messages WHERE request=?')
+    .get(createdRequest.id).count,
+  0,
+  'message creation rolls back when its notification fails',
+);
+checks++;
 const firstMessage = await socialPost(artist, {
   action: 'message',
   id: createdRequest.id,
@@ -575,6 +758,9 @@ assert.equal(
   firstMessage.id,
   'a retried message returns the canonical stored id',
 );
+db.prepare(
+  "UPDATE profiles SET name='Later private artist',visibility='private' WHERE id=?",
+).run(artist);
 const thread = await socialGet(
   socialRecipient,
   'view=thread&id=' + createdRequest.id,
@@ -584,7 +770,15 @@ assert.equal(
   thread.messages[0].body,
   'Here is the direction and the reference mix.',
 );
-checks += 3;
+assert.equal(
+  thread.messages[0].senderName,
+  'Test Artist',
+  'message identity is the request-time snapshot',
+);
+checks += 4;
+db.prepare(
+  "UPDATE profiles SET name='Test Artist',visibility='public' WHERE id=?",
+).run(artist);
 
 activity = await socialGet(socialRecipient, 'view=activity');
 assert.ok(activity.items.some((item) => item.kind === 'collaboration_request'));
@@ -592,6 +786,91 @@ assert.ok(activity.items.some((item) => item.kind === 'message'));
 checks += 2;
 await socialPost(socialRecipient, { action: 'notificationRead' });
 assert.equal((await socialGet(socialRecipient, 'view=activity')).unread, 0);
+checks++;
+
+const pagingRequest = await socialPost(artist, {
+  action: 'collaborationRequest',
+  recipient: socialRecipient,
+  track: socialTrack,
+  role: 'Engineer',
+  message: 'Can you review the long revision history for this mix?',
+});
+beforeBatch = () => {
+  db.exec(`CREATE TRIGGER fail_status_notice
+    BEFORE INSERT ON notifications
+    BEGIN SELECT RAISE(ABORT,'notification failure'); END`);
+};
+await socialPost(
+  socialRecipient,
+  {
+    action: 'collaborationStatus',
+    id: pagingRequest.id,
+    status: 'accepted',
+  },
+  500,
+);
+db.exec('DROP TRIGGER fail_status_notice');
+assert.equal(
+  db
+    .prepare('SELECT status FROM collaboration_requests WHERE id=?')
+    .get(pagingRequest.id).status,
+  'pending',
+  'status change rolls back when its notification fails',
+);
+checks++;
+await socialPost(socialRecipient, {
+  action: 'collaborationStatus',
+  id: pagingRequest.id,
+  status: 'accepted',
+});
+const insertPageMessage = db.prepare(
+  'INSERT INTO direct_messages (id,request,sender,body,created,clientId) VALUES (?,?,?,?,?,?)',
+);
+db.exec('BEGIN');
+for (let index = 0; index < 501; index++)
+  insertPageMessage.run(
+    `page-message-${String(index).padStart(3, '0')}`,
+    pagingRequest.id,
+    artist,
+    `Page ${index + 1}`,
+    now + index,
+    `page-client-${index}`,
+  );
+db.exec('COMMIT');
+const pagedThread = await socialGet(
+  socialRecipient,
+  'view=thread&id=' + pagingRequest.id,
+);
+assert.equal(pagedThread.messages.length, 500);
+assert.equal(pagedThread.messages[0].body, 'Page 2');
+assert.equal(pagedThread.messages.at(-1).body, 'Page 501');
+checks += 3;
+
+const racedClientId = crypto.randomUUID();
+beforeBatch = () => {
+  db.prepare(
+    "UPDATE collaboration_requests SET status='closed',updated=?,operationId='race-close' WHERE id=?",
+  ).run(now + 2000, pagingRequest.id);
+};
+await socialPost(
+  artist,
+  {
+    action: 'message',
+    id: pagingRequest.id,
+    message: 'This stale send must not cross the close boundary.',
+    clientId: racedClientId,
+  },
+  409,
+);
+assert.equal(
+  db
+    .prepare(
+      'SELECT COUNT(*) AS count FROM direct_messages WHERE request=? AND clientId=?',
+    )
+    .get(pagingRequest.id, racedClientId).count,
+  0,
+  'an in-flight send cannot commit after the conversation closes',
+);
 checks++;
 
 await socialPost(socialRecipient, {
@@ -637,5 +916,35 @@ await socialPost(
   'https://unrelated.example',
 );
 await socialGet(null, 'view=activity', 401);
+
+for (const id of ['deterministic-b', 'deterministic-a'])
+  db.prepare(
+    'INSERT INTO tracks (id,owner,title,kind,genre,bpm,musicalKey,visibility,permission,fileId,created) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+  ).run(
+    id,
+    socialRecipient,
+    id,
+    'beat',
+    'R&B',
+    92,
+    'C minor',
+    'public',
+    'listen',
+    fileId,
+    now + 5000,
+  );
+currentHeaders = {
+  'oai-authenticated-user-id': artist,
+  'oai-authenticated-user-email': artist + '@example.test',
+};
+const deterministicState = await (await stateRoute.GET()).json();
+assert.deepEqual(
+  deterministicState.tracks
+    .filter((track) => track.id.startsWith('deterministic-'))
+    .map((track) => track.id),
+  ['deterministic-a', 'deterministic-b'],
+  'same-millisecond tracks use an id tie-breaker',
+);
+checks++;
 
 console.log('Social collaboration backend checks passed:', checks);

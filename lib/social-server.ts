@@ -1,4 +1,4 @@
-import { run } from '@/lib/server';
+import { database } from '@/lib/server';
 
 export type NotificationInput = {
   user: string;
@@ -11,28 +11,38 @@ export type NotificationInput = {
   created?: number;
 };
 
+export function prepareNotification(
+  input: NotificationInput,
+  guard = '1',
+  ...guardValues: unknown[]
+) {
+  const actor = input.actor || null;
+  return database()
+    .prepare(
+      `INSERT INTO notifications
+       (id,user,actor,kind,resourceType,resourceId,body,created,readAt,uniqueKey)
+       SELECT ?,?,?,?,?,?,?,?,NULL,?
+       WHERE (? IS NULL OR ? <> ?) AND (${guard})
+       ON CONFLICT(uniqueKey) DO NOTHING`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      input.user,
+      actor,
+      input.kind,
+      input.resourceType,
+      input.resourceId,
+      input.body.slice(0, 240),
+      input.created || Date.now(),
+      input.uniqueKey,
+      actor,
+      input.user,
+      actor,
+      ...guardValues,
+    );
+}
+
 export async function notifyUser(input: NotificationInput) {
   if (!input.user || input.user === input.actor) return;
-  await run(
-    `INSERT INTO notifications
-      (id,user,actor,kind,resourceType,resourceId,body,created,readAt,uniqueKey)
-     VALUES (?,?,?,?,?,?,?,?,NULL,?)
-     ON CONFLICT(uniqueKey) DO UPDATE SET
-      actor=excluded.actor,
-      kind=excluded.kind,
-      resourceType=excluded.resourceType,
-      resourceId=excluded.resourceId,
-      body=excluded.body,
-      created=excluded.created,
-      readAt=NULL`,
-    crypto.randomUUID(),
-    input.user,
-    input.actor || null,
-    input.kind,
-    input.resourceType,
-    input.resourceId,
-    input.body.slice(0, 240),
-    input.created || Date.now(),
-    input.uniqueKey,
-  );
+  await prepareNotification(input).run();
 }

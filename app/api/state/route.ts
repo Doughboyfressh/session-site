@@ -16,7 +16,7 @@ export async function GET() {
     ] = await Promise.all([
       one('SELECT * FROM profiles WHERE id=?', id),
       all(
-        "SELECT t.*,COALESCE(p.name,'Independent creator') AS creator,(SELECT COUNT(*) FROM saved s WHERE s.track=t.id) AS likes FROM tracks t LEFT JOIN profiles p ON p.id=t.owner AND (p.visibility='public' OR p.id=?) WHERE t.visibility='public' OR t.owner=? ORDER BY t.created DESC LIMIT 200",
+        "SELECT t.*,COALESCE(p.name,'Independent creator') AS creator,(SELECT COUNT(*) FROM saved s WHERE s.track=t.id) AS likes FROM tracks t LEFT JOIN profiles p ON p.id=t.owner AND (p.visibility='public' OR p.id=?) WHERE t.visibility='public' OR t.owner=? ORDER BY t.created DESC,t.id ASC LIMIT 200",
         id,
         id,
       ),

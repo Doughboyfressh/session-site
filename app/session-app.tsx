@@ -610,9 +610,14 @@ export default function SessionApp({
         )
         .slice()
         .sort((a, b) => {
-          if (feedMode === 'New') return (b.created || 0) - (a.created || 0);
+          if (feedMode === 'New')
+            return (
+              (b.created || 0) - (a.created || 0) || a.id.localeCompare(b.id)
+            );
           if (feedMode === 'Following')
-            return (b.created || 0) - (a.created || 0);
+            return (
+              (b.created || 0) - (a.created || 0) || a.id.localeCompare(b.id)
+            );
           const score = (track: Track) =>
             (track.owner && state.follows.includes(track.owner) ? 1000 : 0) +
             (savedGenres.has(track.genre) ? 400 : 0) +
@@ -627,7 +632,11 @@ export default function SessionApp({
                 ) *
                   4,
             );
-          return score(b) - score(a);
+          return (
+            score(b) - score(a) ||
+            (b.created || 0) - (a.created || 0) ||
+            a.id.localeCompare(b.id)
+          );
         })
     : baseFiltered;
   function recommendationReason(track: Track) {

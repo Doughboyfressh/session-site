@@ -282,12 +282,11 @@ export function CollaborationInbox({
   const [requests, setRequests] = useState<Collaboration[]>([]);
   const [blocks, setBlocks] = useState<BlockedMember[]>([]);
   const [selectedId, setSelectedId] = useState('');
-  const [thread, setThread] = useState<{
-    id: string;
-    messages: DirectMessage[];
-  }>({ id: '', messages: [] });
+  const [threads, setThreads] = useState<Record<string, DirectMessage[]>>({});
   const [folder, setFolder] = useState<'incoming' | 'sent'>('incoming');
-  const [draft, setDraft] = useState('');
+  const [drafts, setDrafts] = useState<
+    Record<string, { message: string; clientId: string }>
+  >({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -302,7 +301,8 @@ export function CollaborationInbox({
     [folder, requests, userId],
   );
   const selected = requests.find((request) => request.id === selectedId);
-  const messages = thread.id === selectedId ? thread.messages : [];
+  const messages = threads[selectedId] || [];
+  const draft = drafts[selectedId] || { message: '', clientId: '' };
 
   async function loadInbox(signal?: AbortSignal) {
     try {
@@ -334,7 +334,7 @@ export function CollaborationInbox({
         '/api/social?view=thread&id=' + encodeURIComponent(id),
         { signal },
       );
-      setThread({ id, messages: data.messages });
+      setThreads((current) => ({ ...current, [id]: data.messages }));
     } catch (cause: unknown) {
       if (!isAbortError(cause)) setError(errorMessage(cause));
     }
@@ -369,7 +369,12 @@ export function CollaborationInbox({
       '/api/social?view=thread&id=' + encodeURIComponent(selectedId),
       { signal: controller.signal },
     )
-      .then((data) => setThread({ id: selectedId, messages: data.messages }))
+      .then((data) =>
+        setThreads((current) => ({
+          ...current,
+          [selectedId]: data.messages,
+        })),
+      )
       .catch((cause: unknown) => {
         if (!isAbortError(cause)) setError(errorMessage(cause));
       });
@@ -403,17 +408,24 @@ export function CollaborationInbox({
 
   async function sendMessage(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selected || !draft.trim() || busy) return;
+    if (!selected || !draft.message.trim() || !draft.clientId || busy) return;
+    const requestId = selected.id;
+    const outgoing = draft;
     setBusy(true);
     try {
       await socialAction({
         action: 'message',
-        id: selected.id,
-        message: draft,
-        clientId: crypto.randomUUID(),
+        id: requestId,
+        message: outgoing.message,
+        clientId: outgoing.clientId,
       });
-      setDraft('');
-      await Promise.all([loadThread(selected.id), loadInbox()]);
+      setDrafts((current) => {
+        if (current[requestId]?.clientId !== outgoing.clientId) return current;
+        const next = { ...current };
+        delete next[requestId];
+        return next;
+      });
+      await Promise.all([loadThread(requestId), loadInbox()]);
       onChanged();
     } catch (cause: unknown) {
       setError(errorMessage(cause));
@@ -640,16 +652,28 @@ export function CollaborationInbox({
                       <label htmlFor="collaboration-message">Message</label>
                       <textarea
                         id="collaboration-message"
-                        value={draft}
+                        value={draft.message}
                         maxLength={2000}
                         rows={3}
+                        disabled={busy}
                         placeholder="Share the next step, schedule, or creative direction…"
-                        onChange={(event) => setDraft(event.target.value)}
+                        onChange={(event) => {
+                          const message = event.target.value;
+                          setDrafts((current) => ({
+                            ...current,
+                            [selectedId]: {
+                              message,
+                              clientId: crypto.randomUUID(),
+                            },
+                          }));
+                        }}
                       />
                       <div className="actions">
                         <button
                           className="button primary"
-                          disabled={busy || !draft.trim()}
+                          disabled={
+                            busy || !draft.message.trim() || !draft.clientId
+                          }
                         >
                           <Send size={15} /> Send privately
                         </button>

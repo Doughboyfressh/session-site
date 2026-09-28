@@ -1,5 +1,5 @@
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-import { notifyUser } from '@/lib/social-server';
+import { prepareNotification } from '@/lib/social-server';
 import {
   all,
   choice,
@@ -13,6 +13,17 @@ import {
 } from '@/lib/server';
 
 const privateHeaders = { 'Cache-Control': 'private, no-store' };
+
+function changeCount(result: unknown) {
+  return Number(
+    (result as { meta?: { changes?: number } })?.meta?.changes || 0,
+  );
+}
+
+function requestScope(sender: string, recipient: string, track: string | null) {
+  if (track) return `track:${JSON.stringify([sender, recipient, track])}`;
+  return `profile:${JSON.stringify([sender, recipient].sort())}`;
+}
 
 function responseError(error: unknown, fallback: string) {
   const candidate = error as { message?: unknown; status?: unknown };
@@ -61,9 +72,15 @@ export async function GET(req: Request) {
     const view = url.searchParams.get('view') || 'activity';
     if (view === 'activity') {
       const items = await all(
-        `SELECT n.*,COALESCE(p.name,'SESSION member') AS actorName,p.avatar AS actorAvatar
+        `SELECT n.id,n.kind,n.resourceType,n.resourceId,n.body,n.created,n.readAt,
+          COALESCE(p.name,'SESSION member') AS actorName,p.avatar AS actorAvatar
          FROM notifications n
-         LEFT JOIN profiles p ON p.id=n.actor
+         LEFT JOIN profiles p ON p.id=n.actor AND p.visibility='public'
+          AND NOT EXISTS (
+            SELECT 1 FROM user_blocks b
+            WHERE (b.user=n.user AND b.target=n.actor)
+               OR (b.user=n.actor AND b.target=n.user)
+          )
          WHERE n.user=?
          ORDER BY n.created DESC
          LIMIT 100`,
@@ -81,22 +98,15 @@ export async function GET(req: Request) {
     if (view === 'inbox') {
       const [requests, blocks] = await Promise.all([
         all(
-          `SELECT r.*,
-          COALESCE(sender.name,'SESSION member') AS senderName,
-          COALESCE(sender.username,'member') AS senderUsername,
-          sender.avatar AS senderAvatar,
-          COALESCE(recipient.name,'SESSION member') AS recipientName,
-          COALESCE(recipient.username,'member') AS recipientUsername,
-          recipient.avatar AS recipientAvatar,
-          t.title AS trackTitle,
-          (SELECT body FROM direct_messages d WHERE d.request=r.id ORDER BY d.created DESC LIMIT 1) AS lastMessage,
-          (SELECT created FROM direct_messages d WHERE d.request=r.id ORDER BY d.created DESC LIMIT 1) AS lastMessageAt
+          `SELECT r.id,r.sender,r.recipient,r.track,r.trackTitle,r.role,r.message,
+          r.status,r.created,r.updated,
+          r.senderName,r.senderUsername,r.senderAvatar,
+          r.recipientName,r.recipientUsername,r.recipientAvatar,
+          (SELECT body FROM direct_messages d WHERE d.request=r.id ORDER BY d.created DESC,d.id DESC LIMIT 1) AS lastMessage,
+          (SELECT created FROM direct_messages d WHERE d.request=r.id ORDER BY d.created DESC,d.id DESC LIMIT 1) AS lastMessageAt
          FROM collaboration_requests r
-         LEFT JOIN profiles sender ON sender.id=r.sender
-         LEFT JOIN profiles recipient ON recipient.id=r.recipient
-         LEFT JOIN tracks t ON t.id=r.track
          WHERE r.sender=? OR r.recipient=?
-         ORDER BY COALESCE(lastMessageAt,r.updated) DESC
+         ORDER BY COALESCE(lastMessageAt,r.updated) DESC,r.id ASC
          LIMIT 100`,
           uid,
           uid,
@@ -105,7 +115,7 @@ export async function GET(req: Request) {
           `SELECT b.target,b.created,COALESCE(p.name,'SESSION member') AS name,
            COALESCE(p.username,'member') AS username,p.avatar
            FROM user_blocks b
-           LEFT JOIN profiles p ON p.id=b.target
+           LEFT JOIN profiles p ON p.id=b.target AND p.visibility='public'
            WHERE b.user=?
            ORDER BY b.created DESC`,
           uid,
@@ -119,15 +129,27 @@ export async function GET(req: Request) {
         uid,
       );
       const messages = await all(
-        `SELECT d.*,COALESCE(p.name,'SESSION member') AS senderName
-         FROM direct_messages d
-         LEFT JOIN profiles p ON p.id=d.sender
-         WHERE d.request=?
-         ORDER BY d.created ASC
-         LIMIT 500`,
+        `SELECT * FROM (
+           SELECT d.id,d.request,d.sender,d.body,d.created,
+            CASE WHEN d.sender=r.sender THEN r.senderName ELSE r.recipientName END AS senderName
+           FROM direct_messages d
+           JOIN collaboration_requests r ON r.id=d.request
+           WHERE d.request=?
+           ORDER BY d.created DESC,d.id DESC
+           LIMIT 500
+         ) recent
+         ORDER BY recent.created ASC,recent.id ASC`,
         request.id,
       );
-      return Response.json({ request, messages }, { headers: privateHeaders });
+      const {
+        scopeKey: _scopeKey,
+        operationId: _operationId,
+        ...visibleRequest
+      } = request;
+      return Response.json(
+        { request: visibleRequest, messages },
+        { headers: privateHeaders },
+      );
     }
     fail('Choose a valid social view.');
   } catch (error: unknown) {
@@ -182,18 +204,20 @@ export async function POST(req: Request) {
         const track = body.track ? str(body.track, 120) : null;
         if (await blocked(uid, recipient))
           fail('This collaboration connection is unavailable.', 403);
-        const target = await one(
-          'SELECT * FROM profiles WHERE id=?',
-          recipient,
-        );
+        const [target, senderProfile] = await Promise.all([
+          one('SELECT * FROM profiles WHERE id=?', recipient),
+          one('SELECT name,username,avatar FROM profiles WHERE id=?', uid),
+        ]);
+        let trackTitle: string | null = null;
         if (track) {
           const available = await one(
-            "SELECT id FROM tracks WHERE id=? AND owner=? AND visibility='public' AND permission='collaborate'",
+            "SELECT id,title FROM tracks WHERE id=? AND owner=? AND visibility='public' AND permission='collaborate'",
             track,
             recipient,
           );
           if (!available)
             fail('This track is no longer open to collaboration.', 404);
+          trackTitle = available.title;
         } else if (!target || target.visibility !== 'public')
           fail('This creator is not accepting profile requests.', 404);
         const activeRequest = track
@@ -213,36 +237,53 @@ export async function POST(req: Request) {
         if (activeRequest)
           fail('You already have an active request with this creator.', 409);
         const id = crypto.randomUUID();
-        const created = await run(
-          `INSERT INTO collaboration_requests
-           (id,sender,recipient,track,role,message,status,created,updated)
-           VALUES (?,?,?,?,?,?,'pending',?,?)
-           ON CONFLICT DO NOTHING`,
+        const publicTarget = target?.visibility === 'public' ? target : null;
+        const createRequest = database()
+          .prepare(
+            `INSERT INTO collaboration_requests
+             (id,sender,recipient,track,trackTitle,role,message,status,scopeKey,
+              senderName,senderUsername,senderAvatar,
+              recipientName,recipientUsername,recipientAvatar,
+              created,updated,operationId)
+             VALUES (?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?)
+             ON CONFLICT DO NOTHING`,
+          )
+          .bind(
+            id,
+            uid,
+            recipient,
+            track,
+            trackTitle,
+            role,
+            message,
+            requestScope(uid, recipient, track),
+            senderProfile?.name || 'SESSION member',
+            senderProfile?.username || 'member',
+            senderProfile?.avatar || null,
+            publicTarget?.name || 'SESSION member',
+            publicTarget?.username || 'member',
+            publicTarget?.avatar || null,
+            now,
+            now,
+            id,
+          );
+        const createNotice = prepareNotification(
+          {
+            user: recipient,
+            actor: uid,
+            kind: 'collaboration_request',
+            resourceType: 'collaboration',
+            resourceId: id,
+            body: `invited you to collaborate as ${role.toLowerCase()}`,
+            uniqueKey: `collaboration-request:${id}`,
+            created: now,
+          },
+          'EXISTS (SELECT 1 FROM collaboration_requests WHERE id=?)',
           id,
-          uid,
-          recipient,
-          track,
-          role,
-          message,
-          now,
-          now,
         );
-        if (
-          Number(
-            (created as { meta?: { changes?: number } })?.meta?.changes || 0,
-          ) === 0
-        )
+        const [created] = await database().batch([createRequest, createNotice]);
+        if (changeCount(created) === 0)
           fail('You already have an active request with this creator.', 409);
-        await notifyUser({
-          user: recipient,
-          actor: uid,
-          kind: 'collaboration_request',
-          resourceType: 'collaboration',
-          resourceId: id,
-          body: `invited you to collaborate as ${role.toLowerCase()}`,
-          uniqueKey: `collaboration-request:${id}`,
-          created: now,
-        });
         return Response.json(
           { id, status: 'pending' },
           { headers: privateHeaders },
@@ -251,46 +292,50 @@ export async function POST(req: Request) {
       case 'collaborationStatus': {
         const id = str(body.id, 80);
         const status = choice(body.status, ['accepted', 'declined', 'closed']);
-        let changed: { sender: string; recipient: string } | null = null;
-        if (status === 'closed')
-          changed = await one(
-            "UPDATE collaboration_requests SET status='closed',updated=? WHERE id=? AND ((status='accepted' AND (sender=? OR recipient=?)) OR (status='pending' AND sender=?)) RETURNING *",
-            now,
-            id,
-            uid,
-            uid,
-            uid,
-          );
-        else
-          changed = await one(
-            "UPDATE collaboration_requests SET status=?,updated=? WHERE id=? AND recipient=? AND status='pending' RETURNING *",
-            status,
-            now,
-            id,
-            uid,
-          );
-        if (!changed)
+        const request = await requestFor(id, uid);
+        const operationId = crypto.randomUUID();
+        const transitionAt = Math.max(now, Number(request.updated || 0) + 1);
+        const updateRequest =
+          status === 'closed'
+            ? database()
+                .prepare(
+                  "UPDATE collaboration_requests SET status='closed',updated=?,operationId=? WHERE id=? AND ((status='accepted' AND (sender=? OR recipient=?)) OR (status='pending' AND sender=?))",
+                )
+                .bind(transitionAt, operationId, id, uid, uid, uid)
+            : database()
+                .prepare(
+                  "UPDATE collaboration_requests SET status=?,updated=?,operationId=? WHERE id=? AND recipient=? AND status='pending'",
+                )
+                .bind(status, transitionAt, operationId, id, uid);
+        const other =
+          request.sender === uid ? request.recipient : request.sender;
+        const statusNotice = prepareNotification(
+          {
+            user: other,
+            actor: uid,
+            kind: 'collaboration_status',
+            resourceType: 'collaboration',
+            resourceId: id,
+            body:
+              status === 'accepted'
+                ? 'accepted your collaboration request'
+                : status === 'declined'
+                  ? 'declined your collaboration request'
+                  : 'closed the collaboration conversation',
+            uniqueKey: `collaboration-status:${id}:${status}`,
+            created: transitionAt,
+          },
+          'EXISTS (SELECT 1 FROM collaboration_requests WHERE id=? AND status=? AND operationId=?)',
+          id,
+          status,
+          operationId,
+        );
+        const [changed] = await database().batch([updateRequest, statusNotice]);
+        if (changeCount(changed) === 0)
           fail(
             'This request changed in another session. Refresh and try again.',
             409,
           );
-        const other =
-          changed.sender === uid ? changed.recipient : changed.sender;
-        await notifyUser({
-          user: other,
-          actor: uid,
-          kind: 'collaboration_status',
-          resourceType: 'collaboration',
-          resourceId: id,
-          body:
-            status === 'accepted'
-              ? 'accepted your collaboration request'
-              : status === 'declined'
-                ? 'declined your collaboration request'
-                : 'closed the collaboration conversation',
-          uniqueKey: `collaboration-status:${id}:${status}`,
-          created: now,
-        });
         return Response.json({ status }, { headers: privateHeaders });
       }
       case 'message': {
@@ -307,26 +352,28 @@ export async function POST(req: Request) {
         const text = str(body.message, 2000);
         const clientId = str(body.clientId, 100);
         const id = crypto.randomUUID();
-        const write = await run(
-          'INSERT OR IGNORE INTO direct_messages (id,request,sender,body,created,clientId) VALUES (?,?,?,?,?,?)',
-          id,
-          request.id,
-          uid,
-          text,
-          now,
-          clientId,
-        );
-        const inserted =
-          Number(
-            (write as { meta?: { changes?: number } })?.meta?.changes || 0,
-          ) > 0;
-        if (inserted) {
-          await run(
-            'UPDATE collaboration_requests SET updated=? WHERE id=?',
-            now,
-            request.id,
-          );
-          await notifyUser({
+        const insertMessage = database()
+          .prepare(
+            `INSERT OR IGNORE INTO direct_messages
+             (id,request,sender,body,created,clientId)
+             SELECT ?,r.id,?,?,?,?
+             FROM collaboration_requests r
+             WHERE r.id=? AND r.status='accepted'
+              AND (r.sender=? OR r.recipient=?)
+              AND NOT EXISTS (
+                SELECT 1 FROM user_blocks b
+                WHERE (b.user=r.sender AND b.target=r.recipient)
+                   OR (b.user=r.recipient AND b.target=r.sender)
+              )`,
+          )
+          .bind(id, uid, text, now, clientId, request.id, uid, uid);
+        const updateThread = database()
+          .prepare(
+            'UPDATE collaboration_requests SET updated=? WHERE id=? AND EXISTS (SELECT 1 FROM direct_messages WHERE id=?)',
+          )
+          .bind(now, request.id, id);
+        const messageNotice = prepareNotification(
+          {
             user: other,
             actor: uid,
             kind: 'message',
@@ -335,23 +382,29 @@ export async function POST(req: Request) {
             body: 'sent you a collaboration message',
             uniqueKey: `collaboration-message:${id}`,
             created: now,
-          });
-        }
+          },
+          'EXISTS (SELECT 1 FROM direct_messages WHERE id=?)',
+          id,
+        );
+        await database().batch([insertMessage, updateThread, messageNotice]);
         const stored = await one(
           'SELECT id FROM direct_messages WHERE request=? AND sender=? AND clientId=?',
           request.id,
           uid,
           clientId,
         );
-        return Response.json(
-          { id: stored?.id || id },
-          { headers: privateHeaders },
-        );
+        if (!stored)
+          fail(
+            'This conversation changed while the message was sending. Refresh and try again.',
+            409,
+          );
+        return Response.json({ id: stored.id }, { headers: privateHeaders });
       }
       case 'block': {
         const target = str(body.target, 120);
         if (target === uid) fail('Choose another SESSION member.');
         if (body.value) {
+          const operationId = crypto.randomUUID();
           await database().batch([
             database()
               .prepare(
@@ -360,9 +413,9 @@ export async function POST(req: Request) {
               .bind(uid, target, now),
             database()
               .prepare(
-                "UPDATE collaboration_requests SET status='closed',updated=? WHERE status IN ('pending','accepted') AND ((sender=? AND recipient=?) OR (sender=? AND recipient=?))",
+                "UPDATE collaboration_requests SET status='closed',updated=?,operationId=? WHERE status IN ('pending','accepted') AND ((sender=? AND recipient=?) OR (sender=? AND recipient=?))",
               )
-              .bind(now, uid, target, target, uid),
+              .bind(now, operationId, uid, target, target, uid),
           ]);
         } else
           await run(

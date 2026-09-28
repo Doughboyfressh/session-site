@@ -57,6 +57,13 @@
       "when": 1790576233599,
       "tag": "0007_melted_professor_monster",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790577429985,
+      "tag": "0008_freezing_rafael_vega",
+      "breakpoints": true
     }
   ]
 }
