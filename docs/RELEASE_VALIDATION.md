@@ -8,11 +8,11 @@ This records observed checks for the reusable Studio playlist release prepared f
 - The real browser export harness passes 78 Web Audio assertions at 44.1 and 48 kHz, including reusable-placement PCM timing, gaps, per-placement fades, dry/processed/compressed alignment, automation, retained effects tails, deterministic instruments, stem packaging, cancellation, and retry. The Studio clip harness passes 34 browser audio/editing/stereo-meter and deterministic-selection assertions.
 - Desktop interaction checks covered rename, duplicate, two-copy repeat, remove, split, Undo, nudge, trim, fade, selected-clip persistence, and one-channel reuse. Saved extra clips contain only the bounded persisted fields; runtime selection metadata is not stored.
 - In the 390-pixel phone wrapper, clip selection and duplication worked, the document scroll width matched its 375 px client width, the clip tools and timeline stayed inside the document, and no framework error overlay appeared. The timeline itself remains horizontally scrollable for dense arrangements. This is not an iPhone Safari pass.
-- Exact-commit validation evidence and the independent-review result will be recorded below after the final bounded review.
+- The exact code commit `62ef7bf` passed the mechanical pipeline. Its retained logs and browser notes are under `outputs/no-mistakes/playlist-62ef7bf`.
 
 ## Independent playlist review
 
-Pending the final hostile review of the committed release diff.
+The hostile review found two medium issues and one low inconsistency: collaboration could merge beyond the per-channel or project clip limits without marking overflow, very short or fully stacked placements lacked a reliable pointer path, and the top Duplicate control still used the track limit. The fixes add both merge limits, a deterministic placement picker, 24 px desktop and 44 px phone targets, and clip-capacity gating. The bounded re-review reported no remaining high- or medium-severity findings and independently reran all 70 playlist assertions.
 
 # September 28, 2026 automation release validation
 
