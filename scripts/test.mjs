@@ -11,6 +11,7 @@ const suites = [
   'routing',
   'automation',
   'clip-edit',
+  'playlist',
   'comp',
   'merge',
   'note-edit',

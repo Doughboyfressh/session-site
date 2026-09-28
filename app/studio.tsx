@@ -60,15 +60,19 @@ import ArrangementTimeline from './arrangement-timeline';
 import MixerBoard from './mixer-board';
 import ChannelFx from './channel-fx';
 import { routingFor } from '@/lib/mixer-routing';
+import { gridSeconds, snapTime, type ClipGrid } from '@/lib/clip-edit';
 import {
-  clipLength,
-  duplicateClip,
-  gridSeconds,
-  moveClip,
-  snapTime,
-  splitClip,
-  type ClipGrid,
-} from '@/lib/clip-edit';
+  PRIMARY_CLIP_ID,
+  duplicatePlaylistClip,
+  movePlaylistClip,
+  patchPlaylistClip,
+  playlistClips,
+  playlistTrackEnd,
+  removePlaylistClip,
+  repeatPlaylistClip,
+  splitPlaylistClip,
+  trimPlaylistClip,
+} from '@/lib/playlist-clips';
 export default function Studio({
   initial,
   onDraft,
@@ -117,6 +121,8 @@ export default function Studio({
       initial?.data || { bpm: 92, tracks: [] },
     ),
     [selected, setSelected] = useState(''),
+    [selectedClip, setSelectedClip] = useState(PRIMARY_CLIP_ID),
+    [repeatCount, setRepeatCount] = useState(4),
     [busy, setBusy] = useState(''),
     [playing, setPlaying] = useState(false),
     [position, setPosition] = useState(0),
@@ -472,58 +478,75 @@ export default function Studio({
     setTab('Piano roll');
   }
   function duplicate() {
-    if (!focus || !canEdit || structuralLocked) return;
+    if (!focus || !focusedClip || !canEdit || structuralLocked) return;
     try {
       const newId = crypto.randomUUID();
-      mutate((d) => duplicateClip(d, focus.id, newId));
-      setSelected(newId);
+      mutate((d) => duplicatePlaylistClip(d, focus.id, focusedClip.id, newId));
+      setSelectedClip(newId);
+      notify('Clip duplicated on the same mixer channel.');
     } catch (error: any) {
       notify(error.message);
     }
   }
   function split() {
-    if (!focus || !canEdit || structuralLocked) return;
+    if (!focus || !focusedClip || !canEdit || structuralLocked) return;
     try {
       const newId = crypto.randomUUID();
-      mutate((d) => splitClip(d, focus.id, position, newId));
-      setSelected(newId);
+      mutate((d) =>
+        splitPlaylistClip(d, focus.id, focusedClip.id, position, newId),
+      );
+      setSelectedClip(newId);
+      notify('Clip split. Both halves remain on the same mixer channel.');
+    } catch (error: any) {
+      notify(error.message);
+    }
+  }
+  function repeatSelected() {
+    if (!focus || !focusedClip || !canEdit || structuralLocked) return;
+    try {
+      const ids = Array.from({ length: repeatCount }, () =>
+        crypto.randomUUID(),
+      );
+      mutate((d) =>
+        repeatPlaylistClip(d, focus.id, focusedClip.id, repeatCount, ids),
+      );
+      setSelectedClip(ids.at(-1)!);
+      notify(`${repeatCount} clip repeats added to ${focus.name}.`);
+    } catch (error: any) {
+      notify(error.message);
+    }
+  }
+  function removeSelectedClip() {
+    if (!focus || !focusedClip || !canEdit || structuralLocked) return;
+    try {
+      mutate((d) => removePlaylistClip(d, focus.id, focusedClip.id));
+      setSelectedClip(PRIMARY_CLIP_ID);
       notify(
-        'Clip split. Both halves use the original audio and keep its fades.',
+        'Clip removed. The mixer channel and its other clips are unchanged.',
       );
     } catch (error: any) {
       notify(error.message);
     }
   }
   function moveSelected(offset: number) {
-    if (!focus || !canEdit || structuralLocked) return;
+    if (!focus || !focusedClip || !canEdit || structuralLocked) return;
     try {
-      const next = moveClip(focus, offset);
-      patch(focus.id, { offset: next.offset });
+      mutate((d) => movePlaylistClip(d, focus.id, focusedClip.id, offset));
     } catch (error: any) {
       notify(error.message);
     }
   }
   function trimSelected(key: 'trimStart' | 'trimEnd', value: number) {
-    if (!focus || !canEdit || structuralLocked) return;
+    if (!focus || !focusedClip || !canEdit || structuralLocked) return;
     try {
-      if (
-        !Number.isFinite(focus.duration) ||
-        !focus.duration ||
-        focus.duration > 300
-      )
-        throw new Error('Wait for valid source audio to finish loading.');
-      const other = key === 'trimStart' ? 'trimEnd' : 'trimStart';
-      const min = Math.max(
-        0,
-        focus.duration! + focus.offset - focus[other] - 300,
-      );
-      const max = Math.max(min, focus.duration! - focus[other] - 0.01);
-      const next = { ...focus, [key]: Math.max(min, Math.min(max, value)) };
-      clipLength(next);
-      patch(focus.id, { [key]: next[key] });
+      mutate((d) => trimPlaylistClip(d, focus.id, focusedClip.id, key, value));
     } catch (error: any) {
       notify(error.message);
     }
+  }
+  function patchSelectedClip(patch: Parameters<typeof patchPlaylistClip>[3]) {
+    if (!focus || !focusedClip || !canEdit || structuralLocked) return;
+    mutate((d) => patchPlaylistClip(d, focus.id, focusedClip.id, patch));
   }
   async function checkpointList() {
     if (!canManage) return;
@@ -907,15 +930,14 @@ export default function Studio({
     }
   }
   const focus = data.tracks.find((t) => t.id === selected) || data.tracks[0];
+  const focusedClip = focus
+    ? playlistClips(focus).find((clip) => clip.id === selectedClip) ||
+      playlistClips(focus)[0]
+    : undefined;
   const pianoLocked =
     playing || recording || !!busy || !!exportSnapshot || gesturing;
   const structuralLocked = pianoLocked || noteGesturing;
-  const length = Math.max(
-    30,
-    ...data.tracks.map(
-      (t) => (t.duration || 20) + t.offset - t.trimStart - t.trimEnd,
-    ),
-  );
+  const length = Math.max(30, ...data.tracks.map((t) => playlistTrackEnd(t)));
   const recordDialog = recordSnapshot && (
     <RecordTake
       data={recordSnapshot.data}
@@ -1460,12 +1482,32 @@ export default function Studio({
                     <option value={8}>8×</option>
                   </select>
                 </label>
+                <label className="clip-name-field">
+                  Clip name{' '}
+                  <input
+                    aria-label="Selected clip name"
+                    value={focusedClip?.name || ''}
+                    maxLength={100}
+                    disabled={!canEdit || !focusedClip || structuralLocked}
+                    onChange={(event) =>
+                      patchSelectedClip({
+                        name: event.target.value.slice(0, 100),
+                      })
+                    }
+                  />
+                </label>
                 <button
                   className="button secondary"
-                  disabled={!canEdit || !focus?.duration || structuralLocked}
+                  disabled={
+                    !canEdit ||
+                    !focus?.duration ||
+                    !focusedClip ||
+                    structuralLocked
+                  }
                   onClick={() =>
                     moveSelected(
-                      focus.offset - (gridSeconds(grid, data.bpm) || 0.01),
+                      focusedClip!.offset -
+                        (gridSeconds(grid, data.bpm) || 0.01),
                     )
                   }
                 >
@@ -1473,10 +1515,16 @@ export default function Studio({
                 </button>
                 <button
                   className="button secondary"
-                  disabled={!canEdit || !focus?.duration || structuralLocked}
+                  disabled={
+                    !canEdit ||
+                    !focus?.duration ||
+                    !focusedClip ||
+                    structuralLocked
+                  }
                   onClick={() =>
                     moveSelected(
-                      focus.offset + (gridSeconds(grid, data.bpm) || 0.01),
+                      focusedClip!.offset +
+                        (gridSeconds(grid, data.bpm) || 0.01),
                     )
                   }
                 >
@@ -1487,18 +1535,69 @@ export default function Studio({
                   disabled={
                     !canEdit ||
                     !focus?.duration ||
-                    data.tracks.length >= 48 ||
+                    !focusedClip ||
                     structuralLocked
                   }
                   onClick={split}
                 >
                   Split at playhead
                 </button>
+                <button
+                  className="button secondary"
+                  disabled={
+                    !canEdit ||
+                    !focus?.duration ||
+                    !focusedClip ||
+                    structuralLocked
+                  }
+                  onClick={duplicate}
+                >
+                  Duplicate clip
+                </button>
+                <label>
+                  Repeat{' '}
+                  <select
+                    aria-label="Number of clip repeats"
+                    value={repeatCount}
+                    disabled={!canEdit || !focusedClip || structuralLocked}
+                    onChange={(event) => setRepeatCount(+event.target.value)}
+                  >
+                    {[2, 3, 4, 6, 8].map((count) => (
+                      <option key={count} value={count}>
+                        {count} copies
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="button secondary"
+                  disabled={
+                    !canEdit ||
+                    !focus?.duration ||
+                    !focusedClip ||
+                    structuralLocked
+                  }
+                  onClick={repeatSelected}
+                >
+                  Add repeats
+                </button>
+                <button
+                  className="button secondary danger-text"
+                  disabled={
+                    !canEdit ||
+                    !focusedClip ||
+                    focusedClip.primary ||
+                    structuralLocked
+                  }
+                  onClick={removeSelectedClip}
+                >
+                  Remove clip
+                </button>
               </div>
               <p>
-                Click the ruler or a track to place the playhead. Splitting
-                creates separate channels; compression may change at the cut.
-                Automation stays at its project times when clips move.
+                Select a clip block to edit it. Duplicates, splits, and repeats
+                reuse the same source and mixer channel. Timing and fades belong
+                to each clip; effects and automation stay on the channel.
               </p>
             </div>
           )}
@@ -1507,13 +1606,17 @@ export default function Studio({
               <div className="arrangement">
                 <ArrangementTimeline
                   tracks={data.tracks}
-                  selected={focus?.id}
+                  selectedTrack={focus?.id}
+                  selectedClip={focusedClip?.id}
                   length={length}
                   position={position}
                   zoom={zoom}
                   canEdit={canEdit}
                   locked={structuralLocked}
-                  onSelect={setSelected}
+                  onSelect={(trackId, clipId) => {
+                    setSelected(trackId);
+                    setSelectedClip(clipId);
+                  }}
                   onSeek={(seconds) =>
                     setPosition(snapTime(seconds, grid, data.bpm))
                   }
@@ -1584,6 +1687,9 @@ export default function Studio({
                 {focus ? (
                   <>
                     <h3>{focus.name}</h3>
+                    <p className="selected-clip-label">
+                      Selected clip · {focusedClip?.name || focus.name}
+                    </p>
                     <Range
                       label={'Volume · ' + Math.round(focus.volume * 100) + '%'}
                       value={focus.volume}
@@ -1632,7 +1738,7 @@ export default function Studio({
                       onPatch={patch}
                       disabled={!canEdit || structuralLocked}
                     />
-                    <div className="mixer-divider">CLIP FADES</div>
+                    <div className="mixer-divider">SELECTED CLIP FADES</div>
                     {(['fadeIn', 'fadeOut'] as const).map((k) => (
                       <label className="field" key={k}>
                         <span>
@@ -1643,23 +1749,26 @@ export default function Studio({
                           min={0}
                           max={Math.min(30, focus.duration || 20)}
                           step={0.1}
-                          value={focus[k] || 0}
+                          value={focusedClip?.[k] || 0}
                           disabled={
-                            !canEdit || !focus.duration || structuralLocked
+                            !canEdit ||
+                            !focus.duration ||
+                            !focusedClip ||
+                            structuralLocked
                           }
                           onChange={(e) =>
-                            patch(focus.id, {
+                            patchSelectedClip({
                               [k]: Math.max(0, Math.min(30, +e.target.value)),
                               [k === 'fadeIn' ? 'fadeStart' : 'fadeEnd']:
                                 k === 'fadeIn'
-                                  ? focus.trimStart
-                                  : focus.duration! - focus.trimEnd,
+                                  ? focusedClip!.trimStart
+                                  : focus.duration! - focusedClip!.trimEnd,
                             })
                           }
                         />
                       </label>
                     ))}
-                    <div className="mixer-divider">ARRANGEMENT</div>
+                    <div className="mixer-divider">SELECTED CLIP POSITION</div>
                     <label className="field">
                       <span>Start position (seconds)</span>
                       <input
@@ -1668,14 +1777,17 @@ export default function Studio({
                         max={
                           300 -
                           ((focus.duration || 300) -
-                            focus.trimStart -
-                            focus.trimEnd)
+                            (focusedClip?.trimStart || 0) -
+                            (focusedClip?.trimEnd || 0))
                         }
                         step=".001"
                         disabled={
-                          !canEdit || !focus.duration || structuralLocked
+                          !canEdit ||
+                          !focus.duration ||
+                          !focusedClip ||
+                          structuralLocked
                         }
-                        value={focus.offset}
+                        value={focusedClip?.offset || 0}
                         onChange={(e) => moveSelected(+e.target.value)}
                       />
                     </label>
@@ -1692,14 +1804,17 @@ export default function Studio({
                             0,
                             (focus.duration || 20) -
                               0.01 -
-                              focus[
+                              (focusedClip?.[
                                 k === 'trimStart' ? 'trimEnd' : 'trimStart'
-                              ],
+                              ] || 0),
                           )}
                           step=".001"
-                          value={focus[k]}
+                          value={focusedClip?.[k] || 0}
                           disabled={
-                            !canEdit || !focus.duration || structuralLocked
+                            !canEdit ||
+                            !focus.duration ||
+                            !focusedClip ||
+                            structuralLocked
                           }
                           onChange={(e) => trimSelected(k, +e.target.value)}
                         />
@@ -1976,7 +2091,7 @@ export default function Studio({
               }))
             }
             title="Remove this track?"
-            description="This removes it from the arrangement. Your original upload stays in your library."
+            description="This removes the mixer channel and every clip placed on it. Your original upload stays in your library."
           />
         </div>
       )}{' '}

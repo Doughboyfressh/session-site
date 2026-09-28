@@ -8,6 +8,7 @@ SESSION is still an early-access service. The hardening changes below are suitab
 
 ## Changes in this release
 
+- Mixer channels now support reusable named clip placements without duplicating channel strips. Each placement has its own offset, trims, fades, and name; split, duplicate, repeat, move, rename, and removal are reversible. Playback, loops, mixdown, stems, recovery, validation, source-note edits, and collaboration use the same bounded model. Limits are 32 clips per channel and 256 per project. Existing top-level track geometry remains the primary clip for backward compatibility; mix, effects, routing, and automation remain channel-wide.
 - Seven bounded automation lanes per track now cover volume, pan, low/mid/high EQ, reverb, and delay with Linear/Hold transitions, beat snapping, direct manipulation, precision editing, lane copy/paste, one-step gesture history, and a moving playhead. Playback, loops, processed mix/stem export, recovery, and collaboration use the same lane model. Older volume-only clients remain compatible; ambiguous hybrid saves use the legacy field as the newer old-client edit and current recovery migrates it to the explicit lane.
 - Save and browser recovery preserve all channel, vocal and time/pitch controls and all seven instrument choices. Presets always supply required EQ defaults, validate imported/local values, report storage failures and distinguish user presets from built-ins.
 - Delayed remix/project-open responses cannot replace a workspace after navigation or newer edits. Project lists retrieve summaries; full arrangements load only when opened.
@@ -22,7 +23,7 @@ Mastering presets are creative processing with a sample-peak ceiling. They do no
 
 ## Reproducible checks
 
-Use the committed lockfile and Node >=22.13. `npm run typecheck`, `npm test`, and `npm run build` provide the release checks. `npm test` writes individual logs and a JSON summary to `outputs/release-checks` and returns failure if any suite fails. `tests/production-checks.mjs` verifies presets/recovery, supported instruments, processed clip geometry, pitch/duration/stereo numerical checks, dry-source rules and pump alignment. `tests/backend-checks.mjs` executes actual API handlers with real migrations in isolated SQLite and simulated R2, including malformed multipart limits, throttling, range requests and denied private access.
+Use the committed lockfile and Node >=22.13. `npm run typecheck`, `npm test`, and `npm run build` provide the release checks. `npm test` writes individual logs and a JSON summary to `outputs/release-checks` and returns failure if any suite fails. The runner currently has 21 suites, including the reusable-playlist model. `tests/production-checks.mjs` verifies presets/recovery, supported instruments, processed clip geometry, pitch/duration/stereo numerical checks, dry-source rules and pump alignment. `tests/backend-checks.mjs` executes actual API handlers with real migrations in isolated SQLite and simulated R2, including malformed multipart limits, throttling, range requests and denied private access.
 
 `npm run check:release` runs those checks plus lint on the new hardening modules. This is explicitly a scoped lint check: the repository-wide lint baseline still contains pre-existing findings and has not been certified clean.
 

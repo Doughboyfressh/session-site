@@ -1,3 +1,19 @@
+# September 28, 2026 playlist clip release validation
+
+This records observed checks for the reusable Studio playlist release prepared for Sites version 28. The Site audience remains `custom`, limited to the owner and the previously invited external viewer. Synthetic browser audio and a desktop 390-pixel wrapper do not establish physical iPhone/Safari behavior.
+
+## Playlist release checks
+
+- The release runner passes all 21 suites, type checking, scoped hardening lint, and the production Worker build. The playlist suite passes 60 assertions covering backward-compatible primary clips, duplicate, repeat, split, move, trim, removal, capacity limits, recovery sanitation, export duration, stable identities, and field-level collaboration merges.
+- The real browser export harness passes 78 Web Audio assertions at 44.1 and 48 kHz, including reusable-placement PCM timing, gaps, per-placement fades, dry/processed/compressed alignment, automation, retained effects tails, deterministic instruments, stem packaging, cancellation, and retry. The Studio clip harness passes 31 browser audio/editing/stereo-meter assertions.
+- Desktop interaction checks covered rename, duplicate, two-copy repeat, remove, split, Undo, nudge, trim, fade, selected-clip persistence, and one-channel reuse. Saved extra clips contain only the bounded persisted fields; runtime selection metadata is not stored.
+- In the 390-pixel phone wrapper, clip selection and duplication worked, the document scroll width matched its 375 px client width, the clip tools and timeline stayed inside the document, and no framework error overlay appeared. The timeline itself remains horizontally scrollable for dense arrangements. This is not an iPhone Safari pass.
+- Exact-commit validation evidence and the independent-review result will be recorded below after the final bounded review.
+
+## Independent playlist review
+
+Pending the final hostile review of the committed release diff.
+
 # September 28, 2026 automation release validation
 
 This records observed checks for the seven-lane Studio automation release prepared for Sites version 27. The Site audience remains `custom`, limited to the owner and the previously invited external viewer. Synthetic browser media and desktop viewport emulation do not establish physical iPhone/Safari behavior.

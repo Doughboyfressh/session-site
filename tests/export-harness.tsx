@@ -246,6 +246,32 @@ function App() {
         );
         near(automation.getChannelData(0)[Math.round(0.4 * rate)], 0);
         near(automation.getChannelData(0)[Math.round(0.7 * rate)], 0.2, 1e-4);
+        const playlistTrack = {
+          ...base,
+          clipName: 'Intro',
+          clips: [
+            {
+              id: 'repeat',
+              name: 'Verse repeat',
+              offset: 2,
+              trimStart: 0,
+              trimEnd: 0,
+              fadeIn: 0.25,
+              fadeStart: 0,
+            },
+          ],
+        };
+        const playlist = await renderExportTrack(
+          playlistTrack,
+          constant,
+          rate * 4,
+          { ...settings, sampleRate: rate, processing: 'dry' },
+        );
+        near(playlist.getChannelData(0)[Math.round(0.5 * rate)], 0.2, 1e-4);
+        near(playlist.getChannelData(0)[Math.round(1.5 * rate)], 0);
+        near(playlist.getChannelData(0)[Math.round(2.125 * rate)], 0.1, 1e-4);
+        near(playlist.getChannelData(0)[Math.round(2.5 * rate)], 0.2, 1e-4);
+        near(exportEnd(playlistTrack, constant.duration), 3);
         const echo = await renderExportTrack(
           { ...base, delay: 0.5 },
           constant,
@@ -268,7 +294,7 @@ function App() {
         }
         check(rejected, 'Fully trimmed track was accepted');
         log(
-          `${rate} Hz: fade envelopes, startup levels, automation and retained delay tails passed.`,
+          `${rate} Hz: fades, automation, reusable clips and retained delay tails passed.`,
         );
       }
       const pattern = [

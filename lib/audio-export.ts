@@ -3,9 +3,15 @@ import {
   channel,
   routingGraph,
   scheduleClip,
+  scheduleTrackAutomation,
   type Arrangement,
   type MixerTrack,
 } from './audio';
+import {
+  playlistClips,
+  playlistTrackEnd,
+  trackForPlaylistClip,
+} from './playlist-clips';
 import {
   encodeWave,
   zipAudio,
@@ -21,10 +27,7 @@ import {
   MASTER_PRESET_IDS,
   type MasterPreset,
 } from './mastering';
-import type {
-  AutomationScheduleDelay,
-  AutomationTarget,
-} from './automation';
+import type { AutomationScheduleDelay, AutomationTarget } from './automation';
 
 export type ExportOptions = {
   kind: 'mix' | 'tracks';
@@ -62,18 +65,26 @@ export function automationDelaysForExport(
   } satisfies Record<AutomationTarget, number>;
 }
 export function exportEnd(t: MixerTrack, duration: number) {
-  const end = t.offset + duration - t.trimStart - t.trimEnd;
-  if (
-    !Number.isFinite(end) ||
-    t.trimStart < 0 ||
-    t.trimEnd < 0 ||
-    t.offset < 0 ||
-    t.trimStart + t.trimEnd >= duration
-  )
-    throw new Error(
-      t.name +
-        ' is fully trimmed or has invalid timing. Adjust its trims first.',
-    );
+  for (const clip of playlistClips(t)) {
+    const end = clip.offset + duration - clip.trimStart - clip.trimEnd;
+    if (
+      !Number.isFinite(end) ||
+      clip.trimStart < 0 ||
+      clip.trimEnd < 0 ||
+      clip.offset < 0 ||
+      clip.trimStart + clip.trimEnd >= duration
+    )
+      throw new Error(
+        (clip.name || t.name) +
+          ' is fully trimmed or has invalid timing. Adjust its trims first.',
+      );
+    if (end > 300 + 1 / 48000)
+      throw new Error(
+        (clip.name || t.name) +
+          ' extends beyond the five-minute timeline. Shorten or move it before exporting.',
+      );
+  }
+  const end = playlistTrackEnd(t, duration);
   if (end > 300 + 1 / 48000)
     throw new Error(
       t.name +
@@ -132,18 +143,25 @@ export async function renderExportTrack(
           gain.connect(output);
           return { input: gain, auto: gain, dispose: () => gain.disconnect() };
         })();
-  scheduleClip(
-    c,
-    options.processing === 'dry'
-      ? { ...track, automation: [], automationLanes: {}, pump: 0 }
-      : track,
-    source,
-    input,
-    0,
-    0,
-    frames / options.sampleRate,
-    automationDelaysForExport(latency / options.sampleRate),
-  );
+  const scheduled =
+      options.processing === 'dry'
+        ? { ...track, automation: [], automationLanes: {}, pump: 0 }
+        : track,
+    end = frames / options.sampleRate,
+    automationDelay = automationDelaysForExport(latency / options.sampleRate);
+  scheduleTrackAutomation(scheduled, input, 0, end, 0, automationDelay);
+  for (const clip of playlistClips(scheduled))
+    scheduleClip(
+      c,
+      trackForPlaylistClip(scheduled, clip),
+      source,
+      input,
+      0,
+      0,
+      end,
+      automationDelay,
+      false,
+    );
   try {
     // Offline rendering cannot be stopped reliably. Wait for it before permitting a replacement export.
     const rendered = await c.startRendering();

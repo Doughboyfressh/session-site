@@ -9,6 +9,11 @@ import {
   automationPointCount,
   type AutomationTarget,
 } from './automation';
+import {
+  MAX_CLIPS_PER_PROJECT,
+  MAX_CLIPS_PER_TRACK,
+  PRIMARY_CLIP_ID,
+} from './playlist-clips';
 function fail(message: string): never {
   throw Object.assign(new Error(message), { status: 400 });
 }
@@ -19,6 +24,8 @@ export function validateArrangement(d: any, draft = false) {
     fail('Tempo must be 40–240 BPM.');
   if (d.routing !== undefined) validateRouting(d.routing, draft);
   const ids = new Set();
+  const clipIds = new Set<string>();
+  let clipCount = d.tracks.length;
   for (const t of d.tracks) {
     if (!t || typeof t !== 'object') fail('Invalid track.');
     if (typeof t.id !== 'string' || ids.has(t.id))
@@ -32,6 +39,11 @@ export function validateArrangement(d: any, draft = false) {
       (!draft && !t.name.trim())
     )
       fail('Please complete the required fields.');
+    if (
+      t.clipName !== undefined &&
+      (typeof t.clipName !== 'string' || t.clipName.length > 100)
+    )
+      fail('Clip names must use up to 100 characters.');
     for (const key of [
       'volume',
       'pan',
@@ -123,6 +135,44 @@ export function validateArrangement(d: any, draft = false) {
         t.splitFrom.length > 128)
     )
       fail('Invalid split reference.');
+    if (t.clips !== undefined) {
+      if (!Array.isArray(t.clips) || t.clips.length > MAX_CLIPS_PER_TRACK - 1)
+        fail(`Use up to ${MAX_CLIPS_PER_TRACK} clips on one channel.`);
+      clipCount += t.clips.length;
+      if (clipCount > MAX_CLIPS_PER_PROJECT)
+        fail(`Use up to ${MAX_CLIPS_PER_PROJECT} clips in one project.`);
+      for (const clip of t.clips) {
+        if (
+          !clip ||
+          typeof clip !== 'object' ||
+          typeof clip.id !== 'string' ||
+          !clip.id ||
+          clip.id === PRIMARY_CLIP_ID ||
+          clip.id.length > 128 ||
+          clipIds.has(clip.id)
+        )
+          fail('Each playlist clip needs a unique identity.');
+        clipIds.add(clip.id);
+        if (typeof clip.name !== 'string' || clip.name.length > 100)
+          fail('Clip names must use up to 100 characters.');
+        for (const [key, min, max] of [
+          ['offset', 0, 300],
+          ['trimStart', 0, 300],
+          ['trimEnd', 0, 300],
+          ['fadeIn', 0, 30],
+          ['fadeOut', 0, 30],
+          ['fadeStart', 0, 300],
+          ['fadeEnd', 0, 300],
+        ] as [string, number, number][]) {
+          if (
+            (['offset', 'trimStart', 'trimEnd'].includes(key) ||
+              clip[key] !== undefined) &&
+            (!Number.isFinite(clip[key]) || clip[key] < min || clip[key] > max)
+          )
+            fail('Invalid playlist clip control: ' + key);
+        }
+      }
+    }
     if (t.notes) {
       if (!Array.isArray(t.notes) || t.notes.length > 256)
         fail('Use up to 256 notes per instrument.');
@@ -206,4 +256,6 @@ export function validateArrangement(d: any, draft = false) {
     )
       fail('Invalid drum pattern.');
   }
+  if ([...clipIds].some((id) => ids.has(id)))
+    fail('Track and playlist clip identities must be unique.');
 }

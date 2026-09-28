@@ -1,0 +1,610 @@
+<!doctype html>
+<!-- SESSION implementation plan · studio-playlist-clips · 2026-09-28 -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plan — studio-playlist-clips</title>
+    <style>
+      :root {
+        --bg: #101211;
+        --surface: #191c1a;
+        --surface-2: #242724;
+        --border: #2b302b;
+        --text: #f1f2ef;
+        --muted: #969d94;
+        --primary: #c2f65a;
+        --ok: #a5d375;
+        --warn: #d9c987;
+        --danger: #ff6b79;
+        --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        --mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+        --radius: 10px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        line-height: 1.55;
+      }
+      main {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 32px 24px 96px;
+      }
+      header {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 16px;
+        margin-bottom: 28px;
+      }
+      h1 {
+        font-size: 26px;
+        margin: 0 0 4px;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .meta .badge {
+        display: inline-block;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 1px 10px;
+        margin-right: 8px;
+        color: var(--warn);
+      }
+      section {
+        margin: 28px 0;
+      }
+      h2 {
+        font-size: 15px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 6px;
+      }
+      [contenteditable] {
+        border: 1px dashed transparent;
+        border-radius: 6px;
+        padding: 2px 6px;
+        margin: 0 -6px;
+        outline: none;
+      }
+      [contenteditable]:hover {
+        border-color: var(--border);
+      }
+      [contenteditable]:focus {
+        border-color: var(--primary);
+        background: var(--surface);
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 13px;
+        font-style: italic;
+      }
+      ul.plain {
+        list-style: none;
+        padding: 0;
+        margin: 8px 0;
+      }
+      ul.plain li {
+        padding: 6px 8px;
+        border-left: 2px solid var(--border);
+        margin: 6px 0;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 12px;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 14px;
+      }
+      .card h3 {
+        margin: 0 0 6px;
+        font-size: 15px;
+      }
+      .card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      th {
+        color: var(--muted);
+        text-align: left;
+        font-weight: 500;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      td {
+        padding: 8px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+      }
+      td.num {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      input[type='checkbox'] {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--ok);
+      }
+      .done [contenteditable] {
+        text-decoration: line-through;
+        color: var(--muted);
+      }
+      .risk {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        padding: 8px;
+        border-left: 2px solid var(--warn);
+        margin: 6px 0;
+      }
+      .risk .sev {
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--warn);
+        white-space: nowrap;
+      }
+      .decision {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 14px;
+        margin: 10px 0;
+      }
+      .decision .q {
+        font-weight: 600;
+      }
+      .choices {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 10px 0;
+      }
+      .choices label {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 4px 12px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      textarea {
+        width: 100%;
+        min-height: 52px;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px;
+        font-family: var(--font);
+        font-size: 13px;
+        resize: vertical;
+      }
+      .savebar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: var(--surface);
+        border-top: 1px solid var(--border);
+        padding: 10px 24px;
+        display: flex;
+        gap: 14px;
+        align-items: center;
+      }
+      .savebar button {
+        background: var(--primary);
+        border: none;
+        color: #fff;
+        font-weight: 600;
+        border-radius: 8px;
+        padding: 8px 18px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .savebar .status {
+        color: var(--muted);
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Studio playlist clips</h1>
+        <div class="meta">
+          <span class="badge">release verification</span>studio-playlist-clips
+          · 2026-09-28 · annotate below, then hit “Save annotations”
+        </div>
+      </header>
+
+      <section>
+        <h2>Goal</h2>
+        <div data-id="goal" contenteditable>
+          Let producers arrange a song from reusable clip blocks without
+          creating a new mixer channel for every repeat. Every audio, MIDI,
+          drum, sample, and demo source can have multiple named placements on
+          its channel; each placement can be moved, trimmed, split, duplicated,
+          repeated, and removed while sharing the channel mix and automation.
+          The release succeeds when the same arrangement is heard in playback
+          and rendered exports, survives recovery and collaboration, remains
+          compatible with older projects, and is practical on phone and desktop.
+        </div>
+      </section>
+
+      <section>
+        <h2>Non-goals</h2>
+        <ul class="plain">
+          <li data-id="nongoal-1" contenteditable>
+            Elastic audio warping, transient slicing, pitch correction, and
+            destructive audio consolidation are separate releases.
+          </li>
+          <li data-id="nongoal-2" contenteditable>
+            Plugin hosting, third-party VST/AU loading, and a full FL Studio
+            pattern picker are outside this release.
+          </li>
+          <li data-id="nongoal-3" contenteditable>
+            Clip-level effect chains and automation stay channel-wide for now;
+            fades and timing remain clip-specific.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Screens &amp; flows</h2>
+        <p class="hint">
+          Duplicate a card per screen or flow. Sketch the shape in words;
+          wireframes can come later.
+        </p>
+        <div class="grid">
+          <div class="card">
+            <h3 data-id="screen-1-title" contenteditable>
+              Arrangement timeline
+            </h3>
+            <p data-id="screen-1-desc" contenteditable>
+              Each mixer channel row can show many distinct clip blocks. A click
+              selects one block and seeks to it; the selected state remains
+              clear without losing channel focus.
+            </p>
+          </div>
+          <div class="card">
+            <h3 data-id="screen-2-title" contenteditable>Clip inspector</h3>
+            <p data-id="screen-2-desc" contenteditable>
+              Rename, move, trim, fade, split, duplicate, repeat, and remove the
+              selected placement. Beat snapping and one-step Undo apply to every
+              edit.
+            </p>
+          </div>
+          <div class="card">
+            <h3 data-id="screen-3-title" contenteditable>
+              Playback and export
+            </h3>
+            <p data-id="screen-3-desc" contenteditable>
+              All placements use one decoded source and one mixer channel. Live
+              playback, looping, processed mixdown, and dry stems render the
+              same clip layout.
+            </p>
+          </div>
+          <div class="card">
+            <h3 data-id="screen-4-title" contenteditable>
+              Save and collaboration
+            </h3>
+            <p data-id="screen-4-desc" contenteditable>
+              Legacy projects open as one primary clip. New placements recover
+              from local drafts, save to the project, and merge by stable clip
+              identity with understandable conflicts.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Tasks</h2>
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>#</th>
+              <th>Task</th>
+              <th>Est</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="task">
+              <td><input type="checkbox" data-id="task-1" checked /></td>
+              <td class="num">1</td>
+              <td contenteditable data-id="task-1-text">
+                Add a bounded, backward-compatible clip-placement model with
+                pure edit helpers and validation.
+              </td>
+              <td contenteditable data-id="task-1-est" class="num">~0.5d</td>
+            </tr>
+            <tr class="task">
+              <td><input type="checkbox" data-id="task-2" checked /></td>
+              <td class="num">2</td>
+              <td contenteditable data-id="task-2-text">
+                Render multiple blocks per channel and add selection, rename,
+                duplicate, repeat, split, move, trim, fade, and remove controls.
+              </td>
+              <td contenteditable data-id="task-2-est" class="num">~1d</td>
+            </tr>
+            <tr class="task">
+              <td><input type="checkbox" data-id="task-3" checked /></td>
+              <td class="num">3</td>
+              <td contenteditable data-id="task-3-text">
+                Schedule every placement through live playback, loop playback,
+                processed mixdown, and dry stem export without duplicating
+                channel automation.
+              </td>
+              <td contenteditable data-id="task-3-est" class="num">~0.75d</td>
+            </tr>
+            <tr class="task">
+              <td><input type="checkbox" data-id="task-4" checked /></td>
+              <td class="num">4</td>
+              <td contenteditable data-id="task-4-text">
+                Sanitize and preserve playlist data through project APIs, draft
+                recovery, conflict resolution, and collaboration merge.
+              </td>
+              <td contenteditable data-id="task-4-est" class="num">~0.75d</td>
+            </tr>
+            <tr class="task">
+              <td><input type="checkbox" data-id="task-5" checked /></td>
+              <td class="num">5</td>
+              <td contenteditable data-id="task-5-text">
+                Validate edit math, PCM timing, export parity, legacy migration,
+                merge behavior, accessibility, and 390-pixel mobile use.
+              </td>
+              <td contenteditable data-id="task-5-est" class="num">~0.75d</td>
+            </tr>
+            <tr class="task">
+              <td><input type="checkbox" data-id="task-6" /></td>
+              <td class="num">6</td>
+              <td contenteditable data-id="task-6-text">
+                Run the release pipeline and hostile review, update production
+                documentation, publish, and inspect live logs.
+              </td>
+              <td contenteditable data-id="task-6-est" class="num">~0.5d</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Risks</h2>
+        <div class="risk">
+          <span class="sev">HIGH</span
+          ><span data-id="risk-1" contenteditable
+            >Scheduling channel automation once per clip would create
+            conflicting AudioParam events. Separate channel automation
+            scheduling from per-placement source and fade scheduling, then prove
+            it in the PCM harness.</span
+          >
+        </div>
+        <div class="risk">
+          <span class="sev">HIGH</span
+          ><span data-id="risk-2" contenteditable
+            >Malformed or huge placement arrays could increase CPU and
+            saved-project size. Sanitize every field and cap the model at 32
+            placements per channel and 256 per project.</span
+          >
+        </div>
+        <div class="risk">
+          <span class="sev">MED</span
+          ><span data-id="risk-3" contenteditable
+            >A selected clip can disappear after collaboration or Undo.
+            Reconcile selection by stable ID and fall back to the primary clip
+            without crashing.</span
+          >
+        </div>
+        <div class="risk">
+          <span class="sev">MED</span
+          ><span data-id="risk-4" contenteditable
+            >Dense timelines can become unusable on phones. Keep horizontal
+            scrolling, minimum touch targets, concise labels, and a dedicated
+            inspector with tested mobile behavior.</span
+          >
+        </div>
+      </section>
+
+      <section>
+        <h2>Implementation decisions</h2>
+        <div class="decision">
+          <div class="q" data-id="q-1-text" contenteditable>
+            How should an existing one-clip project migrate?
+          </div>
+          <div class="choices">
+            <label
+              ><input
+                type="radio"
+                name="q-1"
+                data-id="q-1"
+                value="approve-a"
+                checked
+              />
+              Keep its current geometry as the primary clip</label
+            >
+            <label
+              ><input type="radio" name="q-1" data-id="q-1" value="approve-b" />
+              Rewrite every project into a new nested model</label
+            >
+            <label
+              ><input type="radio" name="q-1" data-id="q-1" value="discuss" />
+              Discuss first</label
+            >
+          </div>
+          <textarea data-id="q-1-comment" placeholder="comment for the agent…">
+Selected to preserve compatibility and reduce migration risk.</textarea>
+        </div>
+        <div class="decision">
+          <div class="q" data-id="q-2-text" contenteditable>
+            What does Repeat create?
+          </div>
+          <div class="choices">
+            <label
+              ><input
+                type="radio"
+                name="q-2"
+                data-id="q-2"
+                value="approve-a"
+                checked
+              />
+              Two to eight explicit adjacent clip placements</label
+            >
+            <label
+              ><input type="radio" name="q-2" data-id="q-2" value="approve-b" />
+              One endless visual loop</label
+            >
+            <label
+              ><input type="radio" name="q-2" data-id="q-2" value="discuss" />
+              Discuss first</label
+            >
+          </div>
+          <textarea data-id="q-2-comment" placeholder="comment for the agent…">
+Explicit placements remain editable, mergeable, bounded, and audible in every renderer.</textarea>
+        </div>
+        <div class="decision">
+          <div class="q" data-id="q-3-text" contenteditable>
+            Which settings belong to the clip versus the channel?
+          </div>
+          <div class="choices">
+            <label
+              ><input
+                type="radio"
+                name="q-3"
+                data-id="q-3"
+                value="approve-a"
+                checked
+              />
+              Clip timing, name, trims, and fades; channel mix, effects, and
+              automation</label
+            >
+            <label
+              ><input type="radio" name="q-3" data-id="q-3" value="approve-b" />
+              Duplicate every channel setting on each clip</label
+            >
+            <label
+              ><input type="radio" name="q-3" data-id="q-3" value="discuss" />
+              Discuss first</label
+            >
+          </div>
+          <textarea data-id="q-3-comment" placeholder="comment for the agent…">
+This matches a playlist/channel-strip model and avoids duplicate mixer channels.</textarea>
+        </div>
+      </section>
+    </main>
+
+    <div class="savebar">
+      <button onclick="save()">Save annotations</button>
+      <span class="status" id="status"
+        >edits stay in this page — save writes annotations.json</span
+      >
+    </div>
+
+    <script>
+      function collect() {
+        const out = {};
+        document.querySelectorAll('[data-id]').forEach((el) => {
+          const id = el.dataset.id;
+          if (el.type === 'checkbox')
+            out[id] = { kind: 'check', value: el.checked };
+          else if (el.type === 'radio') {
+            if (el.checked) out[id] = { kind: 'decision', value: el.value };
+          } else if (el.tagName === 'TEXTAREA')
+            out[id] = { kind: 'comment', value: el.value };
+          else if (el.isContentEditable)
+            out[id] = { kind: 'text', value: el.innerText };
+        });
+        document.querySelectorAll('tr.task').forEach((tr) => {
+          const cb = tr.querySelector('input[type=checkbox]');
+          if (cb) tr.classList.toggle('done', cb.checked);
+        });
+        out._savedAt = new Date().toISOString();
+        return out;
+      }
+      async function save() {
+        const data = collect(),
+          status = document.getElementById('status');
+        try {
+          const r = await fetch('/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+          });
+          if (!r.ok) throw 0;
+          status.textContent =
+            'saved to annotations.json ✓ ' + new Date().toLocaleTimeString();
+        } catch (e) {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(
+            new Blob([JSON.stringify(data, null, 2)], {
+              type: 'application/json',
+            }),
+          );
+          a.download = 'annotations.json';
+          a.click();
+          status.textContent =
+            'not served — downloaded annotations.json; put it next to index.html';
+        }
+      }
+      async function restore() {
+        try {
+          const r = await fetch('annotations.json');
+          if (!r.ok) return;
+          const data = await r.json();
+          for (const [id, rec] of Object.entries(data)) {
+            if (id.startsWith('_')) continue;
+            const el = document.querySelector('[data-id="' + id + '"]');
+            if (!el) continue;
+            if (rec.kind === 'check') el.checked = rec.value;
+            else if (rec.kind === 'decision') {
+              const radio = document.querySelector(
+                'input[type=radio][data-id="' +
+                  id +
+                  '"][value="' +
+                  rec.value +
+                  '"]',
+              );
+              if (radio) radio.checked = true;
+            } else if (rec.kind === 'comment') el.value = rec.value;
+            else if (rec.kind === 'text') el.innerText = rec.value;
+          }
+          document.getElementById('status').textContent =
+            'restored annotations from disk';
+        } catch (e) {}
+      }
+      document.addEventListener('DOMContentLoaded', restore);
+      document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+          e.preventDefault();
+          save();
+        }
+      });
+    </script>
+  </body>
+</html>

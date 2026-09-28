@@ -1,4 +1,4 @@
-import type { Arrangement, MixerTrack } from './audio';
+import type { Arrangement, ClipPlacement, MixerTrack } from './audio';
 import {
   cleanRouting,
   routingFor,
@@ -146,6 +146,55 @@ export function mergeProject(
         .filter((k) => (t as any)[k] !== undefined)
         .map((k) => [k, (t as any)[k]]),
     );
+  function mergeClips(
+    b: ClipPlacement[] = [],
+    l: ClipPlacement[] = [],
+    r: ClipPlacement[] = [],
+    trackLabel: string,
+  ) {
+    const maps = [b, l, r].map(
+      (clips) => new Map(clips.map((clip) => [clip.id, clip])),
+    );
+    const ids = [...new Set(maps.flatMap((map) => [...map.keys()]))].sort();
+    return ids
+      .map((id) => {
+        const [baseClip, localClip, remoteClip] = maps.map((map) =>
+            map.get(id),
+          ),
+          clipLabel =
+            (localClip || remoteClip || baseClip)?.name || 'clip';
+        if (baseClip && localClip && remoteClip) {
+          const merged = { id } as ClipPlacement;
+          for (const key of [
+            ...new Set([
+              ...Object.keys(baseClip),
+              ...Object.keys(localClip),
+              ...Object.keys(remoteClip),
+            ]),
+          ].sort()) {
+            if (key === 'id') continue;
+            const value = pick(
+              baseClip[key as keyof ClipPlacement],
+              localClip[key as keyof ClipPlacement],
+              remoteClip[key as keyof ClipPlacement],
+              `${trackLabel} · ${clipLabel} · ${key}`,
+            );
+            if (value !== undefined)
+              Object.assign(merged, { [key]: structuredClone(value) });
+          }
+          return merged;
+        }
+        return pick(
+          baseClip,
+          localClip,
+          remoteClip,
+          `${trackLabel} · ${clipLabel} placement`,
+        ) as ClipPlacement | undefined;
+      })
+      .filter((clip): clip is ClipPlacement => !!clip)
+      .map((clip) => structuredClone(clip))
+      .sort((a, b) => a.offset - b.offset || a.id.localeCompare(b.id));
+  }
   for (const id of [
     ...new Set([...bm.keys(), ...lm.keys(), ...rm.keys()]),
   ].sort()) {
@@ -173,6 +222,8 @@ export function mergeProject(
           ),
         ),
       } as MixerTrack;
+      const clips = mergeClips(b.clips, l.clips, r.clips, label);
+      if (clips.length) merged.clips = clips;
       // A sample region belongs to its file. Never combine a replacement asset
       // with a concurrent zone edit, or merge half of an instrument-mode change.
       const sampled = b.sample || l.sample || r.sample;
@@ -191,7 +242,11 @@ export function mergeProject(
       for (const key of [
         ...new Set([...Object.keys(b), ...Object.keys(l), ...Object.keys(r)]),
       ].sort()) {
-        if (geometry.includes(key) || (sampled && sourceKeys.includes(key)))
+        if (
+          key === 'clips' ||
+          geometry.includes(key) ||
+          (sampled && sourceKeys.includes(key))
+        )
           continue;
         if (key === 'automation' && volumeLanePresent) continue;
         if (key === 'automationLanes') {

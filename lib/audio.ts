@@ -26,6 +26,11 @@ import {
   type AutomationScheduleDelay,
   type AutomationTarget,
 } from './automation';
+import {
+  playlistClips,
+  playlistTrackEnd,
+  trackForPlaylistClip,
+} from './playlist-clips';
 export { automationAt } from './automation';
 export type {
   AutomationCurve,
@@ -39,6 +44,17 @@ export type Note = {
   start: number;
   length: number;
   velocity: number;
+};
+export type ClipPlacement = {
+  id: string;
+  name: string;
+  offset: number;
+  trimStart: number;
+  trimEnd: number;
+  fadeIn?: number;
+  fadeOut?: number;
+  fadeStart?: number;
+  fadeEnd?: number;
 };
 export type MixerTrack = {
   id: string;
@@ -69,6 +85,8 @@ export type MixerTrack = {
   fadeStart?: number;
   fadeEnd?: number;
   splitFrom?: string;
+  clipName?: string;
+  clips?: ClipPlacement[];
   automation?: import('./automation').AutomationPoint[];
   automationLanes?: AutomationLanes;
   groupId?: GroupId;
@@ -726,12 +744,7 @@ export function routingGraph(
 export function mixDuration(data: Arrangement) {
   return Math.min(
     300,
-    Math.max(
-      1,
-      ...data.tracks.map(
-        (t) => t.offset + (t.duration || 20) - t.trimStart - t.trimEnd,
-      ),
-    ),
+    Math.max(1, ...data.tracks.map((t) => playlistTrackEnd(t))),
   );
 }
 export function scheduleClip(
@@ -748,6 +761,7 @@ export function scheduleClip(
   from: number,
   to: number,
   automationDelay: AutomationScheduleDelay = 0,
+  includeAutomation = true,
 ) {
   const end = t.offset + b.duration - t.trimStart - t.trimEnd;
   // Shared boundaries land on the same output sample. Fractional start times
@@ -804,6 +818,28 @@ export function scheduleClip(
       );
     }
   }
+  if (includeAutomation)
+    scheduleTrackAutomation(t, ch, from, to, when, automationDelay);
+  source.start(at, Math.max(0, t.trimStart + relative), dur);
+  source.onended = () => {
+    source.disconnect();
+    fade.disconnect();
+    fadeOut.disconnect();
+    pump.disconnect();
+  };
+  return source;
+}
+export function scheduleTrackAutomation(
+  t: MixerTrack,
+  ch: {
+    auto: GainNode;
+    automation?: Partial<Record<AutomationTarget, AudioParam>>;
+  },
+  from: number,
+  to: number,
+  when: number,
+  automationDelay: AutomationScheduleDelay = 0,
+) {
   for (const target of AUTOMATION_TARGETS) {
     const points = automationLane(t, target);
     const parameter =
@@ -818,14 +854,6 @@ export function scheduleClip(
         automationDelayFor(automationDelay, target),
       );
   }
-  source.start(at, Math.max(0, t.trimStart + relative), dur);
-  source.onended = () => {
-    source.disconnect();
-    fade.disconnect();
-    fadeOut.disconnect();
-    pump.disconnect();
-  };
-  return source;
 }
 async function loadArrangementBuffers(
   data: Arrangement,
@@ -869,15 +897,15 @@ export async function playMix(
   if (options.signal?.aborted)
     throw new DOMException('Playback cancelled.', 'AbortError');
   for (const { t, b } of loaded)
-    if (t.trimStart + t.trimEnd >= b.duration)
-      throw new Error(t.name + ' is fully trimmed. Shorten its trim settings.');
+    for (const clip of playlistClips(t))
+      if (clip.trimStart + clip.trimEnd >= b.duration)
+        throw new Error(
+          (clip.name || t.name) +
+            ' is fully trimmed. Shorten its trim settings.',
+        );
   const duration = Math.min(
       300,
-      Math.max(
-        ...loaded.map(
-          ({ t, b }) => t.offset + b.duration - t.trimStart - t.trimEnd,
-        ),
-      ),
+      Math.max(...loaded.map(({ t, b }) => playlistTrackEnd(t, b.duration))),
     ),
     from = Math.max(
       0,
@@ -954,22 +982,35 @@ export async function playMix(
     for (const { t, b } of loaded) {
       const tr = latest.tracks.find((x) => x.id === t.id);
       if (!tr) continue;
-      const n = scheduleClip(
-        c,
-        {
+      const playbackTrack = {
           ...tr,
           automation: t.automation,
           automationLanes: t.automationLanes,
         },
-        b,
-        channels.get(t.id)!,
-        next,
+        channelNode = channels.get(t.id)!;
+      scheduleTrackAutomation(
+        playbackTrack,
+        channelNode,
         currentFrom,
         end,
+        next,
       );
-      if (n) {
-        nodes.add(n);
-        n.addEventListener('ended', () => nodes.delete(n));
+      for (const clip of playlistClips(playbackTrack)) {
+        const n = scheduleClip(
+          c,
+          trackForPlaylistClip(playbackTrack, clip),
+          b,
+          channelNode,
+          next,
+          currentFrom,
+          end,
+          0,
+          false,
+        );
+        if (n) {
+          nodes.add(n);
+          n.addEventListener('ended', () => nodes.delete(n));
+        }
       }
     }
     if (options.metronome) {
@@ -1077,11 +1118,8 @@ export async function renderBuffer(data: Arrangement) {
   if (!loaded.length) throw new Error('Add or unmute a track first.');
   const duration = Math.min(
       300,
-      Math.max(
-        ...loaded.map(
-          ({ t, b }) => t.offset + b.duration - t.trimStart - t.trimEnd,
-        ),
-      ) + 1.8,
+      Math.max(...loaded.map(({ t, b }) => playlistTrackEnd(t, b.duration))) +
+        1.8,
     ),
     c = new OfflineAudioContext(2, Math.ceil(duration * 44100), 44100),
     master = c.createDynamicsCompressor();
@@ -1091,7 +1129,19 @@ export async function renderBuffer(data: Arrangement) {
   const routing = routingGraph(c, data, master);
   const channels = loaded.map(({ t, b }) => {
     const input = channel(c, t, routing.inputs.get(t.id)!, false, data.bpm);
-    scheduleClip(c, t, b, input, 0, 0, duration);
+    scheduleTrackAutomation(t, input, 0, duration, 0);
+    for (const clip of playlistClips(t))
+      scheduleClip(
+        c,
+        trackForPlaylistClip(t, clip),
+        b,
+        input,
+        0,
+        0,
+        duration,
+        0,
+        false,
+      );
     return input;
   });
   try {

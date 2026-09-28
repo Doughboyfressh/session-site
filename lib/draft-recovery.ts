@@ -10,6 +10,7 @@ import {
   MAX_AUTOMATION_POINTS_PER_TRACK,
   automationPointCount,
 } from './automation';
+import { MAX_CLIPS_PER_TRACK, PRIMARY_CLIP_ID } from './playlist-clips';
 
 export const MAX_DRAFTS = 40;
 export const MAX_DRAFT_BYTES = 600 * 1024;
@@ -58,6 +59,8 @@ const fields = [
   'fadeStart',
   'fadeEnd',
   'splitFrom',
+  'clipName',
+  'clips',
   'automation',
   'automationLanes',
   'groupId',
@@ -129,6 +132,33 @@ export function recoverySnapshot(value: any): DraftSnapshot {
             start: n.start,
             length: n.length,
             velocity: n.velocity,
+          };
+        });
+      }
+      if (t.clips !== undefined) {
+        if (!Array.isArray(t.clips) || t.clips.length > MAX_CLIPS_PER_TRACK - 1)
+          throw new Error('Too many playlist clips in draft.');
+        t.clips = t.clips.map((clip: any) => {
+          if (
+            !clip ||
+            !identity(clip.id) ||
+            clip.id === PRIMARY_CLIP_ID ||
+            typeof clip.name !== 'string' ||
+            clip.name.length > 100
+          )
+            throw new Error('Invalid playlist clip in draft.');
+          return {
+            id: clip.id,
+            name: clip.name,
+            offset: clip.offset,
+            trimStart: clip.trimStart,
+            trimEnd: clip.trimEnd,
+            ...(clip.fadeIn === undefined ? {} : { fadeIn: clip.fadeIn }),
+            ...(clip.fadeOut === undefined ? {} : { fadeOut: clip.fadeOut }),
+            ...(clip.fadeStart === undefined
+              ? {}
+              : { fadeStart: clip.fadeStart }),
+            ...(clip.fadeEnd === undefined ? {} : { fadeEnd: clip.fadeEnd }),
           };
         });
       }

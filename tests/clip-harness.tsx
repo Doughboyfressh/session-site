@@ -27,6 +27,16 @@ const initial = {
         peaks: Array.from({ length: 120 }, (_, i) => 0.2 + i / 200),
         fadeIn: 1,
         fadeOut: 1,
+        clipName: 'Intro phrase',
+        clips: [
+          {
+            id: 'verse-repeat',
+            name: 'Verse repeat',
+            offset: 5,
+            trimStart: 0,
+            trimEnd: 0,
+          },
+        ],
       },
     ],
   },
@@ -323,6 +333,8 @@ function App() {
             volume: t.volume,
             fadeStart: t.fadeStart,
             fadeEnd: t.fadeEnd,
+            clipName: t.clipName,
+            clips: t.clips,
           })),
         )}
       </output>

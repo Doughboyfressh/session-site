@@ -1,5 +1,6 @@
 import type { Arrangement, MixerTrack, Note } from './audio';
 import { applyNotePatch, checkNotes } from './note-edit';
+import { playlistClips, playlistTrackEnd } from './playlist-clips';
 
 export type MidiEvent =
   | { kind: 'on'; channel: number; pitch: number; velocity: number }
@@ -50,7 +51,10 @@ export function midiPlan(
     track.demo
   )
     throw Error('Select an instrument track to record MIDI.');
-  if (track.trimStart || track.trimEnd || track.splitFrom)
+  if (
+    playlistClips(track).some((clip) => clip.trimStart || clip.trimEnd) ||
+    track.splitFrom
+  )
     throw Error(
       'Use an untrimmed instrument track for MIDI recording. You can add a new instrument track.',
     );
@@ -64,7 +68,9 @@ export function midiPlan(
     beats > 32 ||
     start + beats > 256 ||
     track.offset < 0 ||
-    track.offset + ((start + beats) * 60) / bpm > 300
+    playlistClips(track).some(
+      (clip) => clip.offset + ((start + beats) * 60) / bpm > 300,
+    )
   )
     throw Error(
       'Choose a recording range within 32 beats and the five-minute project limit.',
@@ -76,7 +82,7 @@ export function midiPlan(
       60) /
       bpm +
     0.5;
-  if (sourceEnd > 300 || track.offset + sourceEnd > 300)
+  if (sourceEnd > 300 || playlistTrackEnd(track, sourceEnd) > 300)
     throw Error(
       'This recording range and instrument tail must stay within the five-minute project limit.',
     );
@@ -240,6 +246,8 @@ export function keepMidi(
       t.trimStart,
       t.trimEnd,
       t.splitFrom,
+      t.clipName,
+      t.clips,
       t.fileId,
       t.sequence,
       t.demo,

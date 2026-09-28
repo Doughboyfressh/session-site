@@ -1,5 +1,6 @@
 import type { Arrangement, MixerTrack, Note } from './audio';
 import { validateArrangement } from './arrangement-validation';
+import { playlistClips } from './playlist-clips';
 
 export type NoteEdit =
   | { kind: 'move'; beats: number }
@@ -28,6 +29,8 @@ export function applyNotePatch(
       t.trimStart,
       t.trimEnd,
       t.splitFrom,
+      t.clipName,
+      t.clips,
       t.fileId,
       t.sequence,
       t.demo,
@@ -52,8 +55,7 @@ export function applyNotePatch(
   const followNewEnd =
     patch.notes &&
     current.notes &&
-    !current.trimStart &&
-    !current.trimEnd &&
+    playlistClips(current).every((clip) => !clip.trimStart && !clip.trimEnd) &&
     !current.splitFrom &&
     sourceBeats(patch.notes) !== sourceBeats(current.notes);
   const next = {
@@ -63,7 +65,15 @@ export function applyNotePatch(
         ? {
             ...t,
             ...patch,
-            ...(followNewEnd ? { fadeEnd: undefined } : {}),
+            ...(followNewEnd
+              ? {
+                  fadeEnd: undefined,
+                  clips: t.clips?.map((clip) => ({
+                    ...clip,
+                    fadeEnd: undefined,
+                  })),
+                }
+              : {}),
             peaks: undefined,
             duration: undefined,
           }
@@ -100,7 +110,8 @@ export function checkNotes(
   }
   validateArrangement({ bpm, tracks: [{ ...track, notes }] }, true);
   if (
-    (track.trimStart || track.trimEnd || track.splitFrom) &&
+    (playlistClips(track).some((clip) => clip.trimStart || clip.trimEnd) ||
+      track.splitFrom) &&
     (notes.length !== track.notes.length ||
       notes.some(
         (n, i) =>
@@ -116,12 +127,18 @@ export function checkNotes(
     (Math.max(8, ...notes.map((n) => n.start + n.length)) * 60) / bpm + 0.5;
   if (
     duration > 300 ||
-    track.offset + duration - track.trimStart - track.trimEnd > 300
+    playlistClips(track).some(
+      (clip) => clip.offset + duration - clip.trimStart - clip.trimEnd > 300,
+    )
   )
     throw Error(
       'These notes would extend beyond the five-minute project limit.',
     );
-  if (track.trimStart + track.trimEnd >= duration)
+  if (
+    playlistClips(track).some(
+      (clip) => clip.trimStart + clip.trimEnd >= duration,
+    )
+  )
     throw Error(
       'These notes would leave this trimmed instrument silent. Shorten its trim first.',
     );
