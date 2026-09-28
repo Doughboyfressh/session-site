@@ -1,6 +1,6 @@
 # September 28, 2026 playlist clip release validation
 
-This records observed checks for the reusable Studio playlist release prepared for Sites version 28. The Site audience remains `custom`, limited to the owner and the previously invited external viewer. Synthetic browser audio and a desktop 390-pixel wrapper do not establish physical iPhone/Safari behavior.
+This records observed checks for the reusable Studio playlist release published as Sites version 28. The Site audience remains `custom`, limited to the owner and the previously invited external viewer. Synthetic browser audio and a desktop 390-pixel wrapper do not establish physical iPhone/Safari behavior.
 
 ## Playlist release checks
 
@@ -9,6 +9,7 @@ This records observed checks for the reusable Studio playlist release prepared f
 - Desktop interaction checks covered rename, duplicate, two-copy repeat, remove, split, Undo, nudge, trim, fade, selected-clip persistence, and one-channel reuse. Saved extra clips contain only the bounded persisted fields; runtime selection metadata is not stored.
 - In the 390-pixel phone wrapper, clip selection and duplication worked, the document scroll width matched its 375 px client width, the clip tools and timeline stayed inside the document, and no framework error overlay appeared. The timeline itself remains horizontally scrollable for dense arrangements. This is not an iPhone Safari pass.
 - The exact code commit `62ef7bf` passed the mechanical pipeline. Its retained logs and browser notes are under `outputs/no-mistakes/playlist-62ef7bf`.
+- Sites version 28 was saved from source commit `f1e3d18` and deployed successfully to the existing production URL. The post-deployment project check reported version 28 active with the custom owner/viewer audience unchanged; the 30-minute error-only Worker log query returned no events.
 
 ## Independent playlist review
 
