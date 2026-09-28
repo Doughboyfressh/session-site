@@ -1,6 +1,13 @@
 import { GROUP_IDS, validateRouting } from './mixer-routing';
 import { sampleSettings } from './sample-instrument';
 import { SOUNDS } from './instruments';
+import {
+  AUTOMATION_SPECS,
+  AUTOMATION_TARGETS,
+  MAX_AUTOMATION_POINTS_PER_LANE,
+  MAX_AUTOMATION_POINTS_PER_TRACK,
+  type AutomationTarget,
+} from './automation';
 function fail(message: string): never {
   throw Object.assign(new Error(message), { status: 400 });
 }
@@ -136,20 +143,55 @@ export function validateArrangement(d: any, draft = false) {
         )
           fail('Invalid instrument note.');
     }
-    if (t.automation) {
-      if (!Array.isArray(t.automation) || t.automation.length > 64)
-        fail('Use up to 64 automation points.');
-      for (const p of t.automation)
+    function validateAutomationLane(points: any, target: AutomationTarget) {
+      if (
+        !Array.isArray(points) ||
+        points.length > MAX_AUTOMATION_POINTS_PER_LANE
+      )
+        fail(
+          `Use up to ${MAX_AUTOMATION_POINTS_PER_LANE} points in each automation lane.`,
+        );
+      const spec = AUTOMATION_SPECS[target],
+        times = new Set<number>();
+      for (const p of points) {
         if (
           !p ||
+          typeof p !== 'object' ||
           !Number.isFinite(p.time) ||
           p.time < 0 ||
           p.time > 300 ||
+          times.has(p.time) ||
           !Number.isFinite(p.value) ||
-          p.value < 0 ||
-          p.value > 1
+          p.value < spec.min ||
+          p.value > spec.max ||
+          (p.curve !== undefined && p.curve !== 'linear' && p.curve !== 'hold')
         )
-          fail('Invalid automation point.');
+          fail(`Invalid ${spec.label.toLowerCase()} automation point.`);
+        times.add(p.time);
+      }
+    }
+    if (t.automation !== undefined)
+      validateAutomationLane(t.automation, 'volume');
+    if (t.automationLanes !== undefined) {
+      if (
+        !t.automationLanes ||
+        typeof t.automationLanes !== 'object' ||
+        Array.isArray(t.automationLanes)
+      )
+        fail('Invalid automation lanes.');
+      const keys = Object.keys(t.automationLanes);
+      if (keys.some((key) => !AUTOMATION_TARGETS.includes(key as any)))
+        fail('Choose an available automation target.');
+      let total = 0;
+      for (const target of AUTOMATION_TARGETS)
+        if (Object.prototype.hasOwnProperty.call(t.automationLanes, target)) {
+          validateAutomationLane(t.automationLanes[target], target);
+          total += t.automationLanes[target].length;
+        }
+      if (total > MAX_AUTOMATION_POINTS_PER_TRACK)
+        fail(
+          `Use up to ${MAX_AUTOMATION_POINTS_PER_TRACK} automation points per track.`,
+        );
     }
     if (
       t.sequence &&

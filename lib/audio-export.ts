@@ -115,7 +115,7 @@ export async function renderExportTrack(
   scheduleClip(
     c,
     options.processing === 'dry'
-      ? { ...track, automation: [], pump: 0 }
+      ? { ...track, automation: [], automationLanes: {}, pump: 0 }
       : track,
     source,
     input,

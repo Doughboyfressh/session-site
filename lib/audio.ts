@@ -16,6 +16,21 @@ import {
 import { buildInsertFx, type DriveType, type ModType } from './effects';
 import { voiceFor } from './instruments';
 import { schedulePump } from './pump';
+import {
+  AUTOMATION_TARGETS,
+  activeAutomationTargets,
+  automationLane,
+  scheduleAutomation,
+  type AutomationLanes,
+  type AutomationTarget,
+} from './automation';
+export { automationAt } from './automation';
+export type {
+  AutomationCurve,
+  AutomationLanes,
+  AutomationPoint,
+  AutomationTarget,
+} from './automation';
 export type Note = {
   id: string;
   pitch: number;
@@ -23,7 +38,6 @@ export type Note = {
   length: number;
   velocity: number;
 };
-export type AutomationPoint = { time: number; value: number };
 export type MixerTrack = {
   id: string;
   name: string;
@@ -53,7 +67,8 @@ export type MixerTrack = {
   fadeStart?: number;
   fadeEnd?: number;
   splitFrom?: string;
-  automation?: AutomationPoint[];
+  automation?: import('./automation').AutomationPoint[];
+  automationLanes?: AutomationLanes;
   groupId?: GroupId;
   sendReverb?: number;
   sendDelay?: number;
@@ -485,6 +500,7 @@ export function channel(
   metering = false,
   bpm = 120,
 ) {
+  const automatedAtStart = new Set(activeAutomationTargets(t));
   const output = c.createGain();
   output.connect(dest);
   const meter = metering ? stereoMeter(c, output) : null;
@@ -520,8 +536,12 @@ export function channel(
       if (initial) param.setValueAtTime(value, c.currentTime);
       else param.setTargetAtTime(value, c.currentTime, smoothing);
     };
-    eqs.forEach((e, i) => set(e.gain, [next.low, next.mid, next.high][i] || 0));
-    set(pan.pan, next.pan);
+    eqs.forEach((e, i) => {
+      const target = (['low', 'mid', 'high'] as const)[i];
+      if (initial || !automatedAtStart.has(target))
+        set(e.gain, [next.low, next.mid, next.high][i] || 0);
+    });
+    if (initial || !automatedAtStart.has('pan')) set(pan.pan, next.pan);
     set(gain.gain, next.muted || (solo && !next.solo) ? 0 : next.volume);
     const enableCompression = Boolean(next.compression);
     if (enableCompression !== compressionEnabled) {
@@ -541,8 +561,10 @@ export function channel(
       ? -12 - (next.compression || 0) * 24
       : 0;
     compressor.ratio.value = next.compression ? 2 + next.compression * 8 : 1;
-    set(wet.gain, next.reverb || 0, 0.02);
-    set(echo.gain, next.delay || 0, 0.02);
+    if (initial || !automatedAtStart.has('reverb'))
+      set(wet.gain, next.reverb || 0, 0.02);
+    if (initial || !automatedAtStart.has('delay'))
+      set(echo.gain, next.delay || 0, 0.02);
     fx.update(next, set);
   };
   update(t, false, true);
@@ -550,6 +572,15 @@ export function channel(
     input,
     auto,
     bpm,
+    automation: {
+      volume: auto.gain,
+      pan: pan.pan,
+      low: eqs[0].gain,
+      mid: eqs[1].gain,
+      high: eqs[2].gain,
+      reverb: wet.gain,
+      delay: echo.gain,
+    } satisfies Record<AutomationTarget, AudioParam>,
     update,
     level: () => {
       return meter?.level() || 0;
@@ -690,21 +721,6 @@ export function routingGraph(
     },
   };
 }
-export function automationAt(points: AutomationPoint[], time: number) {
-  if (!points.length) return 1;
-  const sorted = [...points].sort((a, b) => a.time - b.time);
-  if (time <= sorted[0].time) return sorted[0].value;
-  for (let i = 1; i < sorted.length; i++)
-    if (time <= sorted[i].time) {
-      const a = sorted[i - 1],
-        b = sorted[i];
-      return (
-        a.value +
-        ((b.value - a.value) * (time - a.time)) / (b.time - a.time || 1)
-      );
-    }
-  return sorted.at(-1)!.value;
-}
 export function mixDuration(data: Arrangement) {
   return Math.min(
     300,
@@ -720,7 +736,12 @@ export function scheduleClip(
   c: BaseAudioContext,
   t: MixerTrack,
   b: AudioBuffer,
-  ch: { input: AudioNode; auto: GainNode; bpm?: number },
+  ch: {
+    input: AudioNode;
+    auto: GainNode;
+    bpm?: number;
+    automation?: Partial<Record<AutomationTarget, AudioParam>>;
+  },
   when: number,
   from: number,
   to: number,
@@ -781,21 +802,13 @@ export function scheduleClip(
       );
     }
   }
-  const points = (t.automation || []).slice().sort((a, b) => a.time - b.time);
-  ch.auto.gain.setValueAtTime(
-    automationAt(points, from),
-    when + automationDelay,
-  );
-  for (const p of points)
-    if (p.time > from && p.time <= to)
-      ch.auto.gain.linearRampToValueAtTime(
-        p.value,
-        when + automationDelay + p.time - from,
-      );
-  ch.auto.gain.linearRampToValueAtTime(
-    automationAt(points, to),
-    when + automationDelay + to - from,
-  );
+  for (const target of AUTOMATION_TARGETS) {
+    const points = automationLane(t, target);
+    const parameter =
+      ch.automation?.[target] || (target === 'volume' ? ch.auto.gain : null);
+    if (points.length && parameter)
+      scheduleAutomation(parameter, points, from, to, when, automationDelay);
+  }
   source.start(at, Math.max(0, t.trimStart + relative), dur);
   source.onended = () => {
     source.disconnect();
@@ -934,7 +947,11 @@ export async function playMix(
       if (!tr) continue;
       const n = scheduleClip(
         c,
-        tr,
+        {
+          ...tr,
+          automation: t.automation,
+          automationLanes: t.automationLanes,
+        },
         b,
         channels.get(t.id)!,
         next,

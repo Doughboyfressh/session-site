@@ -9,6 +9,7 @@ const suites = [
   'recording-upload',
   'loop-recording',
   'routing',
+  'automation',
   'clip-edit',
   'comp',
   'merge',

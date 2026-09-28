@@ -1,6 +1,7 @@
 'use client';
 import { Trash2 } from 'lucide-react';
 import type { MixerTrack } from '@/lib/audio';
+import { activeAutomationTargets } from '@/lib/automation';
 
 export default function ArrangementTimeline({
   tracks,
@@ -50,6 +51,7 @@ export default function ArrangementTimeline({
         </div>
         {tracks.map((track, index) => {
           const duration = track.duration || 20;
+          const automation = activeAutomationTargets(track);
           const visible = Math.max(
             0.01,
             duration - track.trimStart - track.trimEnd,
@@ -123,6 +125,14 @@ export default function ArrangementTimeline({
                   }}
                 >
                   <span>{track.name}</span>
+                  {!!automation.length && (
+                    <span
+                      className="clip-automation-badge"
+                      aria-label={`${automation.length} active automation ${automation.length === 1 ? 'lane' : 'lanes'}`}
+                    >
+                      AUTO · {automation.length}
+                    </span>
+                  )}
                   <svg
                     viewBox={`${(track.trimStart / duration) * 360} 0 ${(visible / duration) * 360} 40`}
                     preserveAspectRatio="none"

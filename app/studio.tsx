@@ -1785,7 +1785,26 @@ export default function Studio({
             <AutomationEditor
               track={focus}
               length={length}
-              onChange={(p) => focus && patch(focus.id, p)}
+              bpm={data.bpm}
+              position={position}
+              disabled={
+                !canEdit || recording || !!busy || !!exportSnapshot || gesturing
+              }
+              onGestureActivity={setNoteGesturing}
+              onChange={(p) => {
+                if (
+                  !editAllowed.current ||
+                  recording ||
+                  !!busy ||
+                  !!exportSnapshot ||
+                  gesturing ||
+                  !focus
+                )
+                  throw Error(
+                    'Automation editing is unavailable during this operation or with view-only access.',
+                  );
+                patch(focus.id, p);
+              }}
             />
           ) : (
             <div className="sequencer">

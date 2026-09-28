@@ -5,6 +5,7 @@ import {
   GROUP_IDS,
   type MixerRouting,
 } from './mixer-routing';
+import { AUTOMATION_TARGETS, type AutomationLanes } from './automation';
 
 export type ProjectSnapshot = { title: string; data: Arrangement };
 export type MergeChoice = 'local' | 'remote';
@@ -182,6 +183,27 @@ export function mergeProject(
       ].sort()) {
         if (geometry.includes(key) || (sampled && sourceKeys.includes(key)))
           continue;
+        if (key === 'automationLanes') {
+          const lanes: AutomationLanes = {};
+          for (const target of AUTOMATION_TARGETS) {
+            const present = [b, l, r].some((track) =>
+              Object.prototype.hasOwnProperty.call(
+                track.automationLanes || {},
+                target,
+              ),
+            );
+            if (!present) continue;
+            const value = pick(
+              b.automationLanes?.[target],
+              l.automationLanes?.[target],
+              r.automationLanes?.[target],
+              `${label} · ${target} automation`,
+            );
+            if (value !== undefined) lanes[target] = structuredClone(value);
+          }
+          if (Object.keys(lanes).length) merged.automationLanes = lanes;
+          continue;
+        }
         const value = pick(
           (b as any)[key],
           (l as any)[key],

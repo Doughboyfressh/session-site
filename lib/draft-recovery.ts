@@ -4,6 +4,11 @@ import { validCreation, type ProjectCreation } from './project-creation';
 import { cleanRouting, validateRouting } from './mixer-routing';
 import { sampleSettings } from './sample-instrument';
 import { SOUNDS } from './instruments';
+import {
+  AUTOMATION_TARGETS,
+  MAX_AUTOMATION_POINTS_PER_LANE,
+  MAX_AUTOMATION_POINTS_PER_TRACK,
+} from './automation';
 
 export const MAX_DRAFTS = 40;
 export const MAX_DRAFT_BYTES = 600 * 1024;
@@ -53,6 +58,7 @@ const fields = [
   'fadeEnd',
   'splitFrom',
   'automation',
+  'automationLanes',
   'groupId',
   'sendReverb',
   'sendDelay',
@@ -126,12 +132,51 @@ export function recoverySnapshot(value: any): DraftSnapshot {
         });
       }
       if (t.automation) {
-        if (!Array.isArray(t.automation) || t.automation.length > 64)
+        if (
+          !Array.isArray(t.automation) ||
+          t.automation.length > MAX_AUTOMATION_POINTS_PER_LANE
+        )
           throw new Error('Too many automation points.');
         t.automation = t.automation.map((p: any) => ({
           time: p?.time,
           value: p?.value,
+          ...(p?.curve === undefined ? {} : { curve: p.curve }),
         }));
+      }
+      if (t.automationLanes !== undefined) {
+        if (
+          !t.automationLanes ||
+          typeof t.automationLanes !== 'object' ||
+          Array.isArray(t.automationLanes) ||
+          Object.keys(t.automationLanes).some(
+            (key) => !AUTOMATION_TARGETS.includes(key as any),
+          )
+        )
+          throw new Error('Invalid automation lanes in draft.');
+        let total = 0;
+        t.automationLanes = Object.fromEntries(
+          AUTOMATION_TARGETS.filter((target) =>
+            Object.prototype.hasOwnProperty.call(t.automationLanes, target),
+          ).map((target) => {
+            const points = t.automationLanes[target];
+            if (
+              !Array.isArray(points) ||
+              points.length > MAX_AUTOMATION_POINTS_PER_LANE
+            )
+              throw new Error('Too many automation points in draft.');
+            total += points.length;
+            return [
+              target,
+              points.map((p: any) => ({
+                time: p?.time,
+                value: p?.value,
+                ...(p?.curve === undefined ? {} : { curve: p.curve }),
+              })),
+            ];
+          }),
+        );
+        if (total > MAX_AUTOMATION_POINTS_PER_TRACK)
+          throw new Error('Too many automation points in draft.');
       }
       return t;
     }),
