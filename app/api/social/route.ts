@@ -22,7 +22,19 @@ function changeCount(result: unknown) {
 
 function requestScope(sender: string, recipient: string, track: string | null) {
   if (track) return `track:${JSON.stringify([sender, recipient, track])}`;
-  return `profile:${JSON.stringify([sender, recipient].sort())}`;
+  const senderBytes = new TextEncoder().encode(sender);
+  const recipientBytes = new TextEncoder().encode(recipient);
+  let senderFirst = senderBytes.length <= recipientBytes.length;
+  for (
+    let index = 0;
+    index < Math.min(senderBytes.length, recipientBytes.length);
+    index++
+  ) {
+    if (senderBytes[index] === recipientBytes[index]) continue;
+    senderFirst = senderBytes[index] < recipientBytes[index];
+    break;
+  }
+  return `profile:${JSON.stringify(senderFirst ? [sender, recipient] : [recipient, sender])}`;
 }
 
 function responseError(error: unknown, fallback: string) {

@@ -195,6 +195,8 @@ for (const [id, username, name, visibility, avatar] of [
   ['migration-b', 'migration-b', 'Migration Producer', 'public', 'avatar-b'],
   ['migration-c', 'migration-c', 'Hidden Engineer', 'private', 'avatar-c'],
   ['migration-d', 'migration-d', 'Migration Engineer', 'public', 'avatar-d'],
+  ['migration-e', 'migration-e', 'Migration Writer', 'public', 'avatar-e'],
+  ['migration-f', 'migration-f', 'Migration Mixer', 'public', 'avatar-f'],
 ])
   migrationDb
     .prepare(
@@ -253,6 +255,33 @@ insertLegacyRequest.run(
   4,
   4,
 );
+insertLegacyRequest.run(
+  'migration-accepted-empty',
+  'migration-e',
+  'migration-f',
+  null,
+  'Engineer',
+  'Accepted conversation without messages',
+  'accepted',
+  5,
+  5,
+);
+insertLegacyRequest.run(
+  'migration-accepted-with-history',
+  'migration-f',
+  'migration-e',
+  null,
+  'Artist',
+  'Accepted conversation with messages',
+  'accepted',
+  6,
+  6,
+);
+migrationDb
+  .prepare(
+    "INSERT INTO direct_messages(id,request,sender,body,created,clientId) VALUES ('migration-message','migration-accepted-with-history','migration-f','Keep this history',7,'migration-client')",
+  )
+  .run();
 migrationDb.exec(
   fs.readFileSync(
     path.join(root, 'drizzle', '0008_freezing_rafael_vega.sql'),
@@ -274,10 +303,16 @@ const migratedTrack = migrationDb
     'SELECT scopeKey,trackTitle,senderName,recipientName FROM collaboration_requests WHERE id=?',
   )
   .get('migration-track-request');
-assert.equal(migratedProfile.status, 'pending');
+const migratedAcceptedEmpty = migrationDb
+  .prepare('SELECT status FROM collaboration_requests WHERE id=?')
+  .get('migration-accepted-empty');
+const migratedAcceptedWithHistory = migrationDb
+  .prepare('SELECT status FROM collaboration_requests WHERE id=?')
+  .get('migration-accepted-with-history');
+assert.equal(migratedProfile.status, 'closed');
 assert.equal(migratedProfile.scopeKey, migratedReverse.scopeKey);
-assert.equal(migratedReverse.status, 'closed');
-assert.match(migratedReverse.operationId, /^migration-scope-dedupe:/);
+assert.equal(migratedReverse.status, 'accepted');
+assert.equal(migratedReverse.operationId, null);
 assert.deepEqual(
   [
     migratedProfile.senderName,
@@ -296,7 +331,16 @@ assert.deepEqual(
   'migration preserves public history while keeping private profiles generic',
 );
 assert.match(migratedTrack.scopeKey, /^track:/);
-checks += 7;
+assert.equal(migratedAcceptedEmpty.status, 'closed');
+assert.equal(migratedAcceptedWithHistory.status, 'accepted');
+assert.equal(
+  migrationDb
+    .prepare('SELECT COUNT(*) AS count FROM direct_messages WHERE request=?')
+    .get('migration-accepted-with-history').count,
+  1,
+  'migration keeps the accepted duplicate that owns message history',
+);
+checks += 10;
 migrationDb.close();
 
 async function act(userId, body, status = 200) {

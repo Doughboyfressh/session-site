@@ -27,14 +27,16 @@ SET
 UPDATE `collaboration_requests`
 SET `status` = 'closed', `operationId` = 'migration-scope-dedupe:' || `id`
 WHERE `status` IN ('pending', 'accepted')
-	AND EXISTS (
-		SELECT 1
+	AND `id` != (
+		SELECT `keeper`.`id`
 		FROM `collaboration_requests` AS `keeper`
 		WHERE `keeper`.`scopeKey` = `collaboration_requests`.`scopeKey`
 			AND `keeper`.`status` IN ('pending', 'accepted')
-			AND (
-				`keeper`.`created` < `collaboration_requests`.`created`
-				OR (`keeper`.`created` = `collaboration_requests`.`created` AND `keeper`.`id` < `collaboration_requests`.`id`)
-			)
+		ORDER BY
+			CASE WHEN `keeper`.`status` = 'accepted' THEN 0 ELSE 1 END,
+			CASE WHEN EXISTS (SELECT 1 FROM `direct_messages` AS `message` WHERE `message`.`request` = `keeper`.`id`) THEN 0 ELSE 1 END,
+			`keeper`.`created`,
+			`keeper`.`id`
+		LIMIT 1
 	);--> statement-breakpoint
 CREATE UNIQUE INDEX `idx_collaboration_active_scope_unique` ON `collaboration_requests` (`scopeKey`) WHERE "collaboration_requests"."status" IN ('pending','accepted');
