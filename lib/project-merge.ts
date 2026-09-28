@@ -10,6 +10,12 @@ import {
   automationLane,
   type AutomationLanes,
 } from './automation';
+import {
+  MAX_CLIPS_PER_PROJECT,
+  MAX_CLIPS_PER_TRACK,
+  playlistClipCount,
+  playlistClips,
+} from './playlist-clips';
 
 export type ProjectSnapshot = { title: string; data: Arrangement };
 export type MergeChoice = 'local' | 'remote';
@@ -366,11 +372,25 @@ export function mergeProject(
   }
   // A union can exceed the server limit even when both input projects are valid.
   const tooManyTracks = project.data.tracks.length > 48;
+  const overfullChannel = project.data.tracks.find(
+    (track) => playlistClips(track).length > MAX_CLIPS_PER_TRACK,
+  );
+  const tooManyProjectClips =
+    playlistClipCount(project.data) > MAX_CLIPS_PER_PROJECT;
   const tooLarge =
     JSON.stringify(project.data).length > 250000 ||
     new TextEncoder().encode(JSON.stringify(project)).length > 290000;
-  const overflow = tooManyTracks || tooLarge;
+  const overflow =
+    tooManyTracks || !!overfullChannel || tooManyProjectClips || tooLarge;
   if (tooManyTracks) conflicts.push('Combined project exceeds 48 tracks');
+  if (overfullChannel)
+    conflicts.push(
+      `${overfullChannel.name} exceeds ${MAX_CLIPS_PER_TRACK} clips after merge`,
+    );
+  if (tooManyProjectClips)
+    conflicts.push(
+      `Combined project exceeds ${MAX_CLIPS_PER_PROJECT} playlist clips`,
+    );
   if (tooLarge)
     conflicts.push('Combined arrangement exceeds the save size limit');
   return { project, conflicts: [...new Set(conflicts)], details, overflow };

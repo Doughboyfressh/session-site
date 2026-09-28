@@ -67,6 +67,20 @@ function App() {
       return max;
     };
     try {
+      const picker = document.querySelector(
+        'select[aria-label="Selected clip placement"]',
+      ) as HTMLSelectElement | null;
+      check(!!picker, 'The deterministic clip picker is missing.');
+      check(
+        [...(picker?.options || [])].map((option) => option.value).join(',') ===
+          '$primary,verse-repeat',
+        'The clip picker does not expose every placement.',
+      );
+      const firstClip = document.querySelector<HTMLElement>('.wave-clip');
+      check(
+        !!firstClip && parseFloat(getComputedStyle(firstClip).minWidth) >= 24,
+        'Timeline clips do not have a usable minimum pointer target.',
+      );
       for (const sr of [44100, 48000]) {
         const factory = new OfflineAudioContext(2, sr * 6, sr),
           source = factory.createBuffer(2, sr * 4, sr);

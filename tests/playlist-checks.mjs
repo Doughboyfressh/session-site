@@ -256,6 +256,73 @@ equal(
   ['local-clip', 'remote-clip'],
 );
 
+const placement = (id) => ({
+  id,
+  name: id,
+  offset: 0,
+  trimStart: 1,
+  trimEnd: 1,
+});
+const channelLimitBase = snapshot(arrangement(track({ clips: [] })));
+const channelLimitLocal = snapshot(
+  arrangement(
+    track({
+      clips: Array.from({ length: 20 }, (_, index) =>
+        placement(`local-limit-${index}`),
+      ),
+    }),
+  ),
+);
+const channelLimitRemote = snapshot(
+  arrangement(
+    track({
+      clips: Array.from({ length: 20 }, (_, index) =>
+        placement(`remote-limit-${index}`),
+      ),
+    }),
+  ),
+);
+validateArrangement(channelLimitLocal.data);
+validateArrangement(channelLimitRemote.data);
+checks += 2;
+const channelOverflow = mergeProject(
+  channelLimitBase,
+  channelLimitLocal,
+  channelLimitRemote,
+);
+ok(channelOverflow.overflow);
+ok(channelOverflow.conflicts.some((label) => label.includes('32 clips')));
+equal(playlistClipCount(channelOverflow.project.data), 41);
+
+const totalLimitBase = {
+  bpm: 120,
+  tracks: Array.from({ length: 9 }, (_, row) =>
+    track({ id: `total-channel-${row}`, clips: [] }),
+  ),
+};
+const totalLimitBranch = (prefix) => ({
+  ...totalLimitBase,
+  tracks: totalLimitBase.tracks.map((item, row) => ({
+    ...item,
+    clips: Array.from({ length: 14 }, (_, column) =>
+      placement(`${prefix}-${row}-${column}`),
+    ),
+  })),
+});
+const totalLimitLocal = totalLimitBranch('local-total');
+const totalLimitRemote = totalLimitBranch('remote-total');
+validateArrangement(totalLimitLocal);
+validateArrangement(totalLimitRemote);
+checks += 2;
+const totalOverflow = mergeProject(
+  snapshot(totalLimitBase),
+  snapshot(totalLimitLocal),
+  snapshot(totalLimitRemote),
+);
+ok(totalOverflow.overflow);
+ok(totalOverflow.conflicts.some((label) => label.includes('256 playlist clips')));
+equal(playlistClipCount(totalOverflow.project.data), 261);
+
 const placedBase = snapshot(
   duplicatePlaylistClip(base, 'channel-a', PRIMARY_CLIP_ID, 'shared-clip'),
 );

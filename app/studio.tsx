@@ -62,10 +62,13 @@ import ChannelFx from './channel-fx';
 import { routingFor } from '@/lib/mixer-routing';
 import { gridSeconds, snapTime, type ClipGrid } from '@/lib/clip-edit';
 import {
+  MAX_CLIPS_PER_PROJECT,
+  MAX_CLIPS_PER_TRACK,
   PRIMARY_CLIP_ID,
   duplicatePlaylistClip,
   movePlaylistClip,
   patchPlaylistClip,
+  playlistClipCount,
   playlistClips,
   playlistTrackEnd,
   removePlaylistClip,
@@ -930,10 +933,12 @@ export default function Studio({
     }
   }
   const focus = data.tracks.find((t) => t.id === selected) || data.tracks[0];
-  const focusedClip = focus
-    ? playlistClips(focus).find((clip) => clip.id === selectedClip) ||
-      playlistClips(focus)[0]
-    : undefined;
+  const focusClips = focus ? playlistClips(focus) : [];
+  const focusedClip =
+    focusClips.find((clip) => clip.id === selectedClip) || focusClips[0];
+  const clipCapacityReached =
+    focusClips.length >= MAX_CLIPS_PER_TRACK ||
+    playlistClipCount(data) >= MAX_CLIPS_PER_PROJECT;
   const pianoLocked =
     playing || recording || !!busy || !!exportSnapshot || gesturing;
   const structuralLocked = pianoLocked || noteGesturing;
@@ -1321,7 +1326,8 @@ export default function Studio({
                 disabled={
                   !canEdit ||
                   !focus?.duration ||
-                  data.tracks.length >= 48 ||
+                  !focusedClip ||
+                  clipCapacityReached ||
                   structuralLocked
                 }
                 onClick={duplicate}
@@ -1482,6 +1488,29 @@ export default function Studio({
                     <option value={8}>8×</option>
                   </select>
                 </label>
+                <label className="clip-picker-field">
+                  Clip{' '}
+                  <select
+                    aria-label="Selected clip placement"
+                    value={focusedClip?.id || ''}
+                    disabled={!focusedClip || structuralLocked}
+                    onChange={(event) => {
+                      const clip = focusClips.find(
+                        (item) => item.id === event.target.value,
+                      );
+                      if (!clip) return;
+                      setSelectedClip(clip.id);
+                      setPosition(clip.offset);
+                    }}
+                  >
+                    {focusClips.map((clip, index) => (
+                      <option key={clip.id} value={clip.id}>
+                        {index + 1}. {clip.name || focus?.name} ·{' '}
+                        {Number(clip.offset.toFixed(3))}s
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="clip-name-field">
                   Clip name{' '}
                   <input
@@ -1536,6 +1565,7 @@ export default function Studio({
                     !canEdit ||
                     !focus?.duration ||
                     !focusedClip ||
+                    clipCapacityReached ||
                     structuralLocked
                   }
                   onClick={split}
@@ -1548,6 +1578,7 @@ export default function Studio({
                     !canEdit ||
                     !focus?.duration ||
                     !focusedClip ||
+                    clipCapacityReached ||
                     structuralLocked
                   }
                   onClick={duplicate}
@@ -1575,6 +1606,7 @@ export default function Studio({
                     !canEdit ||
                     !focus?.duration ||
                     !focusedClip ||
+                    clipCapacityReached ||
                     structuralLocked
                   }
                   onClick={repeatSelected}
@@ -1595,9 +1627,10 @@ export default function Studio({
                 </button>
               </div>
               <p>
-                Select a clip block to edit it. Duplicates, splits, and repeats
-                reuse the same source and mixer channel. Timing and fades belong
-                to each clip; effects and automation stay on the channel.
+                Select a block or use the Clip menu to reach short and stacked
+                clips. Duplicates, splits, and repeats reuse the same source and
+                mixer channel. Timing and fades belong to each clip; effects and
+                automation stay on the channel.
               </p>
             </div>
           )}
