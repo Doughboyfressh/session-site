@@ -19,9 +19,11 @@ import { schedulePump } from './pump';
 import {
   AUTOMATION_TARGETS,
   activeAutomationTargets,
+  automationDelayFor,
   automationLane,
   scheduleAutomation,
   type AutomationLanes,
+  type AutomationScheduleDelay,
   type AutomationTarget,
 } from './automation';
 export { automationAt } from './automation';
@@ -745,7 +747,7 @@ export function scheduleClip(
   when: number,
   from: number,
   to: number,
-  automationDelay = 0,
+  automationDelay: AutomationScheduleDelay = 0,
 ) {
   const end = t.offset + b.duration - t.trimStart - t.trimEnd;
   // Shared boundaries land on the same output sample. Fractional start times
@@ -807,7 +809,14 @@ export function scheduleClip(
     const parameter =
       ch.automation?.[target] || (target === 'volume' ? ch.auto.gain : null);
     if (points.length && parameter)
-      scheduleAutomation(parameter, points, from, to, when, automationDelay);
+      scheduleAutomation(
+        parameter,
+        points,
+        from,
+        to,
+        when,
+        automationDelayFor(automationDelay, target),
+      );
   }
   source.start(at, Math.max(0, t.trimStart + relative), dur);
   source.onended = () => {
@@ -918,8 +927,8 @@ export async function playMix(
         (c.currentTime + Math.max(0.08, options.startDelay || 0)) *
           c.sampleRate,
       ) / c.sampleRate,
-    currentFrom = options.allowPastEnd ? from : Math.min(from, end - 0.01),
-    firstWhen = next;
+    currentFrom = options.allowPastEnd ? from : Math.min(from, end - 0.01);
+  const firstWhen = next;
   const initialFrom = currentFrom;
   let latest = data;
   function schedule() {
@@ -1165,8 +1174,8 @@ export function midiFile(notes: Note[], bpm: number) {
     ];
   let last = 0;
   for (const e of events) {
-    let n = e.tick - last,
-      vl = [n & 127];
+    let n = e.tick - last;
+    const vl = [n & 127];
     while ((n >>= 7)) vl.unshift((n & 127) | 128);
     track.push(...vl, ...e.bytes);
     last = e.tick;

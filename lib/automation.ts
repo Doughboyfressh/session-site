@@ -18,6 +18,9 @@ export type AutomationPoint = {
 export type AutomationLanes = Partial<
   Record<AutomationTarget, AutomationPoint[]>
 >;
+export type AutomationScheduleDelay =
+  | number
+  | Partial<Record<AutomationTarget, number>>;
 
 export type AutomationTrack = {
   automation?: AutomationPoint[];
@@ -189,6 +192,14 @@ export function scheduleAutomation(
   const endValue = automationAt(sorted, to);
   if (previous.curve === 'hold') parameter.setValueAtTime(endValue, endTime);
   else parameter.linearRampToValueAtTime(endValue, endTime);
+}
+
+export function automationDelayFor(
+  delay: AutomationScheduleDelay,
+  target: AutomationTarget,
+) {
+  const value = typeof delay === 'number' ? delay : delay[target] || 0;
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
 export function clampAutomationValue(target: AutomationTarget, value: number) {

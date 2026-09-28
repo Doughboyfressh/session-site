@@ -153,7 +153,12 @@ export function recoverySnapshot(value: any): DraftSnapshot {
           )
         )
           throw new Error('Invalid automation lanes in draft.');
-        let total = 0;
+        let total = Object.prototype.hasOwnProperty.call(
+          t.automationLanes,
+          'volume',
+        )
+          ? 0
+          : t.automation?.length || 0;
         t.automationLanes = Object.fromEntries(
           AUTOMATION_TARGETS.filter((target) =>
             Object.prototype.hasOwnProperty.call(t.automationLanes, target),

@@ -5,7 +5,11 @@ import {
   GROUP_IDS,
   type MixerRouting,
 } from './mixer-routing';
-import { AUTOMATION_TARGETS, type AutomationLanes } from './automation';
+import {
+  AUTOMATION_TARGETS,
+  automationLane,
+  type AutomationLanes,
+} from './automation';
 
 export type ProjectSnapshot = { title: string; data: Arrangement };
 export type MergeChoice = 'local' | 'remote';
@@ -152,6 +156,12 @@ export function mergeProject(
     const label = (l || r || b)!.name;
     let merged: MixerTrack | undefined;
     if (b && l && r) {
+      const volumeLanePresent = [b, l, r].some((track) =>
+        Object.prototype.hasOwnProperty.call(
+          track.automationLanes || {},
+          'volume',
+        ),
+      );
       merged = {
         id,
         ...structuredClone(
@@ -183,6 +193,7 @@ export function mergeProject(
       ].sort()) {
         if (geometry.includes(key) || (sampled && sourceKeys.includes(key)))
           continue;
+        if (key === 'automation' && volumeLanePresent) continue;
         if (key === 'automationLanes') {
           const lanes: AutomationLanes = {};
           for (const target of AUTOMATION_TARGETS) {
@@ -194,9 +205,15 @@ export function mergeProject(
             );
             if (!present) continue;
             const value = pick(
-              b.automationLanes?.[target],
-              l.automationLanes?.[target],
-              r.automationLanes?.[target],
+              target === 'volume' && volumeLanePresent
+                ? automationLane(b, target)
+                : b.automationLanes?.[target],
+              target === 'volume' && volumeLanePresent
+                ? automationLane(l, target)
+                : l.automationLanes?.[target],
+              target === 'volume' && volumeLanePresent
+                ? automationLane(r, target)
+                : r.automationLanes?.[target],
               `${label} · ${target} automation`,
             );
             if (value !== undefined) lanes[target] = structuredClone(value);

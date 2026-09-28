@@ -551,7 +551,7 @@
 .automation-graph {
   display: block;
   min-height: 230px;
-  touch-action: none;
+  touch-action: pan-x pan-y;
   user-select: none;
 }
 .automation-graph-scroll {
@@ -596,6 +596,7 @@
   stroke-width: 2;
   cursor: grab;
   outline: none;
+  touch-action: none;
 }
 .automation-point.hold {
   fill: #76d8e6;

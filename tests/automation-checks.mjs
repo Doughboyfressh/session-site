@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { loadTS } from './load-ts.mjs';
 
 const automation = loadTS('lib/automation.ts');
+const { automationDelaysForExport } = loadTS('lib/audio-export.ts');
+const { scheduleClip } = loadTS('lib/audio.ts');
 const { validateArrangement } = loadTS('lib/arrangement-validation.ts');
 const { recoverySnapshot } = loadTS('lib/draft-recovery.ts');
 const { mergeProject } = loadTS('lib/project-merge.ts');
@@ -12,6 +14,7 @@ const {
   MAX_AUTOMATION_POINTS_PER_TRACK,
   activeAutomationTargets,
   automationAt,
+  automationDelayFor,
   automationLane,
   automationPointCount,
   clampAutomationValue,
@@ -148,6 +151,86 @@ equal(events, [
   ['set', 0.5, 9],
 ]);
 
+const exportDelays = automationDelaysForExport(0.0125);
+for (const target of ['low', 'mid', 'high'])
+  assert.equal(automationDelayFor(exportDelays, target), 0);
+for (const target of ['volume', 'pan', 'reverb', 'delay'])
+  assert.equal(automationDelayFor(exportDelays, target), 0.0125);
+assert.equal(automationDelayFor(0.25, 'low'), 0.25);
+assert.equal(automationDelayFor({ volume: Number.NaN }, 'volume'), 0);
+checks += 9;
+
+const parameterEvents = () => {
+  const events = [];
+  return {
+    events,
+    value: 1,
+    setValueAtTime(value, time) {
+      events.push(['set', value, time]);
+    },
+    linearRampToValueAtTime(value, time) {
+      events.push(['linear', value, time]);
+    },
+  };
+};
+const passthrough = () => ({
+  gain: parameterEvents(),
+  connect(next) {
+    return next;
+  },
+  disconnect() {},
+});
+const scheduled = [];
+const context = {
+  sampleRate: 1000,
+  createGain: passthrough,
+  createBufferSource() {
+    return {
+      buffer: null,
+      onended: null,
+      connect(next) {
+        return next;
+      },
+      disconnect() {},
+      start(...args) {
+        scheduled.push(args);
+      },
+    };
+  },
+};
+const volumeParameter = parameterEvents();
+const lowParameter = parameterEvents();
+scheduleClip(
+  context,
+  track({
+    automationLanes: {
+      volume: [
+        { time: 0, value: 0.5 },
+        { time: 0.5, value: 1 },
+      ],
+      low: [
+        { time: 0, value: -6 },
+        { time: 0.5, value: 6 },
+      ],
+    },
+  }),
+  { duration: 1 },
+  {
+    input: passthrough(),
+    auto: { gain: volumeParameter },
+    automation: { volume: volumeParameter, low: lowParameter },
+  },
+  0,
+  0,
+  1,
+  exportDelays,
+);
+equal(lowParameter.events[0], ['set', -6, 0]);
+equal(lowParameter.events[1], ['linear', 6, 0.5]);
+equal(volumeParameter.events[0], ['set', 0.5, 0.0125]);
+equal(volumeParameter.events[1], ['linear', 1, 0.5125]);
+equal(scheduled, [[0, 0, 1]]);
+
 assert.equal(clampAutomationValue('pan', 3), 1);
 assert.equal(clampAutomationValue('mid', -4.26), -4.3);
 assert.equal(formatAutomationValue('pan', -0.42), '42 L');
@@ -214,6 +297,29 @@ rejects(
     }),
   /per track/i,
 );
+const hybridOverTrackLimit = {
+  automation: Array.from({ length: 64 }, (_, index) => ({
+    time: index,
+    value: 1,
+  })),
+  automationLanes: Object.fromEntries(
+    AUTOMATION_TARGETS.filter((target) => target !== 'volume').map((target) => [
+      target,
+      Array.from({ length: 33 }, (_, index) => ({
+        time: index,
+        value: AUTOMATION_SPECS[target].min,
+      })),
+    ]),
+  ),
+};
+rejects(
+  () =>
+    validateArrangement({
+      bpm: 120,
+      tracks: [track(hybridOverTrackLimit)],
+    }),
+  /per track/i,
+);
 for (const automationLanes of [
   { pan: [{ time: 0, value: 2 }] },
   {
@@ -272,6 +378,14 @@ rejects(
     }),
   /too many automation points/i,
 );
+rejects(
+  () =>
+    recoverySnapshot({
+      title: 'Oversized hybrid recovery',
+      data: { bpm: 120, tracks: [track(hybridOverTrackLimit)] },
+    }),
+  /too many automation points/i,
+);
 
 const base = project();
 const local = structuredClone(base);
@@ -301,6 +415,25 @@ const conflict = mergeProject(base, competingLocal, competingRemote);
 equal(conflict.conflicts, ['Lead vocal · mid automation']);
 equal(conflict.details[0].local, [{ time: 0, value: -2 }]);
 equal(conflict.details[0].remote, [{ time: 0, value: 3 }]);
+
+const legacyBase = project(track({ automation: [{ time: 0, value: 0.5 }] }));
+const migratedLocal = structuredClone(legacyBase);
+const legacyRemote = structuredClone(legacyBase);
+migratedLocal.data.tracks[0].automation = undefined;
+migratedLocal.data.tracks[0].automationLanes = {
+  volume: [{ time: 0, value: 0.8 }],
+};
+legacyRemote.data.tracks[0].automation = [{ time: 0, value: 0.2 }];
+const migrationConflict = mergeProject(legacyBase, migratedLocal, legacyRemote);
+equal(migrationConflict.conflicts, ['Lead vocal · volume automation']);
+equal(migrationConflict.project.data.tracks[0].automationLanes, {
+  volume: [{ time: 0, value: 0.8 }],
+});
+equal(
+  mergeProject(legacyBase, migratedLocal, legacyRemote, 'remote').project.data
+    .tracks[0].automationLanes,
+  { volume: [{ time: 0, value: 0.2 }] },
+);
 
 console.log(
   `PASS: ${checks} multi-lane automation engine, validation, recovery and merge assertions.`,

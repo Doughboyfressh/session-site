@@ -136,13 +136,24 @@ export default function AutomationEditor({
   }
 
   function patchLane(next: AutomationPoint[]) {
-    if (disabled) return;
-    onChange({
-      automationLanes: {
-        ...currentTrack.automationLanes,
-        [target]: sortedAutomation(next),
-      },
-    });
+    if (disabled) return false;
+    try {
+      onChange({
+        ...(target === 'volume' ? { automation: undefined } : {}),
+        automationLanes: {
+          ...currentTrack.automationLanes,
+          [target]: sortedAutomation(next),
+        },
+      });
+      return true;
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'Automation could not be changed.',
+      );
+      return false;
+    }
   }
 
   function selectPoint(point: AutomationPoint) {
@@ -178,12 +189,16 @@ export default function AutomationEditor({
         candidate.time !== replacedTime && candidate.time !== point.time,
     );
     next.push(point);
-    patchLane(next);
-    selectPoint(point);
+    if (patchLane(next)) selectPoint(point);
   }
 
   function removePoint(point: AutomationPoint) {
-    patchLane(savedPoints.filter((candidate) => candidate.time !== point.time));
+    if (
+      !patchLane(
+        savedPoints.filter((candidate) => candidate.time !== point.time),
+      )
+    )
+      return;
     if (selectedTime === point.time) setSelectedTime(null);
     setMessage('Point removed.');
   }
@@ -244,13 +259,23 @@ export default function AutomationEditor({
     const pending = drag;
     setDrag(null);
     onGestureActivity?.(false);
+    if (!commit) {
+      if (
+        pending.trackId === currentTrack.id &&
+        pending.target === target &&
+        pending.source[pending.sourceIndex]
+      ) {
+        selectPoint(pending.source[pending.sourceIndex]);
+        setMessage('Automation gesture canceled.');
+      }
+      return;
+    }
     if (
-      commit &&
       pending.trackId === currentTrack.id &&
       pending.target === target
     ) {
-      patchLane(pending.points);
-      setMessage('Automation gesture saved as one edit.');
+      if (patchLane(pending.points))
+        setMessage('Automation gesture saved as one edit.');
     }
   }
 
@@ -319,9 +344,10 @@ export default function AutomationEditor({
             }
             onClick={() => {
               if (!clipboard || clipboard.target !== target) return;
-              patchLane(structuredClone(clipboard.points));
-              setSelectedTime(null);
-              setMessage(`${spec.label} lane pasted.`);
+              if (patchLane(structuredClone(clipboard.points))) {
+                setSelectedTime(null);
+                setMessage(`${spec.label} lane pasted.`);
+              }
             }}
           >
             <ClipboardPaste size={14} /> Paste lane
@@ -330,9 +356,10 @@ export default function AutomationEditor({
             className="button secondary"
             disabled={disabled || !savedPoints.length}
             onClick={() => {
-              patchLane([]);
-              setSelectedTime(null);
-              setMessage(`${spec.label} lane cleared.`);
+              if (patchLane([])) {
+                setSelectedTime(null);
+                setMessage(`${spec.label} lane cleared.`);
+              }
             }}
           >
             <Trash2 size={14} /> Clear lane
@@ -406,7 +433,7 @@ export default function AutomationEditor({
             width={plot.right - plot.left}
             height={plot.bottom - plot.top}
             className="automation-hitbox"
-            onPointerDown={(event) => {
+            onClick={(event) => {
               if (disabled) return;
               const point = {
                 ...graphPoint(event.clientX, event.clientY),

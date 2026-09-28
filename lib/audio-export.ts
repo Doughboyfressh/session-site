@@ -21,6 +21,10 @@ import {
   MASTER_PRESET_IDS,
   type MasterPreset,
 } from './mastering';
+import type {
+  AutomationScheduleDelay,
+  AutomationTarget,
+} from './automation';
 
 export type ExportOptions = {
   kind: 'mix' | 'tracks';
@@ -41,6 +45,22 @@ export type ExportProgress = {
 };
 import { compressorLatency } from './audio-latency';
 export { compressorLatency } from './audio-latency';
+export function automationDelaysForExport(
+  downstreamDelay: number,
+): AutomationScheduleDelay {
+  const delay = Number.isFinite(downstreamDelay)
+    ? Math.max(0, downstreamDelay)
+    : 0;
+  return {
+    low: 0,
+    mid: 0,
+    high: 0,
+    volume: delay,
+    pan: delay,
+    reverb: delay,
+    delay,
+  } satisfies Record<AutomationTarget, number>;
+}
 export function exportEnd(t: MixerTrack, duration: number) {
   const end = t.offset + duration - t.trimStart - t.trimEnd;
   if (
@@ -122,7 +142,7 @@ export async function renderExportTrack(
     0,
     0,
     frames / options.sampleRate,
-    latency / options.sampleRate,
+    automationDelaysForExport(latency / options.sampleRate),
   );
   try {
     // Offline rendering cannot be stopped reliably. Wait for it before permitting a replacement export.
