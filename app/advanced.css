@@ -831,3 +831,188 @@
     text-align: left;
   }
 }
+
+/* Drum pattern sequencer */
+.drum-editor {
+  padding: 25px;
+  background: #1a2614;
+  border: 1px solid #3b502e;
+  border-radius: 10px;
+  min-width: 0;
+}
+.drum-editor .section-title {
+  align-items: start;
+  gap: 20px;
+  margin: 0 0 20px;
+}
+.drum-editor .section-title h2 {
+  font-size: 23px;
+}
+.drum-editor .section-title p {
+  font-size: 13px;
+  margin-top: 8px;
+}
+.drum-legacy-note {
+  display: block;
+  margin: 0 0 16px;
+  padding: 11px 14px;
+  border: 1px solid #61552c;
+  border-radius: 7px;
+  background: #2b2415;
+  color: #d9c987;
+  font-size: 13px;
+}
+.drum-settings {
+  display: flex;
+  align-items: end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 0 0 20px;
+}
+.drum-settings .field {
+  margin: 0;
+  min-width: 150px;
+  flex: 1;
+  max-width: 230px;
+}
+.drum-settings select {
+  width: 100%;
+  background: #152010;
+  border: 1px solid #455a35;
+  border-radius: 5px;
+  padding: 9px 10px;
+  color: #ecf0e8;
+  font-size: 14px;
+}
+.drum-swing input {
+  accent-color: var(--primary);
+}
+.drum-draft-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.drum-grid-scroll {
+  overflow-x: auto;
+  padding-bottom: 8px;
+  border-radius: 8px;
+}
+.drum-grid {
+  display: grid;
+  grid-template-columns: 92px repeat(var(--drum-steps), minmax(30px, 1fr));
+  gap: 6px;
+  min-width: max-content;
+}
+.drum-grid-corner {
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: #95ad80;
+  align-self: end;
+  padding-bottom: 4px;
+}
+.drum-step-number {
+  font-size: 10px;
+  color: #81996b;
+  text-align: center;
+  align-self: end;
+  padding-bottom: 4px;
+}
+.drum-step-number.beat {
+  color: #c2f65a;
+  font-weight: 700;
+}
+.drum-grid-row {
+  display: contents;
+}
+.drum-grid-row > strong {
+  font-size: 12px;
+  font-weight: 500;
+  color: #b6cba2;
+  align-self: center;
+}
+.drum-step {
+  height: 42px;
+  background: #2b3e20;
+  border: 1px solid #496534;
+  border-radius: 4px;
+  color: #14200d;
+  font-size: 9px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.drum-step.beat {
+  border-left: 2px solid #8eaa76;
+}
+.drum-step.enabled {
+  background: #b6e879;
+  border-color: #c7f892;
+}
+.drum-step.accented {
+  background: #d8ff9a;
+  box-shadow: 0 0 9px #a2e16833;
+}
+.drum-grid-row:nth-of-type(6) .drum-step.enabled {
+  background: #81c6cf;
+  border-color: #89dce7;
+}
+.drum-grid-row:nth-of-type(7) .drum-step.enabled {
+  background: #d3b8f0;
+  border-color: #dfc9f5;
+}
+.drum-step.playing {
+  box-shadow: 0 0 0 2px var(--primary);
+}
+.drum-step.selected {
+  outline: 2px dashed #e9ffc4;
+  outline-offset: 1px;
+}
+.drum-velocity-editor {
+  display: flex;
+  align-items: start;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #35472b;
+}
+.drum-velocity-editor .field {
+  margin: 0;
+  min-width: 240px;
+  flex: 1;
+  max-width: 420px;
+}
+.drum-velocity-editor input {
+  accent-color: var(--primary);
+}
+.drum-velocity-editor p {
+  flex: 1;
+  min-width: 220px;
+  margin: 6px 0 0;
+  color: #8fa57c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+@media (max-width: 700px) {
+  .drum-editor {
+    padding: 18px 14px;
+  }
+  .drum-grid {
+    grid-template-columns: 76px repeat(var(--drum-steps), minmax(26px, 1fr));
+    gap: 4px;
+  }
+  .drum-step {
+    height: 38px;
+  }
+  .drum-draft-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+  .drum-draft-actions .button {
+    flex: 1 1 110px;
+    justify-content: center;
+  }
+}

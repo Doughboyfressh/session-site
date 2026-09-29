@@ -12,6 +12,7 @@ const suites = [
   'automation',
   'clip-edit',
   'playlist',
+  'drum-pattern',
   'comp',
   'merge',
   'note-edit',

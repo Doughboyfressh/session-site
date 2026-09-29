@@ -178,6 +178,7 @@ export function validateBank(value: unknown): BankData {
       target.sample ||
       target.notes ||
       target.sequence ||
+      target.drumPattern ||
       target.demo ||
       target.trimStart ||
       target.trimEnd ||

@@ -1,6 +1,7 @@
 import { GROUP_IDS, validateRouting } from './mixer-routing';
 import { sampleSettings } from './sample-instrument';
 import { SOUNDS } from './instruments';
+import { validateDrumPattern } from './drum-pattern';
 import {
   AUTOMATION_SPECS,
   AUTOMATION_TARGETS,
@@ -101,7 +102,8 @@ export function validateArrangement(d: any, draft = false) {
         t.fileId.length > 128 ||
         !Array.isArray(t.notes) ||
         t.demo ||
-        t.sequence
+        t.sequence ||
+        t.drumPattern
       )
         fail('A sampled instrument needs one audio file and a note sequence.');
       try {
@@ -112,6 +114,22 @@ export function validateArrangement(d: any, draft = false) {
     }
     if (t.fileId && t.notes && !t.sample)
       fail('Choose a sample instrument before combining audio and notes.');
+    if (t.drumPattern !== undefined) {
+      if (
+        t.fileId ||
+        t.sample ||
+        t.notes ||
+        t.demo ||
+        t.sequence ||
+        t.sound
+      )
+        fail('Choose one source for this drum channel.');
+      try {
+        validateDrumPattern(t.drumPattern);
+      } catch (e) {
+        fail((e as Error).message);
+      }
+    }
     if (t.groupId !== undefined && !GROUP_IDS.includes(t.groupId))
       fail('Choose an available mixer group or Main.');
     if (

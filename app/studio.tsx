@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import PianoRoll, { AutomationEditor } from './piano-roll';
+import DrumSequencer from './drum-sequencer';
 import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
@@ -25,7 +26,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { defaultPattern, type Track } from '@/lib/catalog';
+import type { Track } from '@/lib/catalog';
 import {
   context,
   trackFrom,
@@ -76,6 +77,7 @@ import {
   splitPlaylistClip,
   trimPlaylistClip,
 } from '@/lib/playlist-clips';
+import { applyDrumPattern, type DrumPattern } from '@/lib/drum-pattern';
 export default function Studio({
   initial,
   onDraft,
@@ -151,7 +153,6 @@ export default function Studio({
           }
         : null;
     }),
-    [pattern, setPattern] = useState(defaultPattern.map((r) => [...r])),
     [tab, setTab] = useState('Arrangement'),
     [remove, setRemove] = useState(''),
     [dirty, setDirty] = useState(!!initial?.dirty),
@@ -355,6 +356,7 @@ export default function Studio({
               ...([
                 'notes',
                 'sequence',
+                'drumPattern',
                 'sound',
                 'fileId',
                 'sample',
@@ -408,7 +410,7 @@ export default function Studio({
       .map(
         (t) =>
           t.id +
-          JSON.stringify(t.notes || t.sequence || []) +
+          JSON.stringify(t.notes || t.drumPattern || t.sequence || []) +
           JSON.stringify(t.sample || null) +
           (t.sound || '') +
           (t.fileId || '') +
@@ -903,7 +905,7 @@ export default function Studio({
     stop();
     setExportSnapshot(structuredClone({ title, data }));
   }
-  async function addSequence() {
+  async function addDrumTrack(pattern: DrumPattern) {
     if (data.tracks.length >= 48)
       return notify('This session has reached the track limit.');
     setBusy('Building drums');
@@ -911,7 +913,7 @@ export default function Studio({
       const t = await enrich({
         id: crypto.randomUUID(),
         name: 'Drum pattern ' + (data.tracks.length + 1),
-        sequence: pattern.map((r) => [...r]),
+        drumPattern: pattern,
         volume: 0.8,
         pan: 0,
         muted: false,
@@ -930,6 +932,48 @@ export default function Studio({
       notify(e.message);
     } finally {
       setBusy('');
+    }
+  }
+  async function auditionDrums(pattern: DrumPattern) {
+    stop();
+    const epoch = ++generation.current;
+    setBusy('Loading drums');
+    try {
+      const engine = await playMix(
+        {
+          bpm: data.bpm,
+          tracks: [
+            {
+              id: 'preview',
+              name: 'Drums',
+              drumPattern: pattern,
+              volume: 0.8,
+              pan: 0,
+              muted: false,
+              solo: false,
+              offset: 0,
+              trimStart: 0,
+              trimEnd: 0,
+              low: 0,
+              mid: 0,
+              high: 0,
+            },
+          ],
+        },
+        () => setPlaying(false),
+        { output: roomAudio?.output },
+      );
+      if (epoch !== generation.current || !alive.current) {
+        engine.stop();
+        return;
+      }
+      playback.current = engine;
+      setPosition(0);
+      setPlaying(true);
+    } catch (e: any) {
+      notify(e.message);
+    } finally {
+      if (alive.current) setBusy('');
     }
   }
   const focus = data.tracks.find((t) => t.id === selected) || data.tracks[0];
@@ -1954,112 +1998,36 @@ export default function Studio({
                 patch(focus.id, p);
               }}
             />
-          ) : (
-            <div className="sequencer">
-              <div className="section-title">
-                <div>
-                  <h2>Make your own rhythm.</h2>
-                  <p>
-                    16 steps. Three sounds. Eight bars when added to your
-                    arrangement.
-                  </p>
-                </div>
-                <button
-                  className="button primary"
-                  disabled={!!busy}
-                  onClick={addSequence}
-                >
-                  <Plus size={15} /> Add drum track
-                </button>
-              </div>
-              <div className="step-ruler">
-                <span />
-                {Array.from({ length: 16 }, (_, i) => (
-                  <span key={i}>{i + 1}</span>
-                ))}
-              </div>
-              {['Kick', 'Snare', 'Hi-hat'].map((name, r) => (
-                <div className="step-row" key={name}>
-                  <strong>{name}</strong>
-                  {pattern[r].map((v, i) => (
-                    <button
-                      key={i}
-                      className={
-                        (v ? 'enabled ' : '') +
-                        (i % 4 === 0 ? 'beat-start' : '')
-                      }
-                      aria-label={name + ' step ' + (i + 1)}
-                      aria-pressed={!!v}
-                      onClick={() =>
-                        setPattern((p) =>
-                          p.map((row, ri) =>
-                            ri === r
-                              ? row.map((x, xi) => (xi === i ? 1 - x : x))
-                              : row,
-                          ),
-                        )
-                      }
-                    />
-                  ))}
-                </div>
-              ))}
-              <div className="actions">
-                <button
-                  className="button secondary"
-                  disabled={!!busy || recording}
-                  onClick={async () => {
-                    stop();
-                    const epoch = ++generation.current;
-                    setBusy('Loading drums');
-                    try {
-                      const engine = await playMix(
-                        {
-                          bpm: data.bpm,
-                          tracks: [
-                            {
-                              id: 'preview',
-                              name: 'Drums',
-                              sequence: pattern,
-                              volume: 0.8,
-                              pan: 0,
-                              muted: false,
-                              solo: false,
-                              offset: 0,
-                              trimStart: 0,
-                              trimEnd: 0,
-                              low: 0,
-                              mid: 0,
-                              high: 0,
-                            },
-                          ],
-                        },
-                        () => setPlaying(false),
-                        { output: roomAudio?.output },
-                      );
-                      if (epoch !== generation.current || !alive.current) {
-                        engine.stop();
-                        return;
-                      }
-                      playback.current = engine;
-                      setPlaying(true);
-                    } catch (e: any) {
-                      notify(e.message);
-                    } finally {
-                      if (alive.current) setBusy('');
-                    }
-                  }}
-                >
-                  <Play size={16} /> Audition pattern
-                </button>
-                <button
-                  className="button secondary"
-                  onClick={() => setPattern(pattern.map((r) => r.map(() => 0)))}
-                >
-                  Clear pattern
-                </button>
-              </div>
-            </div>
-          )}
+          ) : tab === 'Drum sequencer' ? (
+            <DrumSequencer
+              key={focus?.id || 'drum-draft'}
+              track={
+                focus && (focus.drumPattern || focus.sequence)
+                  ? focus
+                  : undefined
+              }
+              bpm={data.bpm}
+              position={position}
+              disabled={!canEdit || recording || !!busy || !!exportSnapshot}
+              busy={!!busy}
+              playing={playing}
+              onAdd={(pattern) => void addDrumTrack(pattern)}
+              onApply={(track, pattern) => {
+                if (!editAllowed.current || recording || busy || exportSnapshot)
+                  return;
+                try {
+                  mutate((d) => applyDrumPattern(d, track.id, pattern));
+                  notify('Drum pattern applied. Save to keep the change.');
+                } catch (e) {
+                  notify(
+                    e instanceof Error ? e.message : 'Could not apply pattern.',
+                  );
+                }
+              }}
+              onAudition={(pattern) => void auditionDrums(pattern)}
+              onStop={stop}
+            />
+          ) : null}
           <div className="studio-footnote">
             <HeadphoneNote />
             <p>

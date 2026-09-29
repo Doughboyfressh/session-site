@@ -31,6 +31,14 @@ import {
   playlistTrackEnd,
   trackForPlaylistClip,
 } from './playlist-clips';
+import {
+  cleanDrumPattern,
+  drumPatternSeconds,
+  drumStepSeconds,
+  type DrumKit,
+  type DrumLane,
+  type DrumPattern,
+} from './drum-pattern';
 export { automationAt } from './automation';
 export type {
   AutomationCurve,
@@ -62,6 +70,7 @@ export type MixerTrack = {
   fileId?: string;
   demo?: string;
   sequence?: number[][];
+  drumPattern?: DrumPattern;
   notes?: Note[];
   sound?: 'keys' | 'bass' | 'pad' | 'lead' | 'pluck' | 'organ' | 'bell';
   sample?: SampleSettings;
@@ -200,6 +209,201 @@ export function instrument(
     source.start(time);
   }
 }
+
+function noiseSource(
+  c: BaseAudioContext,
+  duration: number,
+  random: () => number,
+) {
+  const buffer = c.createBuffer(
+      1,
+      Math.max(1, Math.ceil(c.sampleRate * duration)),
+      c.sampleRate,
+    ),
+    data = buffer.getChannelData(0);
+  for (let index = 0; index < data.length; index++)
+    data[index] = random() * 2 - 1;
+  const source = c.createBufferSource();
+  source.buffer = buffer;
+  return source;
+}
+
+function drumNoise(
+  c: BaseAudioContext,
+  dest: AudioNode,
+  time: number,
+  duration: number,
+  velocity: number,
+  frequency: number,
+  type: BiquadFilterType,
+  random: () => number,
+  shape?: (data: Float32Array) => void,
+) {
+  if (duration <= 0) return;
+  const source = noiseSource(c, duration, random),
+    filter = c.createBiquadFilter(),
+    gain = c.createGain();
+  if (shape) shape(source.buffer!.getChannelData(0));
+  filter.type = type;
+  filter.frequency.value = frequency;
+  filter.Q.value = type === 'bandpass' ? 0.8 : 0.4;
+  gain.gain.setValueAtTime(Math.max(0.0001, velocity), time);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+  source.connect(filter).connect(gain).connect(dest);
+  source.start(time);
+  source.stop(time + duration);
+}
+
+export function drumHit(
+  c: BaseAudioContext,
+  dest: AudioNode,
+  lane: DrumLane,
+  time: number,
+  velocity: number,
+  kit: DrumKit,
+  random = Math.random,
+  remaining = Number.POSITIVE_INFINITY,
+) {
+  if (!velocity || remaining <= 0) return;
+  const soft = kit === 'dusty',
+    analog = kit === 'analog',
+    level = velocity * (soft ? 0.7 : 0.85),
+    available = Math.max(1 / c.sampleRate, remaining - 1 / c.sampleRate);
+  if (lane === 'kick') {
+    const oscillator = c.createOscillator(),
+      gain = c.createGain(),
+      duration = Math.min(soft ? 0.34 : 0.28, available);
+    oscillator.type = analog ? 'triangle' : 'sine';
+    oscillator.frequency.setValueAtTime(analog ? 125 : 155, time);
+    oscillator.frequency.exponentialRampToValueAtTime(
+      soft ? 42 : 48,
+      time + Math.min(soft ? 0.2 : 0.14, duration),
+    );
+    gain.gain.setValueAtTime(Math.max(0.0001, level), time);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+    oscillator.connect(gain).connect(dest);
+    oscillator.start(time);
+    oscillator.stop(time + duration);
+    return;
+  }
+  if (lane === 'snare') {
+    drumNoise(
+      c,
+      dest,
+      time,
+      Math.min(soft ? 0.14 : 0.19, available),
+      level * 0.48,
+      soft ? 1200 : 1700,
+      'highpass',
+      random,
+    );
+    const body = c.createOscillator(),
+      gain = c.createGain(),
+      duration = Math.min(0.12, available);
+    body.type = analog ? 'triangle' : 'sine';
+    body.frequency.value = soft ? 145 : 185;
+    gain.gain.setValueAtTime(Math.max(0.0001, level * 0.22), time);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+    body.connect(gain).connect(dest);
+    body.start(time);
+    body.stop(time + duration);
+    return;
+  }
+  if (lane === 'clap') {
+    drumNoise(
+      c,
+      dest,
+      time,
+      Math.min(soft ? 0.18 : 0.24, available),
+      level * 0.42,
+      soft ? 1050 : 1450,
+      'bandpass',
+      random,
+      (data) => {
+        const burst = Math.max(1, Math.floor(c.sampleRate * 0.012));
+        for (let index = 0; index < data.length; index++) {
+          const phase = index % Math.max(1, Math.floor(c.sampleRate * 0.032));
+          const pulse = phase < burst ? 1 : 0.16;
+          data[index] *= pulse * (1 - index / data.length);
+        }
+      },
+    );
+    return;
+  }
+  if (lane === 'closedHat' || lane === 'openHat') {
+    const open = lane === 'openHat';
+    drumNoise(
+      c,
+      dest,
+      time,
+      Math.min(open ? (soft ? 0.32 : 0.48) : soft ? 0.045 : 0.065, available),
+      level * (open ? 0.22 : 0.16),
+      soft ? 5200 : analog ? 6800 : 7600,
+      'highpass',
+      random,
+    );
+    return;
+  }
+  const oscillator = c.createOscillator(),
+    gain = c.createGain(),
+    duration = Math.min(0.16, available);
+  oscillator.type = analog ? 'square' : soft ? 'sine' : 'triangle';
+  oscillator.frequency.setValueAtTime(analog ? 310 : soft ? 190 : 420, time);
+  oscillator.frequency.exponentialRampToValueAtTime(
+    analog ? 220 : soft ? 145 : 300,
+    time + Math.min(0.12, duration),
+  );
+  gain.gain.setValueAtTime(Math.max(0.0001, level * 0.28), time);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+  oscillator.connect(gain).connect(dest);
+  oscillator.start(time);
+  oscillator.stop(time + duration);
+}
+
+export async function renderDrumPattern(
+  bpm: number,
+  value: DrumPattern,
+  sampleRate = 44100,
+) {
+  const pattern = cleanDrumPattern(value),
+    seconds = drumPatternSeconds(pattern, bpm),
+    c = new OfflineAudioContext(
+      2,
+      Math.max(1, Math.ceil(seconds * sampleRate)),
+      sampleRate,
+    ),
+    master = c.createGain();
+  master.gain.value = 0.82;
+  master.connect(c.destination);
+  for (const [lane, steps] of Object.entries(pattern.lanes))
+    for (let step = 0; step < steps.length; step++)
+      if (steps[step]) {
+        let seed = 2166136261;
+        for (const letter of JSON.stringify([
+          pattern.version,
+          pattern.kit,
+          lane,
+          step,
+        ]))
+          seed = Math.imul(seed ^ letter.charCodeAt(0), 16777619) >>> 0;
+        const random = () => {
+          seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+          return seed / 4294967296;
+        };
+        const at = drumStepSeconds(pattern, step, bpm);
+        drumHit(
+          c,
+          master,
+          lane as DrumLane,
+          at,
+          steps[step],
+          pattern.kit,
+          random,
+          seconds - at,
+        );
+      }
+  return c.startRendering();
+}
 export function playNote(
   c: BaseAudioContext,
   dest: AudioNode,
@@ -317,7 +521,7 @@ export async function bufferFor(
     (t.sample
       ? `sample-${t.fileId}-${bpm}-${JSON.stringify(t.sample)}-${JSON.stringify(t.notes)}`
       : t.fileId ||
-        `${t.demo || 'seq'}-${bpm}-${t.sound}-${JSON.stringify(t.notes ?? t.sequence ?? [])}`) +
+        `${t.demo || 'seq'}-${bpm}-${t.sound}-${JSON.stringify(t.notes ?? t.drumPattern ?? t.sequence ?? [])}`) +
     ':' +
     (options.sampleRate || 'playback') +
     (t.denoise || t.autoPitch
@@ -395,6 +599,8 @@ export async function bufferFor(
       const { processInWorker } = await import('./audio-processing');
       b = await processInWorker(b, t, options.signal);
     }
+  } else if (t.drumPattern) {
+    b = await renderDrumPattern(bpm, t.drumPattern, sampleRate);
   } else if (t.notes) {
     const beats = Math.max(8, ...t.notes.map((n) => n.start + n.length));
     const c = new OfflineAudioContext(

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<!-- SESSION implementation plan · studio-pattern-sequencer · 2026-09-28 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan — studio-pattern-sequencer</title>
+<style>
+  :root{
+    --bg:#101211; --surface:#191c1a; --surface-2:#242724; --border:#2b302b;
+    --text:#f1f2ef; --muted:#969d94; --primary:#c2f65a; --ok:#a5d375;
+    --warn:#d9c987; --danger:#ff6b79;
+    --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"Cascadia Code",Consolas,monospace;
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.55}
+  main{max-width:880px;margin:0 auto;padding:32px 24px 96px}
+  header{border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:28px}
+  h1{font-size:26px;margin:0 0 4px}
+  .meta{color:var(--muted);font-size:13px}
+  .meta .badge{display:inline-block;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:999px;padding:1px 10px;margin-right:8px;color:var(--warn)}
+  section{margin:28px 0}
+  h2{font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+    border-bottom:1px solid var(--border);padding-bottom:6px}
+  [contenteditable]{border:1px dashed transparent;border-radius:6px;padding:2px 6px;margin:0 -6px;outline:none}
+  [contenteditable]:hover{border-color:var(--border)}
+  [contenteditable]:focus{border-color:var(--primary);background:var(--surface)}
+  .hint{color:var(--muted);font-size:13px;font-style:italic}
+  ul.plain{list-style:none;padding:0;margin:8px 0}
+  ul.plain li{padding:6px 8px;border-left:2px solid var(--border);margin:6px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+  .card h3{margin:0 0 6px;font-size:15px}
+  .card p{margin:0;color:var(--muted);font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{color:var(--muted);text-align:left;font-weight:500;font-size:12px;
+    text-transform:uppercase;letter-spacing:.06em;padding:6px 8px;border-bottom:1px solid var(--border)}
+  td{padding:8px;border-bottom:1px solid var(--border);vertical-align:top}
+  td.num{color:var(--muted);font-family:var(--mono);font-size:12px;white-space:nowrap}
+  input[type=checkbox]{width:16px;height:16px;accent-color:var(--ok)}
+  .done [contenteditable]{text-decoration:line-through;color:var(--muted)}
+  .risk{display:flex;gap:10px;align-items:baseline;padding:8px;border-left:2px solid var(--warn);margin:6px 0}
+  .risk .sev{font-size:11px;font-family:var(--mono);color:var(--warn);white-space:nowrap}
+  .decision{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:14px;margin:10px 0}
+  .decision .q{font-weight:600}
+  .choices{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+  .choices label{display:flex;gap:6px;align-items:center;background:var(--surface-2);
+    border:1px solid var(--border);border-radius:999px;padding:4px 12px;font-size:13px;cursor:pointer}
+  textarea{width:100%;min-height:52px;background:var(--bg);color:var(--text);
+    border:1px solid var(--border);border-radius:8px;padding:8px;font-family:var(--font);font-size:13px;resize:vertical}
+  .savebar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);
+    border-top:1px solid var(--border);padding:10px 24px;display:flex;gap:14px;align-items:center}
+  .savebar button{background:var(--primary);border:none;color:#fff;font-weight:600;
+    border-radius:8px;padding:8px 18px;cursor:pointer;font-size:14px}
+  .savebar .status{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Pattern Sequencer 2.0</h1>
+    <div class="meta"><span class="badge">implementation</span>studio-pattern-sequencer · 2026-09-28 · annotate below, then hit “Save annotations”</div>
+  </header>
+
+  <section>
+    <h2>Goal</h2>
+    <div data-id="goal" contenteditable>Turn SESSION's temporary 3×16 drum scratchpad into an editable pattern instrument. Producers can create or reopen drum tracks, program six lanes with per-step velocity, choose a kit, set swing, and use one, two, or four bars. The pattern remains the channel's shared source, so every playlist placement updates together; audition, playback, stems, exports, save, recovery, Undo/Redo, and collaboration all preserve the same deterministic rhythm.</div>
+  </section>
+
+  <section>
+    <h2>Non-goals</h2>
+    <ul class="plain">
+      <li data-id="nongoal-1" contenteditable>User-uploaded drum samples, slicing, round robin layers, and per-lane effect chains are separate releases.</li>
+      <li data-id="nongoal-2" contenteditable>Polyrhythmic lane lengths, probability, ratchets, triplet grids, and live MIDI pad recording remain outside this bounded release.</li>
+      <li data-id="nongoal-3" contenteditable>Legacy 3×16 tracks retain their exact eight-bar sound and duration until a producer explicitly upgrades or edits them.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Screens &amp; flows</h2>
+    <div class="grid">
+      <div class="card"><h3 data-id="screen-1-title" contenteditable>Editable drum channel</h3>
+        <p data-id="screen-1-desc" contenteditable>Select any modern drum track and open Drum sequencer to edit its source. Header controls choose kit, bars, and swing; Apply is one Undo step and Cancel leaves the arrangement untouched.</p></div>
+      <div class="card"><h3 data-id="screen-2-title" contenteditable>Velocity step grid</h3>
+        <p data-id="screen-2-desc" contenteditable>Six horizontally scrollable lanes cover kick, snare, clap, closed hat, open hat, and percussion. Click cycles Off/Soft/Medium/Full; exact velocity controls the selected step.</p></div>
+      <div class="card"><h3 data-id="screen-3-title" contenteditable>Audition and playlist reuse</h3>
+        <p data-id="screen-3-desc" contenteditable>Audition the draft before applying it. The applied pattern renders once as the channel source and every duplicated or repeated playlist placement hears the update.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Tasks</h2>
+    <table>
+      <thead><tr><th></th><th>#</th><th>Task</th><th>Est</th></tr></thead>
+      <tbody>
+        <tr class="task"><td><input type="checkbox" data-id="task-1"></td><td class="num">1</td><td contenteditable data-id="task-1-text">Define a versioned, bounded drum-pattern model with six lanes, per-step velocity, 16/32/64 steps, kit, swing, musical duration, and explicit legacy compatibility.</td><td contenteditable data-id="task-1-est" class="num">~0.5d</td></tr>
+        <tr class="task"><td><input type="checkbox" data-id="task-2"></td><td class="num">2</td><td contenteditable data-id="task-2-text">Build deterministic multi-kit synthesis and tempo-aware scheduling. Preserve legacy rendering exactly; validate finite timing and monotonic velocity at 44.1 and 48 kHz.</td><td contenteditable data-id="task-2-est" class="num">~1d</td></tr>
+        <tr class="task"><td><input type="checkbox" data-id="task-3"></td><td class="num">3</td><td contenteditable data-id="task-3-text">Replace the scratchpad with a responsive editor for selected drum tracks and new patterns, including draft isolation, velocity editing, kit/bars/swing, clear, audition, Apply, and Cancel.</td><td contenteditable data-id="task-3-est" class="num">~1d</td></tr>
+        <tr class="task"><td><input type="checkbox" data-id="task-4"></td><td class="num">4</td><td contenteditable data-id="task-4-text">Integrate patterns with channel source caching, playlist reuse, duration, playback, processed/dry stems, export, Undo/Redo, and access-loss locks.</td><td contenteditable data-id="task-4-est" class="num">~0.75d</td></tr>
+        <tr class="task"><td><input type="checkbox" data-id="task-5"></td><td class="num">5</td><td contenteditable data-id="task-5-text">Preserve, sanitize, validate, and collaborate on versioned patterns with field/step-level conflict reporting and no silent legacy conversion.</td><td contenteditable data-id="task-5-est" class="num">~0.75d</td></tr>
+        <tr class="task"><td><input type="checkbox" data-id="task-6"></td><td class="num">6</td><td contenteditable data-id="task-6-text">Add focused unit, export, desktop, and 390px browser coverage for edit/reopen, velocity, swing, bars, kits, Apply/Cancel, Undo/Redo, access loss, and no overflow.</td><td contenteditable data-id="task-6-est" class="num">~0.75d</td></tr>
+        <tr class="task"><td><input type="checkbox" data-id="task-7"></td><td class="num">7</td><td contenteditable data-id="task-7-text">Run the release pipeline and hostile review, update product limitations and validation records, publish, and inspect live errors.</td><td contenteditable data-id="task-7-est" class="num">~0.5d</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Risks</h2>
+    <div class="risk"><span class="sev">HIGH</span><span data-id="risk-1" contenteditable>Changing the old sequence semantics could alter existing songs. Keep the legacy array and renderer untouched; versioned patterns use a separate field and explicit upgrade action.</span></div>
+    <div class="risk"><span class="sev">MED</span><span data-id="risk-2" contenteditable>Swing or multi-bar rounding can drift across repeats. Derive all timings from integer step indices and bar duration, then verify bar-aligned output and playlist placement length.</span></div>
+    <div class="risk"><span class="sev">MED</span><span data-id="risk-3" contenteditable>Large grids can overwhelm phone layout and collaboration merges. Bound patterns to 64 steps, scroll within the editor, use touch-sized cells, and merge stable lane/step coordinates.</span></div>
+  </section>
+
+  <section>
+    <h2>Implementation decision</h2>
+    <div class="decision">
+      <div class="q" data-id="q-1-text" contenteditable>Preserve legacy 3×16 tracks until the producer edits them, or migrate every old track automatically?</div>
+      <div class="choices">
+        <label><input type="radio" name="q-1" data-id="q-1" value="approve-a" checked> Preserve until edited</label>
+        <label><input type="radio" name="q-1" data-id="q-1" value="approve-b"> Auto-migrate all</label>
+        <label><input type="radio" name="q-1" data-id="q-1" value="discuss"> Discuss first</label>
+      </div>
+      <textarea data-id="q-1-comment" placeholder="comment for the agent…"></textarea>
+    </div>
+  </section>
+</main>
+
+<div class="savebar">
+  <button onclick="save()">Save annotations</button>
+  <span class="status" id="status">edits stay in this page — save writes annotations.json</span>
+</div>
+
+<script>
+function collect(){
+  const out = {};
+  document.querySelectorAll('[data-id]').forEach(el => {
+    const id = el.dataset.id;
+    if (el.type === 'checkbox') out[id] = {kind:'check', value: el.checked};
+    else if (el.type === 'radio') { if (el.checked) out[id] = {kind:'decision', value: el.value}; }
+    else if (el.tagName === 'TEXTAREA') out[id] = {kind:'comment', value: el.value};
+    else if (el.isContentEditable) out[id] = {kind:'text', value: el.innerText};
+  });
+  document.querySelectorAll('tr.task').forEach(tr => {
+    const cb = tr.querySelector('input[type=checkbox]');
+    if (cb) tr.classList.toggle('done', cb.checked);
+  });
+  out._savedAt = new Date().toISOString();
+  return out;
+}
+async function save(){
+  const data = collect(), status = document.getElementById('status');
+  try {
+    const r = await fetch('/save', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
+    if (!r.ok) throw 0;
+    status.textContent = 'saved to annotations.json ✓ ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+    a.download = 'annotations.json'; a.click();
+    status.textContent = 'not served — downloaded annotations.json; put it next to index.html';
+  }
+}
+async function restore(){
+  try {
+    const r = await fetch('annotations.json'); if (!r.ok) return;
+    const data = await r.json();
+    for (const [id, rec] of Object.entries(data)) {
+      if (id.startsWith('_')) continue;
+      const el = document.querySelector('[data-id="'+id+'"]');
+      if (!el) continue;
+      if (rec.kind==='check') el.checked = rec.value;
+      else if (rec.kind==='decision'){
+        const radio = document.querySelector('input[type=radio][data-id="'+id+'"][value="'+rec.value+'"]');
+        if (radio) radio.checked = true;
+      }
+      else if (rec.kind==='comment') el.value = rec.value;
+      else if (rec.kind==='text') el.innerText = rec.value;
+    }
+    document.getElementById('status').textContent = 'restored annotations from disk';
+  } catch (e) {}
+}
+document.addEventListener('DOMContentLoaded', restore);
+document.addEventListener('keydown', e => { if ((e.ctrlKey||e.metaKey) && e.key==='s'){ e.preventDefault(); save(); } });
+</script>
+</body>
+</html>

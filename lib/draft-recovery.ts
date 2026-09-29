@@ -4,6 +4,7 @@ import { validCreation, type ProjectCreation } from './project-creation';
 import { cleanRouting, validateRouting } from './mixer-routing';
 import { sampleSettings } from './sample-instrument';
 import { SOUNDS } from './instruments';
+import { cleanDrumPattern } from './drum-pattern';
 import {
   AUTOMATION_TARGETS,
   MAX_AUTOMATION_POINTS_PER_LANE,
@@ -38,6 +39,7 @@ const fields = [
   'fileId',
   'demo',
   'sequence',
+  'drumPattern',
   'notes',
   'sound',
   'sample',
@@ -121,6 +123,8 @@ export function recoverySnapshot(value: any): DraftSnapshot {
           });
         });
       }
+      if (t.drumPattern !== undefined)
+        t.drumPattern = cleanDrumPattern(t.drumPattern);
       if (t.notes) {
         if (!Array.isArray(t.notes) || t.notes.length > 256)
           throw new Error('Too many notes in draft.');

@@ -48,6 +48,7 @@ export function midiPlan(
     !track.notes ||
     (track.fileId && !track.sample) ||
     track.sequence ||
+    track.drumPattern ||
     track.demo
   )
     throw Error('Select an instrument track to record MIDI.');
@@ -250,6 +251,7 @@ export function keepMidi(
       t.clips,
       t.fileId,
       t.sequence,
+      t.drumPattern,
       t.demo,
     ]);
   if (

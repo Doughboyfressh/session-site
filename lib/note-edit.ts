@@ -33,6 +33,7 @@ export function applyNotePatch(
       t.clips,
       t.fileId,
       t.sequence,
+      t.drumPattern,
       t.demo,
     ]);
   if (
@@ -97,6 +98,7 @@ export function checkNotes(
     !track.notes ||
     (track.fileId && !track.sample) ||
     track.sequence ||
+    track.drumPattern ||
     track.demo
   )
     throw Error('Choose an instrument track to edit notes.');
