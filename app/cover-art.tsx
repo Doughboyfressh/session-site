@@ -24,12 +24,12 @@ function random(seed: number) {
 }
 
 export const COVER_THEMES = [
-  { core: '#ff2e43', ring: '#ff8091', wash: '#2b0d13', deep: '#1b080c' },
-  { core: '#ff525f', ring: '#ffc2c9', wash: '#33121a', deep: '#200a10' },
-  { core: '#e7e2e4', ring: '#ff2e43', wash: '#241015', deep: '#150a0d' },
-  { core: '#ff6d8c', ring: '#f4e9eb', wash: '#2d0f1c', deep: '#1c0912' },
-  { core: '#d5223b', ring: '#ff9fae', wash: '#1f0b10', deep: '#12060a' },
-  { core: '#f4d7dc', ring: '#ff2e43', wash: '#2a1216', deep: '#190b0e' },
+  { core: '#ff2e43', ring: '#ffffff', wash: '#171416', deep: '#0f0e0f' },
+  { core: '#e9e9ec', ring: '#ff2e43', wash: '#141314', deep: '#0d0c0d' },
+  { core: '#ffffff', ring: '#8e8e93', wash: '#181718', deep: '#101010' },
+  { core: '#ff2e43', ring: '#ffb3bb', wash: '#1a1416', deep: '#100c0d' },
+  { core: '#d5223b', ring: '#e7e2e4', wash: '#171314', deep: '#0e0c0d' },
+  { core: '#c9c9cc', ring: '#ff2e43', wash: '#161415', deep: '#0f0e0f' },
 ] as const;
 
 export function coverTheme(seedText: string) {
