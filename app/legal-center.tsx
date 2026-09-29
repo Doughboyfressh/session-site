@@ -220,8 +220,8 @@ export default function LegalCenter({
               <p>
                 Agree on composition and recording ownership, credits, samples,
                 royalties, and release permission before distribution. Selecting
-                Artist, Producer, or Engineer does not establish ownership or
-                clear third-party rights.
+                Artist, Producer, Engineer, or Videographer does not establish
+                ownership or clear third-party rights.
               </p>
             </section>
             <section>

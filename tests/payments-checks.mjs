@@ -37,7 +37,7 @@ const fails = (fn, pattern) => {
 };
 
 /* ---------------- validation ---------------- */
-equal(ROLES, ['Artist', 'Producer', 'Engineer']);
+equal(ROLES, ['Artist', 'Producer', 'Engineer', 'Videographer']);
 ok(MAX_SERVICES === 3);
 ok(MIN_AMOUNT_CENTS === 100 && MAX_AMOUNT_CENTS === 1000000);
 
@@ -63,10 +63,7 @@ equal(parseRates('[]'), []);
 equal(parseRates(null), []);
 equal(parseRates(undefined), []);
 fails(() => parseRates('{"not":"an array"}'), /unreadable/);
-fails(
-  () => parseRates(JSON.stringify(Array(4).fill(valid))),
-  /up to 3/,
-);
+fails(() => parseRates(JSON.stringify(Array(4).fill(valid))), /up to 3/);
 
 const rates = normalizeRates(
   [valid, { role: 'Engineer', service: 'Mix per song', amountCents: 8000 }],
@@ -136,17 +133,41 @@ const ordersDb = {
 const now = Date.now();
 db.prepare(
   'INSERT INTO profiles (id,username,name,roles,bio,location,visibility,rates,created) VALUES (?,?,?,?,?,?,?,?,?)',
-).run('seller_1', 'beatsmith', 'Beatsmith', '["Producer"]', '', '', 'public', JSON.stringify([valid]), now);
+).run(
+  'seller_1',
+  'beatsmith',
+  'Beatsmith',
+  '["Producer"]',
+  '',
+  '',
+  'public',
+  JSON.stringify([valid]),
+  now,
+);
 db.prepare(
   'INSERT INTO profiles (id,username,name,roles,bio,location,visibility,rates,created) VALUES (?,?,?,?,?,?,?,?,?)',
-).run('buyer_1', 'vocalist', 'Vocalist', '["Artist"]', '', '', 'public', '[]', now);
+).run(
+  'buyer_1',
+  'vocalist',
+  'Vocalist',
+  '["Artist"]',
+  '',
+  '',
+  'public',
+  '[]',
+  now,
+);
 
 await insertPendingOrder(ordersDb, {
   id: 'ord_test1',
   kind: 'service',
   seller: 'seller_1',
   buyer: 'buyer_1',
-  serviceSnapshot: { role: 'Producer', name: 'Custom beat', amountCents: 15000 },
+  serviceSnapshot: {
+    role: 'Producer',
+    name: 'Custom beat',
+    amountCents: 15000,
+  },
   amountCents: 15000,
   feeCents: 0,
   stripeSessionId: 'cs_test_1',
@@ -215,7 +236,11 @@ equal(row.status, 'canceled');
 
 /* ---------------- labels ---------------- */
 equal(
-  orderLabel('service', JSON.stringify({ name: 'Mix per song', amountCents: 8000 }), null),
+  orderLabel(
+    'service',
+    JSON.stringify({ name: 'Mix per song', amountCents: 8000 }),
+    null,
+  ),
   'Mix per song ($80)',
 );
 equal(orderLabel('track', '{}', 'trk_9'), 'track trk_9');

@@ -33,6 +33,7 @@ import {
   MoreHorizontal,
   CircleDollarSign,
   Flame,
+  Video,
 } from 'lucide-react';
 import CoverArt, { coverWaveform } from './cover-art';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -1532,6 +1533,12 @@ export default function SessionApp({
                       'Bring it to life.',
                       'Find a song. Shape the final sound.',
                     ],
+                    [
+                      Video,
+                      'For videographers',
+                      'Give it a face.',
+                      'Music videos, session films, and cover art that moves.',
+                    ],
                   ].map(([Icon, label, title, desc]: any) => (
                     <button
                       className="role-card"
@@ -1542,7 +1549,9 @@ export default function SessionApp({
                             ? 'Songs to engineer'
                             : label === 'For producers'
                               ? 'Upload'
-                              : 'Beat library',
+                              : label === 'For videographers'
+                                ? 'Find collaborators'
+                                : 'Beat library',
                         )
                       }
                     >
@@ -1597,7 +1606,7 @@ export default function SessionApp({
                     view === 'Saved tracks'
                       ? 'Tap the heart on any track to find it here.'
                       : feedMode === 'Following'
-                        ? 'Find artists, producers, and engineers you want to hear from.'
+                        ? 'Find artists, producers, engineers, and videographers you want to hear from.'
                         : 'No matching uploads yet. Try another filter or upload the first track.'
                   }
                   actionLabel="Explore beats"
@@ -1859,7 +1868,13 @@ export default function SessionApp({
             <>
               <Tabs value={role} onValueChange={(v) => setRole(String(v))}>
                 <TabsList className="genre-tabs">
-                  {['Everyone', 'Artist', 'Producer', 'Engineer'].map((r) => (
+                  {[
+                    'Everyone',
+                    'Artist',
+                    'Producer',
+                    'Engineer',
+                    'Videographer',
+                  ].map((r) => (
                     <TabsTrigger value={r} key={r}>
                       {r === 'Everyone' ? r : r + 's'}
                     </TabsTrigger>
@@ -1924,7 +1939,7 @@ export default function SessionApp({
               ) : (
                 <Empty
                   title="Be the first on this wavelength."
-                  text="Make your profile public to appear here. Artists, producers, and engineers with public profiles will join this community."
+                  text="Make your profile public to appear here. Artists, producers, engineers, and videographers with public profiles will join this community."
                   actionLabel="Set up your profile"
                   action={() => go('My profile')}
                 />

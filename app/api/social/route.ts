@@ -209,7 +209,12 @@ export async function POST(req: Request) {
       case 'collaborationRequest': {
         const recipient = str(body.recipient, 120);
         if (recipient === uid) fail('Choose another SESSION member.');
-        const role = choice(body.role, ['Artist', 'Producer', 'Engineer']);
+        const role = choice(body.role, [
+          'Artist',
+          'Producer',
+          'Engineer',
+          'Videographer',
+        ]);
         const message = str(body.message, 1200);
         if (message.length < 10)
           fail('Add a request note with at least 10 characters.');

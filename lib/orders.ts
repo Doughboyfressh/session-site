@@ -4,7 +4,12 @@
  * wrappers so routes, the webhook, and tests share one implementation.
  */
 
-export const ROLES = ['Artist', 'Producer', 'Engineer'] as const;
+export const ROLES = [
+  'Artist',
+  'Producer',
+  'Engineer',
+  'Videographer',
+] as const;
 export type Role = (typeof ROLES)[number];
 
 export const MAX_SERVICES = 3;

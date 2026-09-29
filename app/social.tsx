@@ -735,11 +735,12 @@ export function CollaborationRequestDialog({
   notify: (message: string) => void;
 }) {
   const targetRoles = useMemo(() => {
-    if (!target?.roles) return ['Artist', 'Producer', 'Engineer'];
+    if (!target?.roles)
+      return ['Artist', 'Producer', 'Engineer', 'Videographer'];
     if (Array.isArray(target.roles)) return target.roles;
     try {
       const parsed: unknown = JSON.parse(target.roles);
-      const allowed = ['Artist', 'Producer', 'Engineer'];
+      const allowed = ['Artist', 'Producer', 'Engineer', 'Videographer'];
       return Array.isArray(parsed)
         ? parsed.filter(
             (value): value is string =>
@@ -747,7 +748,7 @@ export function CollaborationRequestDialog({
           )
         : allowed;
     } catch {
-      return ['Artist', 'Producer', 'Engineer'];
+      return ['Artist', 'Producer', 'Engineer', 'Videographer'];
     }
   }, [target]);
   const [role, setRole] = useState(targetRoles[0] || 'Artist');
@@ -803,7 +804,7 @@ export function CollaborationRequestDialog({
               options={
                 targetRoles.length
                   ? targetRoles
-                  : ['Artist', 'Producer', 'Engineer']
+                  : ['Artist', 'Producer', 'Engineer', 'Videographer']
               }
             />
             <label className="field">

@@ -401,7 +401,7 @@ export function ProfileForm({
       </div>
       <fieldset className="role-options">
         <legend>Your creative roles</legend>
-        {['Artist', 'Producer', 'Engineer'].map((role) => (
+        {['Artist', 'Producer', 'Engineer', 'Videographer'].map((role) => (
           <label className="check-label" key={role}>
             <Checkbox
               checked={roles.includes(role)}

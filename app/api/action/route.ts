@@ -57,7 +57,7 @@ export async function POST(req: Request) {
           fail('Use 3–24 letters, numbers or underscores for your username.');
         const roles = Array.isArray(b.roles)
           ? b.roles.filter((r: string) =>
-              ['Artist', 'Producer', 'Engineer'].includes(r),
+              ['Artist', 'Producer', 'Engineer', 'Videographer'].includes(r),
             )
           : [];
         if (!roles.length) fail('Choose at least one creative role.');
