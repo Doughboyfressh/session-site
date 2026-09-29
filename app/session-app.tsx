@@ -970,8 +970,8 @@ export default function SessionApp({
                     </button>
                   </div>
                   <img
-                    src="/chrome-loop.png"
-                    alt="Silver sculptural loop with electric green reflections"
+                    src="/session-hero.png"
+                    alt="3D equalizer pillars glowing red in a black mirror studio"
                   />
                   <span className="feature-caption">
                     CONNECT. CREATE. REPEAT.
@@ -1054,8 +1054,14 @@ export default function SessionApp({
                     <h2>Studio rooms</h2>
                     <Radio size={18} className="green-text" />
                   </div>
-                  <div className="room-visual">
-                    <Headphones size={42} />
+                  <div className="room-shot">
+                    <img
+                      src="/session-room.png"
+                      alt="3D studio room with a red-lit console and glowing monitors"
+                    />
+                    <span className="room-shot-badge">
+                      <Headphones size={11} /> INSIDE THE STUDIO
+                    </span>
                   </div>
                   <h3>
                     Less back and forth.

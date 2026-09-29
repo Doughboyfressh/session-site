@@ -254,11 +254,11 @@ export default function Diagnostics({
         ctx = canvas.getContext('2d')!;
       let frame = 0;
       const draw = () => {
-        ctx.fillStyle = '#182611';
+        ctx.fillStyle = '#1c0d0f';
         ctx.fillRect(0, 0, 320, 180);
-        ctx.fillStyle = '#c2f65a';
+        ctx.fillStyle = '#ff2e43';
         ctx.fillRect((frame++ * 7) % 280, 55, 40, 70);
-        ctx.fillStyle = '#e4eddb';
+        ctx.fillStyle = '#f1e9ea';
         ctx.font = '16px sans-serif';
         ctx.fillText('SESSION · generated test video', 18, 28);
       };
