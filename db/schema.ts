@@ -16,6 +16,7 @@ export const profiles = sqliteTable('profiles', {
   location: text().notNull().default(''),
   visibility: text().notNull().default('private'),
   avatar: text(),
+  rates: text().notNull().default('[]'),
   created: integer().notNull(),
 });
 export const takeBanks = sqliteTable(
@@ -80,6 +81,7 @@ export const tracks = sqliteTable(
     visibility: text().notNull().default('private'),
     permission: text().notNull().default('listen'),
     fileId: text().notNull(),
+    price: integer(),
     created: integer().notNull(),
   },
   (t) => [
@@ -323,3 +325,41 @@ export const roomEditors = sqliteTable(
     index('idx_room_editors_project_user').on(t.project, t.user),
   ],
 );
+
+export const stripeAccounts = sqliteTable('stripe_accounts', {
+  user: text().primaryKey(),
+  accountId: text().notNull(),
+  chargesEnabled: integer().notNull().default(0),
+  payoutsEnabled: integer().notNull().default(0),
+  details: text().notNull().default('{}'),
+  created: integer().notNull(),
+});
+
+export const orders = sqliteTable(
+  'orders',
+  {
+    id: text().primaryKey(),
+    kind: text().notNull(),
+    track: text(),
+    seller: text().notNull(),
+    buyer: text().notNull(),
+    serviceSnapshot: text().notNull().default('{}'),
+    amountCents: integer().notNull(),
+    feeCents: integer().notNull().default(0),
+    currency: text().notNull().default('usd'),
+    status: text().notNull().default('pending'),
+    stripeSessionId: text().notNull().default(''),
+    paymentIntent: text(),
+    created: integer().notNull(),
+  },
+  (t) => [
+    index('idx_orders_seller_created').on(t.seller, t.created),
+    index('idx_orders_buyer_created').on(t.buyer, t.created),
+    index('idx_orders_session').on(t.stripeSessionId),
+  ],
+);
+
+export const stripeEvents = sqliteTable('stripe_events', {
+  eventId: text().primaryKey(),
+  processedAt: integer().notNull(),
+});

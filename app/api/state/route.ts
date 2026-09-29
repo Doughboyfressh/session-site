@@ -1,5 +1,6 @@
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { all, one } from '@/lib/server';
+import { stripeConfigured } from '@/lib/stripe-server';
 export async function GET() {
   try {
     const user = await getChatGPTUser(),
@@ -13,6 +14,8 @@ export async function GET() {
       saved,
       follows,
       unreadNotifications,
+      stripeAccount,
+      orders,
     ] = await Promise.all([
       one('SELECT * FROM profiles WHERE id=?', id),
       all(
@@ -21,7 +24,7 @@ export async function GET() {
         id,
       ),
       all(
-        "SELECT p.*,(SELECT COUNT(*) FROM follows f WHERE f.target=p.id) AS followers FROM profiles p WHERE p.visibility='public' ORDER BY p.created DESC LIMIT 100",
+        "SELECT p.*,(SELECT COUNT(*) FROM follows f WHERE f.target=p.id) AS followers,(SELECT COALESCE(MAX(chargesEnabled),0) FROM stripe_accounts a WHERE a.user=p.id) AS chargesEnabled FROM profiles p WHERE p.visibility='public' ORDER BY p.created DESC LIMIT 100",
       ),
       all(
         "SELECT id,title,updated,revision,forkedFrom,json_extract(data,'$.bpm') AS bpm,json_array_length(data,'$.tracks') AS trackCount FROM projects WHERE owner=? ORDER BY updated DESC LIMIT 100",
@@ -38,6 +41,15 @@ export async function GET() {
         'SELECT COUNT(*) AS count FROM notifications WHERE user=? AND readAt IS NULL',
         id,
       ),
+      one(
+        'SELECT accountId, chargesEnabled, payoutsEnabled FROM stripe_accounts WHERE user=?',
+        id,
+      ),
+      all(
+        'SELECT id,kind,track,seller,buyer,serviceSnapshot,amountCents,feeCents,currency,status,created FROM orders WHERE buyer=? OR seller=? ORDER BY created DESC LIMIT 60',
+        id,
+        id,
+      ),
     ]);
     return Response.json(
       {
@@ -49,6 +61,12 @@ export async function GET() {
         saved: saved.map((s) => s.track),
         follows: follows.map((f) => f.target),
         unreadNotifications: Number(unreadNotifications?.count || 0),
+        payments: {
+          configured: stripeConfigured(),
+          chargesEnabled: !!stripeAccount?.chargesEnabled,
+          payoutsEnabled: !!stripeAccount?.payoutsEnabled,
+        },
+        orders,
       },
       { headers: { 'Cache-Control': 'private, no-store' } },
     );

@@ -17,6 +17,7 @@ import {
   readJSON,
   limit,
 } from '@/lib/server';
+import { normalizeRates, normalizeTrackPrice } from '@/lib/orders';
 export async function POST(req: Request) {
   try {
     const user = await getChatGPTUser();
@@ -70,9 +71,10 @@ export async function POST(req: Request) {
           ))
         )
           fail('Choose your own profile photo.');
+        const rates = normalizeRates(b.rates ?? '[]', roles);
         try {
           await run(
-            'INSERT INTO profiles (id,username,name,roles,bio,location,visibility,avatar,created) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username,name=excluded.name,roles=excluded.roles,bio=excluded.bio,location=excluded.location,visibility=excluded.visibility,avatar=excluded.avatar',
+            'INSERT INTO profiles (id,username,name,roles,bio,location,visibility,avatar,rates,created) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username,name=excluded.name,roles=excluded.roles,bio=excluded.bio,location=excluded.location,visibility=excluded.visibility,avatar=excluded.avatar,rates=excluded.rates',
             uid,
             username,
             str(b.name, 60),
@@ -81,6 +83,7 @@ export async function POST(req: Request) {
             String(b.location || '').slice(0, 80),
             choice(b.visibility, ['private', 'public']),
             avatar,
+            rates,
             now,
           );
         } catch (e: any) {
@@ -104,9 +107,10 @@ export async function POST(req: Request) {
         const bpm = Number(b.bpm);
         if (!Number.isFinite(bpm) || bpm < 40 || bpm > 240)
           fail('Tempo must be between 40 and 240 BPM.');
+        const price = normalizeTrackPrice(b.price ?? null);
         const id = crypto.randomUUID();
         await run(
-          'INSERT INTO tracks (id,owner,title,kind,genre,bpm,musicalKey,visibility,permission,fileId,created) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+          'INSERT INTO tracks (id,owner,title,kind,genre,bpm,musicalKey,visibility,permission,fileId,price,created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
           id,
           uid,
           str(b.title),
@@ -117,6 +121,7 @@ export async function POST(req: Request) {
           choice(b.visibility, ['private', 'public']),
           choice(b.permission, ['listen', 'collaborate']),
           b.fileId,
+          price,
           now,
         );
         result = { id };
@@ -127,6 +132,16 @@ export async function POST(req: Request) {
           'UPDATE tracks SET visibility=?,permission=? WHERE id=? AND owner=?',
           choice(b.visibility, ['private', 'public']),
           choice(b.permission, ['listen', 'collaborate']),
+          str(b.id),
+          uid,
+        );
+        break;
+      }
+      case 'trackPrice': {
+        const price = normalizeTrackPrice(b.price ?? null);
+        await run(
+          'UPDATE tracks SET price=? WHERE id=? AND owner=?',
+          price,
           str(b.id),
           uid,
         );

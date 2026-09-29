@@ -14,6 +14,9 @@ import {
   Check,
   Trash2,
   Handshake,
+  CircleDollarSign,
+  CreditCard,
+  Plus,
 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
@@ -29,7 +32,15 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Pick, Avatar, action, upload, Confirm } from './helpers';
+import {
+  Pick,
+  Avatar,
+  action,
+  upload,
+  Confirm,
+  stripeAction,
+  formatPrice,
+} from './helpers';
 import CoverArt from './cover-art';
 import { genres, type Track } from '@/lib/catalog';
 export function UploadForm({
@@ -48,6 +59,7 @@ export function UploadForm({
     [visibility, setVisibility] = useState('private'),
     [permission, setPermission] = useState('listen'),
     [rights, setRights] = useState(false),
+    [price, setPrice] = useState(''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const input = useRef<HTMLInputElement>(null);
@@ -81,6 +93,9 @@ export function UploadForm({
             musicalKey: key,
             visibility,
             permission,
+            price: price
+              ? Math.round(Math.max(0, Number(price) || 0) * 100)
+              : null,
             rights,
           });
           notify(
@@ -215,11 +230,30 @@ export function UploadForm({
             },
           ]}
         />
+        <label className="field sell-field">
+          <span>Sell this {kind === 'beat' ? 'beat' : 'song'} (optional)</span>
+          <div className="input-prefix">
+            <CircleDollarSign size={16} />
+            <input
+              aria-label="Track price in US dollars"
+              type="number"
+              min={1}
+              max={10000}
+              placeholder="50"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+            />
+          </div>
+          <small className="small-note">
+            US dollars, charged by card through Stripe. Buyers get a license
+            receipt and a message thread with you. Leave empty to share freely.
+          </small>
+        </label>
         <p>
           Open collaboration allows artists and engineers to create private
-          working versions. Commercial release, ownership, and revenue splits
-          require a separate agreement. Existing working versions are not
-          recalled by changing visibility.
+          working versions. Sales and licenses are paid to you directly; you
+          keep creative ownership. Existing working versions are not recalled by
+          changing visibility.
         </p>
       </div>
       <label className="check-label">
@@ -253,11 +287,13 @@ export function ProfileForm({
   user,
   onDone,
   notify,
+  payments,
 }: {
   profile: any;
   user: any;
   onDone: () => void;
   notify: (s: string) => void;
+  payments?: { configured: boolean; chargesEnabled: boolean } | null;
 }) {
   const [name, setName] = useState(profile?.name || user?.name || ''),
     [username, setUsername] = useState(profile?.username || ''),
@@ -268,6 +304,10 @@ export function ProfileForm({
     [location, setLocation] = useState(profile?.location || ''),
     [visibility, setVisibility] = useState(profile?.visibility || 'private'),
     [avatar, setAvatar] = useState(profile?.avatar || null),
+    [rates, setRates] = useState<any[]>(
+      profile?.rates ? JSON.parse(profile.rates) : [],
+    ),
+    [payBusy, setPayBusy] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const input = useRef<HTMLInputElement>(null);
@@ -288,6 +328,7 @@ export function ProfileForm({
             location,
             visibility,
             avatar,
+            rates,
           });
           notify('Your profile is saved.');
           onDone();
@@ -409,6 +450,153 @@ export function ProfileForm({
           onCheckedChange={(v) => setVisibility(v ? 'public' : 'private')}
         />
       </div>
+      <div className="services-box">
+        <div className="services-head">
+          <CircleDollarSign size={20} />
+          <span>
+            Charge for your work
+            <small>
+              List up to 3 services. Buyers pay by card and reach you in a
+              private thread.
+            </small>
+          </span>
+        </div>
+        {rates.map((rate, index) => (
+          <div className="service-row" key={index}>
+            <label className="field service-role">
+              <span>Role</span>
+              <select
+                aria-label={'Service role ' + (index + 1)}
+                value={rate.role || roles[0] || 'Producer'}
+                onChange={(e) =>
+                  setRates(
+                    rates.map((r, i) =>
+                      i === index ? { ...r, role: e.target.value } : r,
+                    ),
+                  )
+                }
+              >
+                {roles.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field service-name">
+              <span>Service</span>
+              <input
+                aria-label={'Service name ' + (index + 1)}
+                maxLength={60}
+                placeholder="Custom beat, mix per song…"
+                value={rate.service || ''}
+                onChange={(e) =>
+                  setRates(
+                    rates.map((r, i) =>
+                      i === index ? { ...r, service: e.target.value } : r,
+                    ),
+                  )
+                }
+              />
+            </label>
+            <label className="field service-price">
+              <span>Price (USD)</span>
+              <input
+                aria-label={'Service price ' + (index + 1)}
+                type="number"
+                min={1}
+                max={10000}
+                placeholder="150"
+                value={rate.amountCents ? rate.amountCents / 100 : ''}
+                onChange={(e) =>
+                  setRates(
+                    rates.map((r, i) =>
+                      i === index
+                        ? {
+                            ...r,
+                            amountCents: Math.round(
+                              Math.max(0, Number(e.target.value) || 0) * 100,
+                            ),
+                          }
+                        : r,
+                    ),
+                  )
+                }
+              />
+            </label>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={'Remove service ' + (index + 1)}
+              onClick={() => setRates(rates.filter((_, i) => i !== index))}
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        ))}
+        {rates.length < 3 && (
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() =>
+              setRates([
+                ...rates,
+                { role: roles[0] || 'Producer', service: '', amountCents: 0 },
+              ])
+            }
+          >
+            <Plus size={15} /> Add a service
+          </button>
+        )}
+        {rates.length > 0 && (
+          <p className="small-note">
+            Bookings will show:{' '}
+            {rates
+              .filter((r) => r.service && r.amountCents >= 100)
+              .map((r) => `${r.service} · ${formatPrice(r.amountCents)}`)
+              .join('  ·  ') || 'finish naming and pricing your services'}
+          </p>
+        )}
+      </div>
+      <div className="privacy-box switch-row payouts-box">
+        <div>
+          <CreditCard size={22} />
+          <span>
+            Get paid
+            <small>
+              {payments?.chargesEnabled
+                ? 'Your account can receive card payments. Buyers see Book & pay buttons.'
+                : payments?.configured
+                  ? 'Connect a Stripe account once to accept card payments for your services and tracks.'
+                  : 'Card payments are coming soon — your prices will be listed for bookings meanwhile.'}
+            </small>
+          </span>
+        </div>
+        {payments?.configured && !payments?.chargesEnabled && (
+          <button
+            type="button"
+            className="button secondary"
+            disabled={payBusy}
+            onClick={async () => {
+              setPayBusy(true);
+              try {
+                const { url } = await stripeAction({ action: 'onboard' });
+                window.location.href = url;
+              } catch (e: any) {
+                notify(e.message);
+                setPayBusy(false);
+              }
+            }}
+          >
+            {payBusy ? 'Connecting…' : 'Connect payouts'}
+          </button>
+        )}
+        {payments?.chargesEnabled && (
+          <span className="pay-ok">
+            <Check size={15} /> Ready
+          </span>
+        )}
+      </div>
       {error && (
         <div className="error-banner" role="alert">
           {error}
@@ -433,6 +621,9 @@ export function TrackDetail({
   user,
   onRefresh,
   notify,
+  onBuy,
+  sellerChargeable,
+  payments,
 }: {
   track: Track | null;
   onClose: () => void;
@@ -445,6 +636,9 @@ export function TrackDetail({
   user: any;
   onRefresh: () => void;
   notify: (s: string) => void;
+  onBuy?: (t: Track) => void;
+  sellerChargeable?: boolean;
+  payments?: { configured: boolean } | null;
 }) {
   const [comments, setComments] = useState<any[]>([]),
     [text, setText] = useState(''),
@@ -511,6 +705,25 @@ export function TrackDetail({
                   <Heart size={17} fill={saved ? 'currentColor' : 'none'} />
                   {saved ? 'Saved' : 'Save'}
                 </button>
+                {!!track.price &&
+                  track.owner !== user?.id &&
+                  payments?.configured && (
+                    <button
+                      className={
+                        'button ' + (sellerChargeable ? 'primary' : 'secondary')
+                      }
+                      disabled={!sellerChargeable || !onBuy}
+                      title={
+                        sellerChargeable
+                          ? 'Buy a license — card payment via Stripe'
+                          : 'Card payments pending on this creator'
+                      }
+                      onClick={() => onBuy?.(track)}
+                    >
+                      <CircleDollarSign size={17} />
+                      Buy · {formatPrice(track.price)}
+                    </button>
+                  )}
               </div>
               <div className="permission-note">
                 <ShieldCheck size={20} />

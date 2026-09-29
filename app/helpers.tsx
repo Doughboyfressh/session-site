@@ -32,6 +32,29 @@ export async function action(
     });
   return j;
 }
+export async function stripeAction(body: any): Promise<{ url: string }> {
+  const r = await fetch('/api/stripe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const j = (await r.json()) as any;
+  if (!r.ok)
+    throw Object.assign(new Error(j.error || 'Payments are unavailable.'), {
+      status: r.status,
+    });
+  return j;
+}
+export function formatPrice(cents: number): string {
+  const dollars = cents / 100;
+  return (
+    '$' +
+    (Number.isInteger(dollars)
+      ? dollars.toLocaleString('en-US')
+      : dollars.toLocaleString('en-US', { minimumFractionDigits: 2 }))
+  );
+}
+
 export async function upload(
   file: File,
   purpose = 'audio',

@@ -920,3 +920,216 @@ main .feed {
   .feed-hero-copy { padding: 20px; }
   .post-play { width: 46px; height: 46px; }
 }
+
+/* ================= PAYMENTS ================= */
+.services-box {
+  border: 1px solid #4d2c31;
+  background: #2c171a;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px 0;
+}
+.services-head {
+  display: flex;
+  gap: 13px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+.services-head > svg { color: var(--primary); margin-top: 3px; }
+.services-head span {
+  font-size: 15px;
+  color: #f4eff1;
+  font-weight: 600;
+}
+.services-head small {
+  display: block;
+  font-size: 13px;
+  color: #9bab8b;
+  font-weight: 400;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.service-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) 110px 38px;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 4px;
+}
+.service-row .field { margin: 8px 0; }
+.service-row select,
+.service-row input {
+  font-size: 14px;
+  padding: 10px 12px;
+}
+.payouts-box { margin-bottom: 20px; }
+.pay-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #a5d375;
+  font-size: 13px;
+  font-weight: 600;
+}
+.sell-field .input-prefix input { padding-left: 34px; }
+
+/* profile dialog services */
+.dialog-services {
+  text-align: left;
+  border: 1px solid #4d2c31;
+  background: #2c171a;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 14px 0;
+}
+.dialog-services h3 {
+  font-size: 11px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: #ff8091;
+  margin-bottom: 10px;
+}
+.dialog-service {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid #3b252a;
+}
+.dialog-service:last-child { border-bottom: 0; }
+.dialog-service > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.dialog-service strong {
+  display: block;
+  font-size: 14px;
+  color: #f4eff1;
+}
+.dialog-service small {
+  display: block;
+  font-size: 11px;
+  color: #9d9095;
+  margin-top: 2px;
+}
+.service-price-tag {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ff8091;
+  white-space: nowrap;
+}
+
+/* feed + library price chips */
+.chip.price-chip {
+  color: #fff;
+  background: #ff2e43;
+  border-color: #ff2e43;
+}
+.cover-price {
+  position: absolute;
+  right: 10px;
+  top: 42px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: #ff2e43;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+}
+.post-act.buy { color: #b6a9ae; }
+.post-act.buy.ready {
+  color: #ff2e43;
+  font-weight: 700;
+}
+.post-act.buy.ready:hover {
+  background: #ff2e4318;
+}
+
+/* payments panel on My profile */
+.profile-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+.payments-panel {
+  border: 1px solid #3f2328;
+  border-radius: 14px;
+  background: #1d1114f2;
+  backdrop-filter: blur(14px);
+  padding: 22px;
+  box-shadow: 0 26px 60px -34px #ff2e4333;
+}
+.payments-panel .section-title { margin: 0 0 14px; }
+.payments-panel .section-title h2 {
+  font-size: 16px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.pay-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+}
+.pay-chip.ok {
+  background: #2c4020;
+  color: #b5db85;
+  border: 1px solid #4d6b35;
+}
+.payouts-status p {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #b0a4a8;
+  margin-bottom: 12px;
+}
+.payments-sub {
+  font-size: 11px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: #ff8091;
+  margin: 18px 0 8px;
+}
+.order-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #3a2227;
+  border-radius: 9px;
+  background: #241316;
+  margin-bottom: 8px;
+}
+.order-row strong {
+  display: block;
+  font-size: 13px;
+  color: #f4eff1;
+}
+.order-row small {
+  display: block;
+  font-size: 10px;
+  color: #9d9095;
+  text-transform: capitalize;
+  margin-top: 2px;
+}
+.order-amount {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ff8091;
+}
+.order-row.paid { border-left: 3px solid #a5d375; }
+.order-row.pending { border-left: 3px solid #e0a458; }
+.order-row.canceled, .order-row.refunded { border-left: 3px solid #7d6c72; }
+
+@media (max-width: 1050px) {
+  .profile-columns { grid-template-columns: 1fr; }
+  .service-row { grid-template-columns: 1fr 1fr; }
+  .service-row .icon-button { justify-self: end; }
+}

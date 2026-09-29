@@ -31,6 +31,7 @@ import {
   Share2,
   MessageCircle,
   MoreHorizontal,
+  CircleDollarSign,
 } from 'lucide-react';
 import CoverArt, { coverWaveform } from './cover-art';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -42,7 +43,15 @@ import {
 } from '@/components/ui/dialog';
 import { demos, genres, type Track } from '@/lib/catalog';
 import { context, trackFrom, bufferFor, playMix } from '@/lib/audio';
-import { Pick, Avatar, Confirm, Range, action } from './helpers';
+import {
+  Pick,
+  Avatar,
+  Confirm,
+  Range,
+  action,
+  stripeAction,
+  formatPrice,
+} from './helpers';
 import { UploadForm, ProfileForm, TrackDetail } from './forms';
 import LegalCenter from './legal-center';
 import Diagnostics from './diagnostics';
@@ -71,6 +80,8 @@ const empty = {
   saved: [],
   follows: [],
   unreadNotifications: 0,
+  payments: { configured: false, chargesEnabled: false, payoutsEnabled: false },
+  orders: [],
 } as any;
 const captions: Record<string, string> = {
   Discover:
@@ -652,6 +663,36 @@ export default function SessionApp({
       ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
       : String(n);
   }
+  const [payBusy, setPayBusy] = useState(false);
+  async function payForService(profile: any, serviceIndex: number) {
+    setPayBusy(true);
+    try {
+      const { url } = await stripeAction({
+        action: 'checkout',
+        kind: 'service',
+        seller: profile.id,
+        serviceIndex,
+      });
+      window.location.href = url;
+    } catch (e: any) {
+      notify(e.message);
+      setPayBusy(false);
+    }
+  }
+  async function payForTrack(track: Track) {
+    setPayBusy(true);
+    try {
+      const { url } = await stripeAction({
+        action: 'checkout',
+        kind: 'track',
+        track: track.id,
+      });
+      window.location.href = url;
+    } catch (e: any) {
+      notify(e.message);
+      setPayBusy(false);
+    }
+  }
   async function shareTrack(t: Track) {
     try {
       await navigator.clipboard.writeText(
@@ -662,6 +703,28 @@ export default function SessionApp({
       notify('Could not copy the link on this browser.');
     }
   }
+  function ordersBy(orders: any[], side: 'seller' | 'buyer') {
+    return orders.filter((o) => o[side] === user?.id);
+  }
+  function renderOrder(o: any) {
+    let name = 'Order';
+    try {
+      name = JSON.parse(o.serviceSnapshot)?.name || 'Order';
+    } catch {}
+    return (
+      <div className={'order-row ' + o.status} key={o.id}>
+        <span>
+          <strong>{name}</strong>
+          <small>
+            {o.status === 'paid' ? 'Paid' : o.status}
+            {' · '}
+            {o.kind === 'service' ? 'service' : 'track'}
+          </small>
+        </span>
+        <span className="order-amount">{formatPrice(o.amountCents)}</span>
+      </div>
+    );
+  }
   function feedPost(t: Track) {
     const isSaved = state.saved.includes(t.id),
       active = playing?.id === t.id,
@@ -670,7 +733,12 @@ export default function SessionApp({
       wave = coverWaveform(t.id + t.title, 40),
       progress = active && duration ? Math.min(1, elapsed / duration) : 0,
       reason = recommendationReason(t),
-      studioAllowed = t.permission === 'collaborate' || t.owner === user?.id;
+      studioAllowed = t.permission === 'collaborate' || t.owner === user?.id,
+      sellerChargeable =
+        !!t.price &&
+        state.payments.configured &&
+        !!creatorProfile?.chargesEnabled,
+      canBuy = !!t.price && t.owner !== user?.id && state.payments.configured;
     return (
       <article className="feed-post" key={t.id}>
         <header className="post-head">
@@ -752,6 +820,9 @@ export default function SessionApp({
                   ? 'Listen only'
                   : 'Private'}
             </span>
+            {t.price ? (
+              <span className="chip price-chip">{formatPrice(t.price)}</span>
+            ) : null}
           </div>
           {reason && <span className="post-reason">{reason}</span>}
         </div>
@@ -776,6 +847,21 @@ export default function SessionApp({
           >
             <SlidersHorizontal size={16} /> Studio
           </button>
+          {canBuy && (
+            <button
+              className={'post-act buy' + (sellerChargeable ? ' ready' : '')}
+              disabled={payBusy || !sellerChargeable}
+              title={
+                sellerChargeable
+                  ? 'Buy a license — card payment via Stripe'
+                  : 'Card payments pending on this creator'
+              }
+              onClick={() => payForTrack(t)}
+            >
+              <CircleDollarSign size={16} />
+              {sellerChargeable ? 'Buy' : 'Priced'}
+            </button>
+          )}
         </footer>
       </article>
     );
@@ -1332,13 +1418,79 @@ export default function SessionApp({
             )
           ) : view === 'My profile' ? (
             user ? (
-              <ProfileForm
-                key={state.profile?.id || 'new'}
-                profile={state.profile}
-                user={user}
-                notify={notify}
-                onDone={refresh}
-              />
+              <div className="profile-columns">
+                <ProfileForm
+                  key={state.profile?.id || 'new'}
+                  profile={state.profile}
+                  user={user}
+                  notify={notify}
+                  payments={state.payments}
+                  onDone={refresh}
+                />
+                <aside className="payments-panel">
+                  <div className="section-title">
+                    <h2>
+                      <CircleDollarSign size={17} /> Payments
+                    </h2>
+                    {state.payments.chargesEnabled && (
+                      <span className="pay-chip ok">
+                        <Check size={12} /> Ready to sell
+                      </span>
+                    )}
+                  </div>
+                  <div className="payouts-status">
+                    {state.payments.chargesEnabled ? (
+                      <p>
+                        Your Stripe account is connected. Card payments for your
+                        services and tracks go straight to you.
+                      </p>
+                    ) : state.payments.configured ? (
+                      <>
+                        <p>
+                          Connect a Stripe account to accept card payments for
+                          your services and tracks.
+                        </p>
+                        <button
+                          className="button primary"
+                          disabled={payBusy}
+                          onClick={async () => {
+                            setPayBusy(true);
+                            try {
+                              const { url } = await stripeAction({
+                                action: 'onboard',
+                              });
+                              window.location.href = url;
+                            } catch (e: any) {
+                              notify(e.message);
+                              setPayBusy(false);
+                            }
+                          }}
+                        >
+                          {payBusy ? 'Connecting…' : 'Connect payouts'}
+                        </button>
+                      </>
+                    ) : (
+                      <p>
+                        Card payments are coming soon to SESSION. Your prices
+                        are listed, and collaborators can request bookings
+                        today.
+                      </p>
+                    )}
+                  </div>
+                  <h3 className="payments-sub">Sales</h3>
+                  {ordersBy(state.orders, 'seller').length ? (
+                    ordersBy(state.orders, 'seller').map(renderOrder)
+                  ) : (
+                    <p className="small-note">No sales yet.</p>
+                  )}
+                  <h3 className="payments-sub">Purchases</h3>
+                  {ordersBy(state.orders, 'buyer').length ? (
+                    ordersBy(state.orders, 'buyer').map(renderOrder)
+                  ) : (
+                    <p className="small-note">No purchases yet.</p>
+                  )}
+                </aside>
+              </div>
             ) : (
               signin
             )
@@ -1711,6 +1863,13 @@ export default function SessionApp({
       <TrackDetail
         track={detail}
         user={user}
+        onBuy={payForTrack}
+        sellerChargeable={
+          state.payments.configured &&
+          !!state.profiles.find((p: any) => p.id === detail?.owner)
+            ?.chargesEnabled
+        }
+        payments={state.payments}
         saved={!!detail && state.saved.includes(detail.id)}
         onClose={() => setDetail(null)}
         onPlay={playPreview}
@@ -1796,6 +1955,58 @@ export default function SessionApp({
               </DialogDescription>
               <p>{selectedProfile.bio}</p>
               <p>{selectedProfile.location}</p>
+              {(() => {
+                const rates = (() => {
+                  try {
+                    return JSON.parse(selectedProfile.rates || '[]');
+                  } catch {
+                    return [];
+                  }
+                })();
+                if (!rates.length) return null;
+                const chargeable =
+                  state.payments.configured && selectedProfile.chargesEnabled;
+                return (
+                  <div className="dialog-services">
+                    <h3>Services</h3>
+                    {rates.map((rate: any, index: number) => (
+                      <div className="dialog-service" key={index}>
+                        <span>
+                          <strong>{rate.service}</strong>
+                          <small>
+                            {rate.role}
+                            {rate.note ? ' · ' + rate.note : ''}
+                          </small>
+                        </span>
+                        <span className="service-price-tag">
+                          {formatPrice(rate.amountCents)}
+                        </span>
+                        {selectedProfile.id !== user?.id && (
+                          <button
+                            className={
+                              'button ' +
+                              (chargeable ? 'primary small' : 'secondary small')
+                            }
+                            disabled={payBusy}
+                            title={
+                              chargeable
+                                ? 'Pay by card through Stripe'
+                                : 'Send a booking request — card payments pending on this creator'
+                            }
+                            onClick={() =>
+                              chargeable
+                                ? payForService(selectedProfile, index)
+                                : requestCollaboration(selectedProfile)
+                            }
+                          >
+                            {chargeable ? 'Book & pay' : 'Request booking'}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
               {selectedProfile.id !== user?.id && (
                 <div className="actions">
                   <button

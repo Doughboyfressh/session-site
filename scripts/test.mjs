@@ -24,6 +24,7 @@ const suites = [
   'creation-atomic',
   'take-bank-server',
   'backend',
+  'payments',
   'production',
 ];
 const results = [];
