@@ -24,12 +24,12 @@ function random(seed: number) {
 }
 
 export const COVER_THEMES = [
-  { core: '#ff2e43', ring: '#ffffff', wash: '#171416', deep: '#0f0e0f' },
-  { core: '#e9e9ec', ring: '#ff2e43', wash: '#141314', deep: '#0d0c0d' },
+  { core: '#d11a33', ring: '#ffffff', wash: '#171416', deep: '#0f0e0f' },
+  { core: '#e9e9ec', ring: '#d11a33', wash: '#141314', deep: '#0d0c0d' },
   { core: '#ffffff', ring: '#8e8e93', wash: '#181718', deep: '#101010' },
-  { core: '#ff2e43', ring: '#ffb3bb', wash: '#1a1416', deep: '#100c0d' },
-  { core: '#d5223b', ring: '#e7e2e4', wash: '#171314', deep: '#0e0c0d' },
-  { core: '#c9c9cc', ring: '#ff2e43', wash: '#161415', deep: '#0f0e0f' },
+  { core: '#d11a33', ring: '#ffb3bb', wash: '#1a1416', deep: '#100c0d' },
+  { core: '#b01528', ring: '#e7e2e4', wash: '#171314', deep: '#0e0c0d' },
+  { core: '#c9c9cc', ring: '#d11a33', wash: '#161415', deep: '#0f0e0f' },
 ] as const;
 
 export function coverTheme(seedText: string) {
