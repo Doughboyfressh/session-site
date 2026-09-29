@@ -27,19 +27,12 @@ import {
   Bell,
   MessagesSquare,
   Handshake,
+  Home,
+  Share2,
+  MessageCircle,
+  MoreHorizontal,
 } from 'lucide-react';
-import {
-  Sidebar,
-  SidebarProvider,
-  SidebarContent,
-  SidebarHeader,
-  SidebarFooter,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarTrigger,
-  useSidebar,
-} from '@/components/ui/sidebar';
+import CoverArt, { coverWaveform } from './cover-art';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
@@ -653,6 +646,139 @@ export default function SessionApp({
     if (track.likes) return 'Saved by SESSION creators';
     return track.demo ? 'SESSION starter' : 'New to the community';
   }
+  function formatCount(n?: number) {
+    if (!n) return 'Like';
+    return n >= 1000
+      ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
+      : String(n);
+  }
+  async function shareTrack(t: Track) {
+    try {
+      await navigator.clipboard.writeText(
+        window.location.origin + '/?track=' + t.id,
+      );
+      notify('Link to ' + t.title + ' copied.');
+    } catch {
+      notify('Could not copy the link on this browser.');
+    }
+  }
+  function feedPost(t: Track) {
+    const isSaved = state.saved.includes(t.id),
+      active = playing?.id === t.id,
+      isPlayingTrack = active && isPlaying,
+      creatorProfile = state.profiles.find((item: any) => item.id === t.owner),
+      wave = coverWaveform(t.id + t.title, 40),
+      progress = active && duration ? Math.min(1, elapsed / duration) : 0,
+      reason = recommendationReason(t),
+      studioAllowed = t.permission === 'collaborate' || t.owner === user?.id;
+    return (
+      <article className="feed-post" key={t.id}>
+        <header className="post-head">
+          <button
+            className="post-creator"
+            onClick={() =>
+              creatorProfile ? setSelectedProfile(creatorProfile) : setDetail(t)
+            }
+          >
+            <Avatar profile={creatorProfile || { name: t.creator }} size={40} />
+            <span>
+              <strong>{t.creator}</strong>
+              <small>
+                {creatorProfile ? '@' + creatorProfile.username : t.kind}
+                {t.owner && t.owner === user?.id ? ' · you' : ''}
+              </small>
+            </span>
+          </button>
+          <div className="post-head-actions">
+            {t.owner &&
+              !state.follows.includes(t.owner) &&
+              t.owner !== user?.id && (
+                <button
+                  className="button secondary small"
+                  onClick={() => follow({ id: t.owner, name: t.creator })}
+                >
+                  Follow
+                </button>
+              )}
+            <button
+              className="post-more"
+              aria-label={'More about ' + t.title}
+              onClick={() => setDetail(t)}
+            >
+              <MoreHorizontal size={18} />
+            </button>
+          </div>
+        </header>
+        <div className="post-media">
+          <button
+            className="post-cover"
+            onClick={() => playPreview(t)}
+            aria-label={(isPlayingTrack ? 'Pause ' : 'Play ') + t.title}
+          >
+            <CoverArt
+              seed={t.id + t.title}
+              label={t.title}
+              size={0}
+              className="cover-fill"
+              spinning={!!isPlayingTrack}
+            />
+            <span className="post-play">
+              {isPlayingTrack ? <Pause size={22} /> : <Play size={22} />}
+            </span>
+          </button>
+        </div>
+        <div className="post-wave" aria-hidden="true">
+          {wave.map((v, i) => (
+            <i
+              key={i}
+              style={{
+                height: Math.round(v * 100) + '%',
+                opacity: i / wave.length <= progress ? 1 : 0.35,
+              }}
+            />
+          ))}
+        </div>
+        <div className="post-info">
+          <strong>{t.title}</strong>
+          <div className="post-chips">
+            <span className="chip">{t.genre}</span>
+            {t.bpm ? <span className="chip">{t.bpm} BPM</span> : null}
+            {t.musicalKey ? <span className="chip">{t.musicalKey}</span> : null}
+            <span className={'chip perm-' + t.permission}>
+              {t.permission === 'collaborate'
+                ? 'Open collab'
+                : t.permission === 'listen'
+                  ? 'Listen only'
+                  : 'Private'}
+            </span>
+          </div>
+          {reason && <span className="post-reason">{reason}</span>}
+        </div>
+        <footer className="post-actions">
+          <button
+            className={'post-act' + (isSaved ? ' liked' : '')}
+            onClick={() => saveTrack(t)}
+            aria-label={isSaved ? 'Unlike ' + t.title : 'Like ' + t.title}
+          >
+            <Heart size={17} /> {formatCount(t.likes)}
+          </button>
+          <button className="post-act" onClick={() => setDetail(t)}>
+            <MessageCircle size={17} /> Comments
+          </button>
+          <button className="post-act" onClick={() => void shareTrack(t)}>
+            <Share2 size={16} /> Share
+          </button>
+          <button
+            className="post-act"
+            disabled={!studioAllowed}
+            onClick={() => useTrack(t)}
+          >
+            <SlidersHorizontal size={16} /> Studio
+          </button>
+        </footer>
+      </article>
+    );
+  }
   function cards(tracks: Track[]) {
     return (
       <div className="beat-grid">
@@ -664,7 +790,12 @@ export default function SessionApp({
                 aria-label={'Details for ' + t.title}
                 onClick={() => setDetail(t)}
               >
-                <img src="/chrome-loop.png" alt={t.title + ' cover'} />
+                <CoverArt
+                  seed={t.id + t.title}
+                  label={t.title}
+                  size={0}
+                  className="cover-fill"
+                />
               </button>
               <span className="genre-label">{t.genre}</span>
               <button
@@ -774,86 +905,77 @@ export default function SessionApp({
     </div>
   );
   return (
-    <SidebarProvider
-      style={{ '--sidebar-width': '224px' } as React.CSSProperties}
-    >
-      <Sidebar className="app-sidebar">
-        <SidebarHeader>
-          <button className="brand" onClick={() => go('Discover')}>
-            <AudioLines />
-            <span>
-              session<span className="brand-dot">.</span>
-            </span>
-          </button>
-        </SidebarHeader>
-        <SidebarContent>
-          <div className="nav-caption">MAKE SOMETHING GREAT</div>
-          <NavItems
-            view={view}
-            go={go}
-            items={[
-              [Compass, 'Discover'],
-              [Disc3, 'Beat library'],
-              [Users, 'Find collaborators'],
-              [Radio, 'Studio rooms'],
-            ]}
-          />
-          <div className="nav-caption space-top">YOUR WORKSPACE</div>
-          <NavItems
-            view={view}
-            go={go}
-            items={[
-              [FolderClosed, 'My projects'],
-              [Heart, 'Saved tracks'],
-              [Bell, 'Activity', state.unreadNotifications],
-              [MessagesSquare, 'Collaborations'],
-            ]}
-          />
-          <div className="sidebar-note">
-            <AudioLines />
-            <h3>
-              Good music starts
-              <br />
-              with a connection.
-            </h3>
-            <p>
-              Your next collaborator
-              <br />
-              could be one session away.
-            </p>
-            <button onClick={() => go('Find collaborators')}>
-              Find your people <ArrowUpRight size={16} />
+    <div className="social-app">
+      <aside className="social-rail" aria-label="Primary">
+        <button
+          className="rail-brand"
+          onClick={() => go('Discover')}
+          aria-label="SESSION home"
+        >
+          <AudioLines />
+        </button>
+        <div className="rail-group">
+          {(
+            [
+              [Home, 'Feed', 'Discover'],
+              [Compass, 'Explore', 'Beat library'],
+              [Users, 'People', 'Find collaborators'],
+              [Radio, 'Rooms', 'Studio rooms'],
+              [MessagesSquare, 'Messages', 'Collaborations'],
+              [Bell, 'Alerts', 'Activity'],
+            ] as const
+          ).map(([Icon, label, target]) => (
+            <button
+              key={label}
+              className={'rail-button' + (view === target ? ' active' : '')}
+              onClick={() => go(target)}
+              aria-label={label}
+              aria-current={view === target ? 'page' : undefined}
+            >
+              <Icon size={20} />
+              {target === 'Activity' && state.unreadNotifications > 0 && (
+                <span className="rail-badge">
+                  {state.unreadNotifications > 99
+                    ? '99+'
+                    : state.unreadNotifications}
+                </span>
+              )}
+              <span className="rail-tip">{label}</span>
             </button>
-          </div>
-        </SidebarContent>
-        <SidebarFooter>
-          <button className="rights-nav" onClick={() => go('Rights & privacy')}>
-            <ShieldCheck size={17} /> Rights & privacy
+          ))}
+        </div>
+        <button
+          className={
+            'rail-button rail-create' + (view === 'Studio' ? ' active' : '')
+          }
+          onClick={() => go('Studio')}
+          aria-label="Create in the studio"
+        >
+          <SlidersHorizontal size={20} />
+          <span className="rail-tip">Create</span>
+        </button>
+        <div className="rail-spacer" />
+        <button
+          className="rail-button"
+          onClick={() => go('Rights & privacy')}
+          aria-label="Rights and privacy"
+        >
+          <ShieldCheck size={20} />
+          <span className="rail-tip">Rights</span>
+        </button>
+        <button
+          className={'rail-avatar' + (view === 'My profile' ? ' active' : '')}
+          onClick={() => go('My profile')}
+          aria-label="Your profile"
+        >
+          <Avatar profile={state.profile || user} size={30} />
+        </button>
+      </aside>
+      <div className="social-shell">
+        <header className="social-top">
+          <button className="social-brand" onClick={() => go('Discover')}>
+            session<span className="brand-dot">.</span>
           </button>
-          <button className="account" onClick={() => go('My profile')}>
-            <Avatar profile={state.profile || user} />
-            <span>
-              <strong>
-                {state.profile?.name || user?.name || 'Your creative space'}
-              </strong>
-              <small>
-                {state.profile
-                  ? '@' + state.profile.username
-                  : user
-                    ? 'Set up your profile'
-                    : 'Join the community'}
-              </small>
-            </span>
-            <ChevronRight size={16} />
-          </button>
-        </SidebarFooter>
-      </Sidebar>
-      <div className="app-shell">
-        <header className="topbar">
-          <div className="top-left">
-            <SidebarTrigger />
-            <span>THE MUSIC COMMUNITY</span>
-          </div>
           <div className="global-search">
             <Search size={17} />
             <input
@@ -876,8 +998,11 @@ export default function SessionApp({
             />
             <kbd>⌕</kbd>
           </div>
-          <button className="button primary" onClick={() => go('Upload')}>
-            <Plus size={17} /> Upload music
+          <button
+            className="button primary social-upload"
+            onClick={() => go('Upload')}
+          >
+            <Plus size={17} /> Upload
           </button>
         </header>
         {notice && (
@@ -918,7 +1043,7 @@ export default function SessionApp({
               </button>
             </div>
           )}
-          {!['Studio', 'Room'].includes(view) && (
+          {!['Studio', 'Room', 'Discover'].includes(view) && (
             <div className="page-heading">
               <div>
                 <div className="eyebrow">
@@ -946,197 +1071,168 @@ export default function SessionApp({
             </div>
           )}
           {view === 'Discover' ? (
-            <div className="main-columns">
-              <div className="main-feed">
-                <section className="feature">
-                  <div className="feature-copy">
-                    <span className="pill">
-                      <span className="status-dot" /> MADE FOR COLLABORATION
-                    </span>
-                    <h2>
-                      Your next track.
-                      <br />
-                      <em>Our kind of energy.</em>
-                    </h2>
-                    <p>
-                      Find a sound that moves you.
-                      <br />
-                      Make it something only you could create.
-                    </p>
-                    <button
-                      className="button primary"
-                      onClick={() => go('Beat library')}
-                    >
-                      Explore the beats <ArrowUpRight size={17} />
-                    </button>
-                  </div>
-                  <Scene3D
-                    variant="hero"
-                    poster="/session-hero.png"
-                    alt="3D equalizer pillars glowing red in a black mirror studio"
-                    label="Interactive 3D equalizer canyon. Drag to orbit."
-                  />
-                  <span className="feature-caption">
-                    CONNECT. CREATE. REPEAT.
+            <div className="feed">
+              <section className="feed-hero">
+                <div className="feed-hero-copy">
+                  <span className="pill">
+                    <span className="status-dot" /> THE MUSIC COMMUNITY
                   </span>
-                </section>
-                <div className="section-title">
                   <h2>
-                    Find your frequency
-                    <span className="tiny-label">
-                      {state.tracks.length
-                        ? 'FRESH SOUNDS'
-                        : 'STARTER COLLECTION'}
-                    </span>
+                    Your music world
+                    <br />
+                    <em>lives here.</em>
                   </h2>
-                  <button onClick={() => go('Beat library')}>
-                    View all <ArrowRight size={16} />
+                  <p>
+                    Sounds from people you follow, rooms happening now, and the
+                    next thing you'll wish you made.
+                  </p>
+                  <button
+                    className="button primary"
+                    onClick={() => go('Studio')}
+                  >
+                    Start a session <ArrowUpRight size={17} />
                   </button>
                 </div>
-                {discoveryTabs()}
-                {genreTabs()}
+                <Scene3D
+                  variant="hero"
+                  poster="/session-hero.png"
+                  alt="3D equalizer pillars glowing red in a black mirror studio"
+                  label="Interactive 3D equalizer canyon. Drag to orbit."
+                />
+              </section>
+              <div className="stories-rail" aria-label="Rooms and creators">
+                <button
+                  className="story story-add"
+                  onClick={() => {
+                    if (signIn()) setRoomModal(true);
+                  }}
+                >
+                  <span className="story-ring add">
+                    <Plus size={16} />
+                  </span>
+                  <small>Create room</small>
+                </button>
+                {state.rooms.map((room: any) => (
+                  <button
+                    className="story"
+                    key={room.id}
+                    onClick={() => enterRoom(room.id)}
+                  >
+                    <span
+                      className={
+                        'story-ring' + (room.active > 0 ? ' live' : '')
+                      }
+                    >
+                      <Radio size={15} />
+                    </span>
+                    <small>
+                      {room.name}
+                      {room.active > 0 ? ` · ${room.active} live` : ''}
+                    </small>
+                  </button>
+                ))}
+                {state.profiles
+                  .filter((p: any) => state.follows.includes(p.id))
+                  .slice(0, 9)
+                  .map((p: any) => (
+                    <button
+                      className="story"
+                      key={p.id}
+                      onClick={() => setSelectedProfile(p)}
+                    >
+                      <span className="story-ring followed">
+                        <Avatar profile={p} size={44} />
+                      </span>
+                      <small>{p.username || p.name}</small>
+                    </button>
+                  ))}
+                {state.profiles
+                  .filter(
+                    (p: any) =>
+                      !state.follows.includes(p.id) && p.id !== user?.id,
+                  )
+                  .sort(
+                    (a: any, b: any) => (b.followers || 0) - (a.followers || 0),
+                  )
+                  .slice(0, 5)
+                  .map((p: any) => (
+                    <button
+                      className="story"
+                      key={p.id}
+                      onClick={() => setSelectedProfile(p)}
+                    >
+                      <span className="story-ring">
+                        <Avatar profile={p} size={44} />
+                      </span>
+                      <small>{p.username || p.name}</small>
+                    </button>
+                  ))}
+              </div>
+              {discoveryTabs()}
+              {genreTabs()}
+              <div className="feed-posts">
                 {filtered.length ? (
-                  cards(filtered.slice(0, 8))
+                  filtered.slice(0, 12).map((track: Track) => feedPost(track))
                 ) : (
                   <Empty
                     title="Nothing on this frequency yet."
                     text="Try another genre or clear your search."
                   />
                 )}
-                <section className="workflow">
-                  <div className="section-title">
-                    <h2>Different talents. Same wavelength.</h2>
-                  </div>
-                  <div className="role-grid">
-                    {[
-                      [
-                        Disc3,
-                        'For producers',
-                        'Set the tone.',
-                        'Upload a beat. Find the voice it needs.',
-                      ],
-                      [
-                        Mic2,
-                        'For artists',
-                        'Make it yours.',
-                        'Find your sound. Record your next track.',
-                      ],
-                      [
-                        SlidersHorizontal,
-                        'For engineers',
-                        'Bring it to life.',
-                        'Find a song. Shape the final sound.',
-                      ],
-                    ].map(([Icon, label, title, desc]: any) => (
-                      <button
-                        className="role-card"
-                        key={label}
-                        onClick={() =>
-                          go(
-                            label === 'For engineers'
-                              ? 'Songs to engineer'
-                              : label === 'For producers'
-                                ? 'Upload'
-                                : 'Beat library',
-                          )
-                        }
-                      >
-                        <Icon size={21} />
-                        <span>{label}</span>
-                        <h3>{title}</h3>
-                        <p>{desc}</p>
-                        <ArrowUpRight size={17} />
-                      </button>
-                    ))}
-                  </div>
-                </section>
               </div>
-              <aside className="right-rail">
-                <section className="room-teaser">
-                  <div className="section-title">
-                    <h2>Studio rooms</h2>
-                    <Radio size={18} className="green-text" />
-                  </div>
-                  <div className="room-shot">
-                    <img
-                      src="/session-room.png"
-                      alt="3D studio room with a red-lit console and glowing monitors"
-                    />
-                    <span className="room-shot-badge">
-                      <Headphones size={11} /> INSIDE THE STUDIO
-                    </span>
-                  </div>
-                  <h3>
-                    Less back and forth.
-                    <br />
-                    More making music.
-                  </h3>
-                  <p>
-                    A shared space for your sound.
-                    <br />
-                    Video, conversation, and music
-                    <br />
-                    in one session.
-                  </p>
-                  <button
-                    className="button secondary"
-                    onClick={() => {
-                      if (signIn()) setRoomModal(true);
-                    }}
-                  >
-                    Create a room <Plus size={16} />
-                  </button>
-                  <div className="private-note">
-                    <LockKeyhole size={13} /> Invite only. Your circle.
-                  </div>
-                </section>
-                <section className="community-note">
-                  <span className="eyebrow">BUILT FOR THE PROCESS</span>
-                  <h3>
-                    From first idea
-                    <br />
-                    to final bounce.
-                  </h3>
+              <section className="workflow">
+                <div className="section-title">
+                  <h2>Different talents. Same wavelength.</h2>
+                </div>
+                <div className="role-grid">
                   {[
                     [
                       Disc3,
-                      'Start with a beat',
-                      'Discover your next direction',
+                      'For producers',
+                      'Set the tone.',
+                      'Upload a beat. Find the voice it needs.',
                     ],
-                    [Mic2, 'Add your voice', 'Record right in the studio'],
+                    [
+                      Mic2,
+                      'For artists',
+                      'Make it yours.',
+                      'Find your sound. Record your next track.',
+                    ],
                     [
                       SlidersHorizontal,
-                      'Find your finish',
-                      'Connect with an engineer',
+                      'For engineers',
+                      'Bring it to life.',
+                      'Find a song. Shape the final sound.',
                     ],
-                  ].map(([Icon, title, sub]: any) => (
-                    <div key={title}>
-                      <span className="round-icon">
-                        <Icon size={17} />
-                      </span>
-                      <p>
-                        {title}
-                        <small>{sub}</small>
-                      </p>
-                    </div>
+                  ].map(([Icon, label, title, desc]: any) => (
+                    <button
+                      className="role-card"
+                      key={label}
+                      onClick={() =>
+                        go(
+                          label === 'For engineers'
+                            ? 'Songs to engineer'
+                            : label === 'For producers'
+                              ? 'Upload'
+                              : 'Beat library',
+                        )
+                      }
+                    >
+                      <Icon size={21} />
+                      <span>{label}</span>
+                      <h3>{title}</h3>
+                      <p>{desc}</p>
+                      <ArrowUpRight size={17} />
+                    </button>
                   ))}
-                </section>
-                <section className="ownership">
-                  <ShieldCheck size={21} />
-                  <h3>Your music. Your say.</h3>
-                  <p>
-                    You control who hears your work and who gets to collaborate.
-                  </p>
-                  <button onClick={() => go('Rights & privacy')}>
-                    Know your rights <ArrowUpRight size={14} />
-                  </button>
-                </section>
-                <div className="rail-footer">
-                  SESSION © 2026
-                  <br />
-                  INDEPENDENT SOUNDS. SHARED SPACE.
                 </div>
-              </aside>
+              </section>
+              <div className="feed-footnote">
+                SESSION © 2026 · Independent sounds. Shared space. ·{' '}
+                <button onClick={() => go('Rights & privacy')}>
+                  Your rights
+                </button>
+              </div>
             </div>
           ) : ['Beat library', 'Songs to engineer', 'Saved tracks'].includes(
               view,
@@ -1511,12 +1607,39 @@ export default function SessionApp({
             )
           ) : null}
         </main>
+        <nav className="social-tabs" aria-label="Main navigation">
+          {(
+            [
+              [Home, 'Home', 'Discover'],
+              [Compass, 'Explore', 'Beat library'],
+              [SlidersHorizontal, 'Create', 'Studio'],
+              [Radio, 'Rooms', 'Studio rooms'],
+              [Users, 'People', 'Find collaborators'],
+            ] as const
+          ).map(([Icon, label, target]) => (
+            <button
+              key={label}
+              className={'tab' + (view === target ? ' active' : '')}
+              onClick={() => go(target)}
+              aria-label={label}
+              aria-current={view === target ? 'page' : undefined}
+            >
+              <Icon size={20} />
+              <small>{label}</small>
+            </button>
+          ))}
+        </nav>
         <footer
           className="player"
           style={view === 'Room' ? { display: 'none' } : undefined}
         >
           <div className="now-playing">
-            <img src="/chrome-loop.png" alt="Current track artwork" />
+            <CoverArt
+              seed={(playing?.id || 'session') + (playing?.title || '')}
+              label={playing?.title}
+              size={46}
+              spinning={!!playing && isPlaying}
+            />
             <button
               className="now-playing-title"
               onClick={() => playing && setDetail(playing)}
@@ -1778,42 +1901,7 @@ export default function SessionApp({
         onClose={() => setTakesOpen(false)}
         onOpen={restoreTakes}
       />
-    </SidebarProvider>
-  );
-}
-function NavItems({
-  items,
-  view,
-  go,
-}: {
-  items: any[];
-  view: string;
-  go: (s: string) => void;
-}) {
-  const { setOpenMobile } = useSidebar();
-  return (
-    <SidebarMenu>
-      {items.map(([Icon, label, badge]) => (
-        <SidebarMenuItem key={label}>
-          <SidebarMenuButton
-            isActive={view === label}
-            onClick={() => {
-              go(label);
-              setOpenMobile(false);
-            }}
-          >
-            <Icon />
-            <span>{label}</span>
-            {Number(badge) > 0 && (
-              <span className="nav-badge" aria-label={`${badge} unread`}>
-                {Number(badge) > 99 ? '99+' : badge}
-              </span>
-            )}
-            {label === 'Studio rooms' && <span className="status-dot" />}
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ))}
-    </SidebarMenu>
+    </div>
   );
 }
 function Empty({

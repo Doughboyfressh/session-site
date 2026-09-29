@@ -30,6 +30,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Pick, Avatar, action, upload, Confirm } from './helpers';
+import CoverArt from './cover-art';
 import { genres, type Track } from '@/lib/catalog';
 export function UploadForm({
   onDone,
@@ -484,7 +485,12 @@ export function TrackDetail({
                   'cover detail-cover cover-' + (track.color || 'lime')
                 }
               >
-                <img src="/chrome-loop.png" alt="Abstract chrome artwork" />
+                <CoverArt
+                  seed={track.id + track.title}
+                  label={track.title}
+                  size={0}
+                  className="cover-fill"
+                />
               </div>
               <SheetTitle>{track.title}</SheetTitle>
               <SheetDescription>
