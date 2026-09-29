@@ -199,3 +199,89 @@ body::before {
     animation: none;
   }
 }
+
+/* ---- live 3D scenes (three.js) ---- */
+.scene-3d {
+  position: relative;
+  overflow: hidden;
+}
+.scene-3d-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.scene-3d-hero .scene-3d-canvas {
+  cursor: grab;
+}
+.scene-3d-hero .scene-3d-canvas:active {
+  cursor: grabbing;
+}
+.scene-3d-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.feature .scene-3d {
+  position: absolute;
+  right: -18px;
+  top: -30px;
+  width: 53%;
+  height: 320px;
+  z-index: 0;
+  animation: hero-float 9s ease-in-out infinite;
+  will-change: transform;
+}
+.studio-visualizer {
+  position: relative;
+  height: 168px;
+  margin-bottom: 18px;
+  border: 1px solid #4f2c31;
+  border-radius: 8px;
+  overflow: hidden;
+  background: radial-gradient(90% 110% at 50% 0%, #2c1215, #150a0c);
+}
+.studio-visualizer .scene-3d-canvas {
+  cursor: grab;
+}
+.studio-visualizer .scene-3d-canvas:active {
+  cursor: grabbing;
+}
+.studio-visualizer-badge {
+  position: absolute;
+  left: 9px;
+  bottom: 8px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #ff2e43;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  box-shadow: 0 4px 14px -4px #ff2e43aa;
+}
+@media (min-width: 1600px) {
+  .feature .scene-3d {
+    height: 380px;
+    top: -45px;
+  }
+}
+@media (max-width: 1050px) {
+  .feature .scene-3d {
+    width: 47%;
+  }
+}
+@media (max-width: 767px) {
+  .feature .scene-3d {
+    width: 70%;
+    right: -95px;
+    animation: none;
+  }
+}

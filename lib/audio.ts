@@ -1132,6 +1132,11 @@ export async function playMix(
   master.ratio.value = 20;
   master.connect(c.destination);
   const masterMeter = stereoMeter(c, master);
+  const analyser = c.createAnalyser();
+  analyser.fftSize = 128;
+  analyser.smoothingTimeConstant = 0.72;
+  master.connect(analyser);
+  const spectrumBins = new Uint8Array(analyser.frequencyBinCount);
   const releaseOutput = options.output?.(master);
   const routing = routingGraph(c, data, master, true);
   const channels = new Map(
@@ -1283,6 +1288,7 @@ export async function playMix(
     routing.dispose();
     releaseOutput?.();
     master.disconnect();
+    analyser.disconnect();
     masterMeter.dispose();
   }
   options.signal?.addEventListener('abort', stop, { once: true });
@@ -1309,6 +1315,19 @@ export async function playMix(
     },
     level: () => {
       return masterMeter.level();
+    },
+    spectrum: () => {
+      analyser.getByteFrequencyData(spectrumBins);
+      const bands: number[] = [];
+      const usable = Math.floor(spectrumBins.length * 0.75),
+        per = Math.max(1, Math.floor(usable / 24));
+      for (let band = 0; band < 24; band++) {
+        let sum = 0;
+        for (let i = 0; i < per; i++)
+          sum += spectrumBins[band * per + i] || 0;
+        bands.push(sum / per / 255);
+      }
+      return bands;
     },
     levels: () => ({
       ...Object.fromEntries([...channels].map(([id, ch]) => [id, ch.level()])),

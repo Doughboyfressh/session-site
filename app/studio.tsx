@@ -19,6 +19,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import PianoRoll, { AutomationEditor } from './piano-roll';
 import DrumSequencer from './drum-sequencer';
+import Scene3D from './scene-3d';
 import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
@@ -1760,6 +1761,16 @@ export default function Studio({
                   <h2>
                     <SlidersHorizontal size={16} /> Channel strip
                   </h2>
+                </div>
+                <div className="studio-visualizer">
+                  <Scene3D
+                    variant="visualizer"
+                    label="3D spectrum visualizer reacting to playback"
+                    getSpectrum={() => playback.current?.spectrum?.() ?? null}
+                  />
+                  <span className="studio-visualizer-badge">
+                    {playing ? 'LIVE SPECTRUM' : 'DRAG TO SPIN'}
+                  </span>
                 </div>
                 {focus ? (
                   <>

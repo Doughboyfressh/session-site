@@ -54,6 +54,7 @@ import { UploadForm, ProfileForm, TrackDetail } from './forms';
 import LegalCenter from './legal-center';
 import Diagnostics from './diagnostics';
 import Studio from './studio';
+import Scene3D from './scene-3d';
 import Room from './room';
 import { useDraftRecovery } from './use-draft-recovery';
 import RecoveryPanel from './recovery-panel';
@@ -969,9 +970,11 @@ export default function SessionApp({
                       Explore the beats <ArrowUpRight size={17} />
                     </button>
                   </div>
-                  <img
-                    src="/session-hero.png"
+                  <Scene3D
+                    variant="hero"
+                    poster="/session-hero.png"
                     alt="3D equalizer pillars glowing red in a black mirror studio"
+                    label="Interactive 3D equalizer canyon. Drag to orbit."
                   />
                   <span className="feature-caption">
                     CONNECT. CREATE. REPEAT.
