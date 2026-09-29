@@ -720,6 +720,7 @@ export default function SessionApp({
               label={t.title}
               size={0}
               className="cover-fill"
+              variant="sleeve"
               spinning={!!isPlayingTrack}
             />
             <span className="post-play">

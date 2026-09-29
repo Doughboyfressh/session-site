@@ -2,9 +2,10 @@
 
 /**
  * Deterministic generated cover art for a track.
- * Concentric ring / disc composition in the red-pink-white family,
- * seeded by track id + title so every track gets its own stable look.
- * Pure DOM/CSS — no images.
+ * Two variants, both pure DOM/CSS:
+ *  - 'disc'   a dimensional vinyl disc (grooves, sweeping specular, tilt)
+ *  - 'sleeve' an album sleeve with the vinyl peeking out — used in the feed
+ * Seeded by track id + title so every track gets its own stable look.
  */
 
 function seedFrom(text: string) {
@@ -23,12 +24,12 @@ function random(seed: number) {
 }
 
 export const COVER_THEMES = [
-  { core: '#ff2e43', ring: '#ff8091', wash: '#2b0d13' },
-  { core: '#ff525f', ring: '#ffc2c9', wash: '#33121a' },
-  { core: '#e7e2e4', ring: '#ff2e43', wash: '#241015' },
-  { core: '#ff6d8c', ring: '#f4e9eb', wash: '#2d0f1c' },
-  { core: '#d5223b', ring: '#ff9fae', wash: '#1f0b10' },
-  { core: '#f4d7dc', ring: '#ff2e43', wash: '#2a1216' },
+  { core: '#ff2e43', ring: '#ff8091', wash: '#2b0d13', deep: '#1b080c' },
+  { core: '#ff525f', ring: '#ffc2c9', wash: '#33121a', deep: '#200a10' },
+  { core: '#e7e2e4', ring: '#ff2e43', wash: '#241015', deep: '#150a0d' },
+  { core: '#ff6d8c', ring: '#f4e9eb', wash: '#2d0f1c', deep: '#1c0912' },
+  { core: '#d5223b', ring: '#ff9fae', wash: '#1f0b10', deep: '#12060a' },
+  { core: '#f4d7dc', ring: '#ff2e43', wash: '#2a1216', deep: '#190b0e' },
 ] as const;
 
 export function coverTheme(seedText: string) {
@@ -50,30 +51,69 @@ export function coverWaveform(seedText: string, bars = 42) {
 export default function CoverArt({
   seed,
   label,
-  size = 160,
+  size = 0,
   spinning = false,
   className = '',
+  variant = 'disc',
 }: {
   seed: string;
   label?: string;
   size?: number;
   spinning?: boolean;
   className?: string;
+  variant?: 'disc' | 'sleeve';
 }) {
   const rng = random(seedFrom(seed)),
     theme = coverTheme(seed),
     rings = 3 + Math.floor(rng() * 3),
-    tilt = -8 + Math.floor(rng() * 16),
-    cut = Math.floor(rng() * 4);
+    cut = Math.floor(rng() * rings),
+    tilt = -10 + Math.floor(rng() * 20),
+    sleeveAngle = Math.floor(rng() * 360),
+    words = (label || 'session').split(/\s+/).slice(0, 2);
   const ringSizes = Array.from(
     { length: rings },
-    (_, i) => 100 - i * (68 / Math.max(rings, 1)) - rng() * 8,
+    (_, i) => 100 - i * (64 / Math.max(rings, 1)) - rng() * 7,
   );
-  const words = (label || 'session').split(/\s+/).slice(0, 2);
+
+  const disc = (
+    <div className="cover-disc">
+      <span
+        className="cover-disc-grooves"
+        style={
+          {
+            '--disc-core': theme.core,
+            '--disc-ring': theme.ring,
+            '--disc-deep': theme.deep,
+          } as React.CSSProperties
+        }
+      >
+        {ringSizes.map((diameter, i) => (
+          <span
+            key={i}
+            className="cover-disc-ring"
+            style={{
+              width: diameter + '%',
+              height: diameter + '%',
+              borderColor:
+                i === cut ? 'transparent' : i % 2 ? theme.ring : theme.core,
+              opacity: 0.42 + (i / rings) * 0.5,
+            }}
+          />
+        ))}
+        <span className="cover-disc-shine" />
+        <span className="cover-disc-label">
+          <i>{words[0] || ''}</i>
+          {words[1] && <i>{words[1]}</i>}
+        </span>
+      </span>
+    </div>
+  );
+
   return (
     <div
       className={
-        'cover-art' +
+        'cover-art cover-' +
+        variant +
         (spinning ? ' spinning' : '') +
         (className ? ' ' + className : '')
       }
@@ -81,39 +121,36 @@ export default function CoverArt({
         {
           ...(size > 0 ? { '--cover-size': size + 'px' } : {}),
           '--cover-wash': theme.wash,
+          '--cover-deep': theme.deep,
+          '--cover-core': theme.core,
+          '--sleeve-angle': sleeveAngle + 'deg',
+          '--cover-tilt': tilt + 'deg',
         } as React.CSSProperties
       }
       role="img"
       aria-label={label ? `Cover art for ${label}` : 'Cover art'}
     >
-      <div
-        className="cover-art-stage"
-        style={{ transform: `rotate(${tilt}deg)` }}
-      >
-        {ringSizes.map((diameter, i) => (
-          <span
-            key={i}
-            className="cover-art-ring"
-            style={{
-              width: diameter + '%',
-              height: diameter + '%',
-              borderColor:
-                i === cut ? 'transparent' : i % 2 ? theme.ring : theme.core,
-              opacity: 0.5 + (i / rings) * 0.5,
-            }}
-          />
-        ))}
-        <span className="cover-art-disc" style={{ background: theme.core }} />
-        <span className="cover-art-gloss" />
-      </div>
-      {words.length > 0 && (
-        <span className="cover-art-label">
-          {words.map((w, i) => (
-            <i key={i} style={{ fontStyle: i % 2 ? 'normal' : 'italic' }}>
-              {w}
-            </i>
-          ))}
-        </span>
+      {variant === 'sleeve' ? (
+        <>
+          <div className="cover-sleeve-panel">
+            <span className="cover-sleeve-emblem">
+              {(label || 's')[0]?.toUpperCase()}
+            </span>
+            <span className="cover-sleeve-title">
+              {words.map((w, i) => (
+                <i key={i}>{w}</i>
+              ))}
+            </span>
+            <span className="cover-sleeve-hairline" />
+          </div>
+          <div className="cover-sleeve-disc">{disc}</div>
+        </>
+      ) : (
+        <>
+          <span className="cover-ground" />
+          <div className="cover-tilt">{disc}</div>
+          <span className="cover-gloss" />
+        </>
       )}
     </div>
   );

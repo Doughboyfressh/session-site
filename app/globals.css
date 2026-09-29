@@ -574,8 +574,7 @@ main .feed {
   overflow: hidden;
   background: #120b0d;
 }
-.post-cover .cover-art { width: 100%; height: 100%; border-radius: 12px; }
-.post-cover .cover-art-stage { inset: 8% 22%; }
+.post-cover .cover-art { width: 100%; height: 100%; border-radius: 12px; border: 0; }
 .post-play {
   position: absolute;
   right: 14px;
@@ -657,7 +656,7 @@ main .feed {
 }
 .feed-footnote button { color: #b98f97; text-decoration: underline; text-underline-offset: 3px; }
 
-/* ================= COVER ART (generated) ================= */
+/* ================= COVER ART (generated, dimensional vinyl) ================= */
 .cover-art {
   position: relative;
   flex: none;
@@ -665,57 +664,210 @@ main .feed {
   aspect-ratio: 1;
   border-radius: 10px;
   overflow: hidden;
-  background: radial-gradient(circle at 50% 42%, var(--cover-wash, #2b0d13), #120a0c 82%);
+  background: radial-gradient(circle at 50% 42%, var(--cover-wash, #2b0d13), var(--cover-deep, #150a0d) 85%);
   box-shadow: inset 0 0 0 1px #ffffff14, 0 12px 30px -16px #000d;
 }
 .cover-art.cover-fill { width: 100%; }
-.cover-art-stage { position: absolute; inset: 10%; will-change: transform; }
-.cover-art.spinning .cover-art-stage { animation: cover-spin 5.5s linear infinite; }
-@keyframes cover-spin { to { transform: rotate(360deg); } }
-.cover-art-ring {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  border: 2px solid;
-  border-radius: 50%;
-}
-.cover-art-disc {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 17%;
-  height: 17%;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  box-shadow: 0 0 18px #ff2e4370;
-}
-.cover-art-disc::after {
-  content: "";
-  position: absolute;
-  inset: 36%;
-  border-radius: 50%;
-  background: #120a0c;
-}
-.cover-art-gloss {
+
+/* ---- shared vinyl disc ---- */
+.cover-disc { position: absolute; inset: 0; }
+.cover-disc-grooves {
   position: absolute;
   inset: 0;
-  background: linear-gradient(128deg, #ffffff1c 0%, transparent 32%, transparent 68%, #ffffff0e 100%);
+  border-radius: 50%;
+  display: block;
+  background:
+    repeating-radial-gradient(
+      circle at 50% 50%,
+      transparent 0,
+      transparent 2.5px,
+      #ffffff09 2.5px,
+      #ffffff09 3.5px,
+      transparent 3.5px
+    ),
+    radial-gradient(
+      circle at 50% 50%,
+      #33191e 0%,
+      var(--disc-deep, #1b080c) 58%,
+      #0c0406 100%
+    );
+  box-shadow:
+    inset 0 0 0 1px #ffffff1c,
+    inset 0 0 22px #00000090,
+    0 0 24px -6px var(--disc-core, #ff2e4359);
 }
-.cover-art-label {
+.cover-disc-ring {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 7%;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border: 1.5px solid;
+  border-radius: 50%;
+}
+.cover-disc-shine {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    #ffffff2e 16deg,
+    transparent 44deg,
+    transparent 176deg,
+    #ffffff17 198deg,
+    transparent 226deg
+  );
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+.cover-disc-label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 34%;
+  height: 34%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, color-mix(in srgb, var(--disc-core) 88%, #fff 12%), var(--disc-core) 62%, var(--disc-deep) 160%);
+  box-shadow: 0 0 0 1px #ffffff2c, 0 2px 10px #000a;
   display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
-  gap: 5px;
-  font-size: 9px;
+  gap: 1px;
+  overflow: hidden;
+}
+.cover-disc-label::after {
+  content: '';
+  position: absolute;
+  inset: 38%;
+  border-radius: 50%;
+  background: var(--cover-deep, #150a0d);
+  box-shadow: inset 0 0 4px #000c;
+}
+.cover-disc-label i {
+  font-style: normal;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 1px 3px #0009;
+  max-width: 92%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cover-art.spinning .cover-disc-grooves {
+  animation: cover-spin 4.6s linear infinite;
+}
+@keyframes cover-spin { to { transform: rotate(360deg); } }
+
+/* ---- disc variant: tilted record with ground shadow ---- */
+.cover-art.cover-disc .cover-tilt {
+  position: absolute;
+  inset: 13%;
+  transform: perspective(680px) rotateX(16deg) rotate(var(--cover-tilt, 0deg));
+  transform-style: preserve-3d;
+  transition: transform 0.45s ease;
+}
+.cover-art.cover-disc:hover .cover-tilt {
+  transform: perspective(680px) rotateX(6deg) rotate(var(--cover-tilt, 0deg));
+}
+.cover-art.cover-disc .cover-ground {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: 2%;
+  height: 12%;
+  background: radial-gradient(ellipse at center, #000000a8, transparent 68%);
+  filter: blur(2px);
+}
+.cover-art.cover-disc .cover-gloss {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(128deg, #ffffff17 0%, transparent 30%, transparent 70%, #ffffff0a 100%);
+  pointer-events: none;
+}
+
+/* ---- sleeve variant: album sleeve + peeking vinyl ---- */
+.cover-art.cover-sleeve {
+  aspect-ratio: auto;
+  border-radius: 12px;
+  background: var(--cover-deep, #150a0d);
+}
+.cover-sleeve-disc {
+  position: absolute;
+  top: 50%;
+  left: 56%;
+  width: 74%;
+  aspect-ratio: 1;
+  transform: translateY(-50%) translateX(0);
+  transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+  filter: drop-shadow(0 18px 30px #000c);
+  z-index: 1;
+}
+.cover-art.cover-sleeve:hover .cover-sleeve-disc {
+  transform: translateY(-50%) translateX(7%);
+}
+.cover-art.cover-sleeve.spinning .cover-sleeve-disc {
+  transform: translateY(-50%) translateX(16%);
+}
+.cover-sleeve-panel {
+  position: absolute;
+  inset: 5% 24% 5% 0;
+  z-index: 2;
+  border-radius: 10px;
+  background:
+    linear-gradient(var(--sleeve-angle, 135deg), var(--cover-wash), var(--cover-deep)),
+    var(--cover-deep);
+  border: 1px solid #ffffff17;
+  box-shadow: 0 22px 44px -18px #000d, inset 0 1px 0 #ffffff14;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 7% 8%;
+  overflow: hidden;
+  transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.cover-art.cover-sleeve:hover .cover-sleeve-panel {
+  transform: translateX(-2.5%);
+}
+.cover-sleeve-emblem {
+  width: 26%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+  background: radial-gradient(circle at 34% 30%, color-mix(in srgb, var(--cover-core) 82%, #fff 18%), var(--cover-core) 64%, var(--cover-deep) 170%);
+  box-shadow: 0 0 0 1px #ffffff26, 0 10px 22px -8px var(--cover-core);
+  text-shadow: 0 2px 6px #0008;
+}
+.cover-sleeve-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cover-sleeve-title i {
+  font-style: normal;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 2.6px;
   text-transform: uppercase;
-  color: #f4eff1d9;
-  text-shadow: 0 2px 10px #000;
+  color: #f6e9eb;
+  text-shadow: 0 2px 8px #000b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cover-sleeve-hairline {
+  height: 2px;
+  border-radius: 2px;
+  margin-top: 7%;
+  background: linear-gradient(90deg, var(--cover-core), transparent 82%);
 }
 
 /* grid tiles + player use CoverArt now */
