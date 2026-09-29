@@ -71,6 +71,13 @@
       "when": 1790697013696,
       "tag": "0009_dapper_karla_sofen",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1790701308976,
+      "tag": "0010_brave_scott_summers",
+      "breakpoints": true
     }
   ]
 }

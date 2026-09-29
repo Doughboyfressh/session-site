@@ -32,6 +32,7 @@ import {
   MessageCircle,
   MoreHorizontal,
   CircleDollarSign,
+  Flame,
 } from 'lucide-react';
 import CoverArt, { coverWaveform } from './cover-art';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -82,6 +83,9 @@ const empty = {
   unreadNotifications: 0,
   payments: { configured: false, chargesEnabled: false, payoutsEnabled: false },
   orders: [],
+  trending: [],
+  liveRooms: [],
+  pulse: { tracks: 0, creators: 0, tracksToday: 0, publicRooms: 0 },
 } as any;
 const captions: Record<string, string> = {
   Discover:
@@ -121,6 +125,9 @@ export default function SessionApp({
     [detail, setDetail] = useState<Track | null>(null),
     [roomId, setRoomId] = useState(''),
     [roomModal, setRoomModal] = useState(false),
+    [results, setResults] = useState<any>(null),
+    [searching, setSearching] = useState(false),
+    [roomDiscoverable, setRoomDiscoverable] = useState('invite'),
     [roomTitle, setRoomTitle] = useState(''),
     [roomProject, setRoomProject] = useState('none'),
     [roomBusy, setRoomBusy] = useState(false),
@@ -179,6 +186,65 @@ export default function SessionApp({
       setLoading(false);
     }
   }
+  const playsCounted = useRef<Set<string>>(new Set()),
+    deepLinkHandled = useRef(false),
+    lastUnread = useRef(0);
+  useEffect(() => {
+    if (deepLinkHandled.current || loading || !state.tracks.length) return;
+    const trackId = new URLSearchParams(window.location.search).get('track');
+    deepLinkHandled.current = true;
+    if (!trackId) return;
+    const track = state.tracks.find((t: Track) => t.id === trackId);
+    if (track) {
+      setDetail(track);
+      window.history.replaceState(null, '', '/');
+    }
+  }, [loading, state.tracks]);
+  useEffect(() => {
+    if (
+      state.unreadNotifications > lastUnread.current &&
+      lastUnread.current > 0
+    )
+      notify('New activity — check your alerts.');
+    lastUnread.current = state.unreadNotifications;
+  }, [state.unreadNotifications]);
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      if (
+        document.visibilityState !== 'visible' ||
+        ['Studio', 'Room'].includes(view) ||
+        !user
+      )
+        return;
+      try {
+        const r = await fetch('/api/state');
+        if (!r.ok) return;
+        setState(await r.json());
+      } catch {}
+    }, 90000);
+    return () => clearInterval(timer);
+  }, [view, user]);
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setResults(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const r = await fetch('/api/search?q=' + encodeURIComponent(q));
+        const j = (await r.json()) as any;
+        if (r.ok) setResults(j);
+      } catch {
+        setResults(null);
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [query]);
   function stopPreview() {
     previewSeq.current++;
     playback.current?.stop();
@@ -399,6 +465,10 @@ export default function SessionApp({
     return () => clearInterval(timer);
   }, [isPlaying, duration]);
   async function playPreview(t: Track, seek = 0) {
+    if (!t.demo && !playsCounted.current.has(t.id)) {
+      playsCounted.current.add(t.id);
+      void action({ action: 'play', id: t.id }).catch(() => {});
+    }
     if (t.id === playing?.id && isPlaying && seek === 0) {
       stopPreview();
       return;
@@ -657,6 +727,13 @@ export default function SessionApp({
     if (track.likes) return 'Saved by SESSION creators';
     return track.demo ? 'SESSION starter' : 'New to the community';
   }
+  function fmtNum(n?: number) {
+    return n
+      ? n >= 1000
+        ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
+        : String(n)
+      : '0';
+  }
   function formatCount(n?: number) {
     if (!n) return 'Like';
     return n >= 1000
@@ -693,10 +770,19 @@ export default function SessionApp({
       setPayBusy(false);
     }
   }
+  async function enterPublicRoom(id: string) {
+    try {
+      await action({ action: 'joinPublicRoom', id });
+      await refresh();
+      enterRoom(id);
+    } catch (e: any) {
+      notify(e.message);
+    }
+  }
   async function shareTrack(t: Track) {
     try {
       await navigator.clipboard.writeText(
-        window.location.origin + '/?track=' + t.id,
+        window.location.origin + '/t/' + t.id,
       );
       notify('Link to ' + t.title + ' copied.');
     } catch {
@@ -823,6 +909,9 @@ export default function SessionApp({
             {t.price ? (
               <span className="chip price-chip">{formatPrice(t.price)}</span>
             ) : null}
+            <span className="chip plays-chip">
+              ▶ {t.plays ? fmtNum(t.plays) : 'New'}
+            </span>
           </div>
           {reason && <span className="post-reason">{reason}</span>}
         </div>
@@ -835,7 +924,8 @@ export default function SessionApp({
             <Heart size={17} /> {formatCount(t.likes)}
           </button>
           <button className="post-act" onClick={() => setDetail(t)}>
-            <MessageCircle size={17} /> Comments
+            <MessageCircle size={17} />{' '}
+            {t.comments ? fmtNum(t.comments) : 'Comments'}
           </button>
           <button className="post-act" onClick={() => void shareTrack(t)}>
             <Share2 size={16} /> Share
@@ -1255,18 +1345,169 @@ export default function SessionApp({
                     </button>
                   ))}
               </div>
+              <div className="pulse-strip" role="status">
+                <span className="status-dot" />
+                <b>{fmtNum(state.pulse.tracks)}</b> tracks ·{' '}
+                <b>{fmtNum(state.pulse.creators)}</b> creators
+                {state.pulse.tracksToday
+                  ? ` · ${fmtNum(state.pulse.tracksToday)} shared today`
+                  : ''}
+                {state.liveRooms.length
+                  ? ` · ${state.liveRooms.length} public room${
+                      state.liveRooms.length === 1 ? '' : 's'
+                    }`
+                  : ''}
+              </div>
+              {state.trending.length > 0 && (
+                <div className="trending-rail" aria-label="Trending worldwide">
+                  <div className="trend-head">
+                    <Flame size={15} /> Trending worldwide
+                  </div>
+                  <div className="trend-scroll">
+                    {state.trending.map((tr: any) => (
+                      <button
+                        className="trend-tile"
+                        key={tr.id}
+                        onClick={() => {
+                          const full = state.tracks.find(
+                            (x: Track) => x.id === tr.id,
+                          );
+                          if (full) setDetail(full);
+                        }}
+                      >
+                        <CoverArt
+                          seed={tr.id + tr.title}
+                          label={tr.title}
+                          size={62}
+                          spinning={playing?.id === tr.id && isPlaying}
+                        />
+                        <span>
+                          <strong>{tr.title}</strong>
+                          <small>
+                            {tr.creator} · ▶ {fmtNum(tr.plays)}
+                          </small>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {state.liveRooms.length > 0 && (
+                <section className="live-rooms">
+                  <div className="section-title">
+                    <h2>
+                      <Radio size={16} /> Live now
+                    </h2>
+                    <span className="tiny-label">PUBLIC ROOMS</span>
+                  </div>
+                  <div className="live-grid">
+                    {state.liveRooms.map((r: any) => (
+                      <div className="live-room" key={r.id}>
+                        <span
+                          className={'live-dot' + (r.active > 0 ? ' on' : '')}
+                        />
+                        <div>
+                          <strong>{r.title}</strong>
+                          <small>
+                            {r.active > 0
+                              ? `${r.active} in the room now`
+                              : `${r.members} member${
+                                  r.members === 1 ? '' : 's'
+                                }`}
+                          </small>
+                        </div>
+                        <button
+                          className="button secondary small"
+                          onClick={() => void enterPublicRoom(r.id)}
+                        >
+                          Join
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
               {discoveryTabs()}
               {genreTabs()}
-              <div className="feed-posts">
-                {filtered.length ? (
-                  filtered.slice(0, 12).map((track: Track) => feedPost(track))
-                ) : (
-                  <Empty
-                    title="Nothing on this frequency yet."
-                    text="Try another genre or clear your search."
-                  />
-                )}
-              </div>
+              {results && query.trim().length >= 2 ? (
+                <div className="search-results">
+                  <div className="section-title">
+                    <h2>
+                      Results for “{query.trim()}”
+                      <span className="tiny-label">
+                        {searching ? 'SEARCHING…' : 'SERVER-SIDE'}
+                      </span>
+                    </h2>
+                  </div>
+                  {results.tracks?.length ? (
+                    results.tracks.map((tr: any) => {
+                      const full = state.tracks.find(
+                        (x: Track) => x.id === tr.id,
+                      );
+                      return (
+                        <button
+                          className="search-row"
+                          key={tr.id}
+                          onClick={() =>
+                            full
+                              ? setDetail(full)
+                              : notify('Open the app to hear this one.')
+                          }
+                        >
+                          <CoverArt
+                            seed={tr.id + tr.title}
+                            label={tr.title}
+                            size={44}
+                          />
+                          <span>
+                            <strong>{tr.title}</strong>
+                            <small>
+                              {tr.creator} · {tr.genre}
+                              {tr.plays ? ` · ▶ ${fmtNum(tr.plays)}` : ''}
+                            </small>
+                          </span>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <p className="small-note">
+                      No tracks matched. Try a genre, title, or creator name.
+                    </p>
+                  )}
+                  {results.profiles?.length > 0 && (
+                    <>
+                      <h3 className="payments-sub">Creators</h3>
+                      {results.profiles.map((pr: any) => (
+                        <button
+                          className="search-row"
+                          key={pr.id}
+                          onClick={() => setSelectedProfile(pr)}
+                        >
+                          <Avatar profile={pr} size={44} />
+                          <span>
+                            <strong>{pr.name}</strong>
+                            <small>
+                              @{pr.username} · {fmtNum(pr.followers)} followers
+                            </small>
+                          </span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
+              ) : null}
+              {!results || query.trim().length < 2 ? (
+                <div className="feed-posts">
+                  {filtered.length ? (
+                    filtered.slice(0, 12).map((track: Track) => feedPost(track))
+                  ) : (
+                    <Empty
+                      title="Nothing on this frequency yet."
+                      text="Try another genre or clear your search."
+                    />
+                  )}
+                </div>
+              ) : null}
               <section className="workflow">
                 <div className="section-title">
                   <h2>Different talents. Same wavelength.</h2>
@@ -1428,6 +1669,48 @@ export default function SessionApp({
                   onDone={refresh}
                 />
                 <aside className="payments-panel">
+                  {(() => {
+                    const steps = [
+                      ['Add a profile photo', !!state.profile?.avatar],
+                      ['Say something about yourself', !!state.profile?.bio],
+                      [
+                        'Share your first track',
+                        state.tracks.some((t: Track) => t.owner === user?.id),
+                      ],
+                      ['Follow creators you like', state.follows.length > 0],
+                      ['Start or join a room', state.rooms.length > 0],
+                      ['Turn on payouts', state.payments.chargesEnabled],
+                    ];
+                    const done = steps.filter(([, ok]) => ok).length,
+                      next = steps.find(([, ok]) => !ok);
+                    return (
+                      <div className="checklist">
+                        <h3 className="payments-sub">
+                          Your SESSION checklist · {done}/{steps.length}
+                        </h3>
+                        <div className="checklist-bar">
+                          <i
+                            style={{ width: (done / steps.length) * 100 + '%' }}
+                          />
+                        </div>
+                        <ul>
+                          {steps.map(([label, ok]) => (
+                            <li
+                              key={label as string}
+                              className={ok ? 'ok' : ''}
+                            >
+                              {ok ? '✓' : '○'} {label as string}
+                            </li>
+                          ))}
+                        </ul>
+                        {next && (
+                          <p className="small-note">
+                            Next: {next[0] as string}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <div className="section-title">
                     <h2>
                       <CircleDollarSign size={17} /> Payments
@@ -1895,6 +2178,7 @@ export default function SessionApp({
                   action: 'room',
                   title: roomTitle,
                   project: roomProject === 'none' ? null : roomProject,
+                  visibility: roomDiscoverable,
                 });
                 setRoomModal(false);
                 setRoomTitle('');
@@ -1929,12 +2213,31 @@ export default function SessionApp({
                 })),
               ]}
             />
+            <Pick
+              label="Who can find this room"
+              value={roomDiscoverable}
+              onChange={setRoomDiscoverable}
+              options={[
+                {
+                  value: 'invite',
+                  label: 'Invite only — just your circle',
+                },
+                {
+                  value: 'public',
+                  label: 'Discoverable — anyone can join while there is space',
+                },
+              ]}
+            />
             <p className="small-note">
               Room members can listen to the attached project and its private
               audio. The owner can allow room members to edit and save changes.
             </p>
             <button className="button primary wide" disabled={roomBusy}>
-              {roomBusy ? 'Creating your room…' : 'Create private room'}
+              {roomBusy
+                ? 'Creating your room…'
+                : roomDiscoverable === 'public'
+                  ? 'Create discoverable room'
+                  : 'Create private room'}
               <ArrowUpRight size={16} />
             </button>
           </form>

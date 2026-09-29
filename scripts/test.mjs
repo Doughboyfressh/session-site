@@ -25,6 +25,7 @@ const suites = [
   'take-bank-server',
   'backend',
   'payments',
+  'growth',
   'production',
 ];
 const results = [];

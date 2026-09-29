@@ -344,9 +344,18 @@ export async function POST(req: Request) {
         await database().batch([
           database()
             .prepare(
-              'INSERT INTO rooms (id,owner,title,project,invite,expires,created) VALUES (?,?,?,?,?,?,?)',
+              'INSERT INTO rooms (id,owner,title,project,invite,expires,created,visibility) VALUES (?,?,?,?,?,?,?,?)',
             )
-            .bind(id, uid, str(b.title), project, invite, now + 86400000, now),
+            .bind(
+              id,
+              uid,
+              str(b.title),
+              project,
+              invite,
+              now + 86400000,
+              now,
+              choice(b.visibility, ['invite', 'public']),
+            ),
           database()
             .prepare('INSERT INTO members (room,user,seen) VALUES (?,?,?)')
             .bind(id, uid, now),
@@ -458,6 +467,37 @@ export async function POST(req: Request) {
           now,
           r.id,
         );
+        await roomAccess(r.id, uid);
+        result = { id: r.id };
+        break;
+      }
+      case 'play': {
+        // count one play of a public track (rate-limited per user per minute)
+        await run(
+          "UPDATE tracks SET plays=plays+1 WHERE id=? AND visibility='public'",
+          str(b.id),
+        );
+        break;
+      }
+      case 'joinPublicRoom': {
+        const r = await one(
+          "SELECT * FROM rooms WHERE id=? AND visibility='public'",
+          b.id,
+        );
+        if (!r) fail('This room is invite-only.', 403);
+        const inserted = await run(
+          `INSERT OR IGNORE INTO members (room,user,seen)
+           SELECT id,?,? FROM rooms WHERE id=? AND visibility='public'
+             AND (SELECT COUNT(*) FROM members WHERE room=?)<4`,
+          uid,
+          now,
+          r.id,
+          r.id,
+        );
+        if (
+          !Number((inserted as { meta?: { changes?: number } })?.meta?.changes)
+        )
+          fail('This room is full right now. Try another one.', 409);
         await roomAccess(r.id, uid);
         result = { id: r.id };
         break;

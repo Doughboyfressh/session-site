@@ -14,6 +14,8 @@ export type Track = {
   color?: string;
   likes?: number;
   price?: number | null;
+  plays?: number;
+  comments?: number;
   created?: number;
 };
 export const demos: Track[] = [

@@ -82,6 +82,7 @@ export const tracks = sqliteTable(
     permission: text().notNull().default('listen'),
     fileId: text().notNull(),
     price: integer(),
+    plays: integer().notNull().default(0),
     created: integer().notNull(),
   },
   (t) => [
@@ -138,6 +139,7 @@ export const rooms = sqliteTable('rooms', {
   invite: text().notNull(),
   expires: integer().notNull(),
   created: integer().notNull(),
+  visibility: text().notNull().default('invite'),
 });
 export const members = sqliteTable(
   'members',

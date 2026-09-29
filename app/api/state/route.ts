@@ -16,10 +16,13 @@ export async function GET() {
       unreadNotifications,
       stripeAccount,
       orders,
+      trending,
+      liveRooms,
+      pulse,
     ] = await Promise.all([
       one('SELECT * FROM profiles WHERE id=?', id),
       all(
-        "SELECT t.*,COALESCE(p.name,'Independent creator') AS creator,(SELECT COUNT(*) FROM saved s WHERE s.track=t.id) AS likes FROM tracks t LEFT JOIN profiles p ON p.id=t.owner AND (p.visibility='public' OR p.id=?) WHERE t.visibility='public' OR t.owner=? ORDER BY t.created DESC,t.id ASC LIMIT 200",
+        "SELECT t.*,COALESCE(p.name,'Independent creator') AS creator,(SELECT COUNT(*) FROM saved s WHERE s.track=t.id) AS likes,(SELECT COUNT(*) FROM comments c WHERE c.track=t.id) AS comments FROM tracks t LEFT JOIN profiles p ON p.id=t.owner AND (p.visibility='public' OR p.id=?) WHERE t.visibility='public' OR t.owner=? ORDER BY t.created DESC,t.id ASC LIMIT 200",
         id,
         id,
       ),
@@ -50,6 +53,21 @@ export async function GET() {
         id,
         id,
       ),
+      all(
+        "SELECT t.id,t.title,t.genre,t.bpm,t.plays,t.price,COALESCE(p.name,'Independent creator') AS creator FROM tracks t LEFT JOIN profiles p ON p.id=t.owner WHERE t.visibility='public' AND t.plays>0 ORDER BY t.plays DESC,t.created DESC LIMIT 8",
+      ),
+      all(
+        "SELECT r.id,r.title,r.owner,(SELECT COUNT(*) FROM members x WHERE x.room=r.id AND x.seen>?) AS active,(SELECT COUNT(*) FROM members x WHERE x.room=r.id) AS members FROM rooms r WHERE r.visibility='public' ORDER BY active DESC,r.created DESC LIMIT 10",
+        Date.now() - 30000,
+      ),
+      one(
+        `SELECT
+           (SELECT COUNT(*) FROM tracks WHERE visibility='public') AS tracks,
+           (SELECT COUNT(*) FROM profiles WHERE visibility='public') AS creators,
+           (SELECT COUNT(*) FROM tracks WHERE visibility='public' AND created>?) AS tracksToday,
+           (SELECT COUNT(*) FROM rooms WHERE visibility='public') AS publicRooms`,
+        Date.now() - 86400000,
+      ),
     ]);
     return Response.json(
       {
@@ -67,6 +85,14 @@ export async function GET() {
           payoutsEnabled: !!stripeAccount?.payoutsEnabled,
         },
         orders,
+        trending,
+        liveRooms,
+        pulse: {
+          tracks: Number(pulse?.tracks || 0),
+          creators: Number(pulse?.creators || 0),
+          tracksToday: Number(pulse?.tracksToday || 0),
+          publicRooms: Number(pulse?.publicRooms || 0),
+        },
       },
       { headers: { 'Cache-Control': 'private, no-store' } },
     );
