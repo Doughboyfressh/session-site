@@ -15,6 +15,8 @@ import {
   Loader2,
   SlidersHorizontal,
   LockKeyhole,
+  HelpCircle,
+  Compass,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import PianoRoll, { AutomationEditor } from './piano-roll';
@@ -78,7 +80,11 @@ import {
   splitPlaylistClip,
   trimPlaylistClip,
 } from '@/lib/playlist-clips';
-import { applyDrumPattern, type DrumPattern } from '@/lib/drum-pattern';
+import {
+  applyDrumPattern,
+  defaultDrumPattern,
+  type DrumPattern,
+} from '@/lib/drum-pattern';
 export default function Studio({
   initial,
   onDraft,
@@ -155,6 +161,7 @@ export default function Studio({
         : null;
     }),
     [tab, setTab] = useState('Arrangement'),
+    [helpOpen, setHelpOpen] = useState(false),
     [remove, setRemove] = useState(''),
     [dirty, setDirty] = useState(!!initial?.dirty),
     [loop, setLoop] = useState(false),
@@ -302,6 +309,30 @@ export default function Studio({
     sync.creation,
     sync.reviewFirstSave,
   ]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.closest('input, textarea, select, [contenteditable="true"]') ||
+          target.isContentEditable)
+      )
+        return;
+      if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
+        e.preventDefault();
+        if (recording || recordSnapshot || exportSnapshot) return;
+        if (playing) stop();
+        else void play();
+      } else if (e.key === 'r' || e.key === 'R') {
+        if (!recordSnapshot && !exportSnapshot) record();
+      } else if (e.key === '?') {
+        e.preventDefault();
+        setHelpOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [playing, recording, recordSnapshot, exportSnapshot]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -1169,6 +1200,15 @@ export default function Studio({
             <div className="actions">
               <button
                 className="button secondary"
+                onClick={() => setHelpOpen(true)}
+                aria-label="How the studio works"
+                title="What everything does (?)"
+              >
+                <HelpCircle size={16} /> Help
+              </button>
+              <button
+                className="button secondary"
+                title="Download your song as an audio file"
                 onClick={bounce}
                 disabled={!!busy || recording || !data.tracks.length}
               >
@@ -1176,6 +1216,7 @@ export default function Studio({
               </button>
               <button
                 className="button primary"
+                title="Save the arrangement to your account"
                 onClick={() => save()}
                 disabled={!canEdit || !!sync.conflict || !!busy || recording}
               >
@@ -1264,6 +1305,7 @@ export default function Studio({
                 className={'transport-play ' + (playing ? 'active' : '')}
                 onClick={play}
                 disabled={!!busy || recording}
+                title="Play or stop (Space)"
                 aria-label={playing ? 'Stop playback' : 'Play arrangement'}
               >
                 {playing ? (
@@ -1272,13 +1314,19 @@ export default function Studio({
                   <Play size={19} fill="currentColor" />
                 )}
               </button>
-              <button onClick={stop} aria-label="Stop" disabled={recording}>
+              <button
+                onClick={stop}
+                aria-label="Stop"
+                title="Stop and rewind"
+                disabled={recording}
+              >
                 <Square size={17} />
               </button>
               <button
                 className={'record-button ' + (recording ? 'recording' : '')}
                 onClick={record}
                 disabled={!canEdit || !!busy}
+                title="Record your microphone (R)"
                 aria-label="Record microphone"
               >
                 <span />
@@ -1300,6 +1348,9 @@ export default function Studio({
                   .padStart(2, '0')}
               </span>
             </output>
+            <span className="kbd-hint" aria-hidden="true">
+              <kbd>Space</kbd> play · <kbd>R</kbd> record
+            </span>
             <label className="tempo">
               <input
                 type="number"
@@ -1354,6 +1405,7 @@ export default function Studio({
                 className="button secondary"
                 disabled={!canEdit || !past.current.length || structuralLocked}
                 onClick={() => undo()}
+                title="Undo your last change"
               >
                 Undo
               </button>
@@ -1363,6 +1415,7 @@ export default function Studio({
                   !canEdit || !future.current.length || structuralLocked
                 }
                 onClick={() => undo(true)}
+                title="Redo an undone change"
               >
                 Redo
               </button>
@@ -1702,21 +1755,60 @@ export default function Studio({
                   onRemove={setRemove}
                 />
                 {!data.tracks.length ? (
-                  <div className="studio-empty">
-                    <AudioLines size={46} />
-                    <h2>Every great track starts somewhere.</h2>
-                    <p>
-                      {canEdit
-                        ? 'Bring in a beat, record a vocal, or build your own drums.'
-                        : 'The owner has not added tracks to this room project yet.'}
-                    </p>
-                    <button
-                      className="button primary"
-                      onClick={browse}
-                      disabled={!canEdit}
-                    >
-                      <Disc3 size={17} /> Find a beat
-                    </button>
+                  <div className="studio-start">
+                    <div className="studio-start-head">
+                      <AudioLines size={38} />
+                      <h2>Let's make something.</h2>
+                      <p>
+                        {canEdit
+                          ? 'Tap a starter. Undo fixes anything, and nothing is public until you save.'
+                          : 'The owner has not added tracks to this room project yet.'}
+                      </p>
+                    </div>
+                    {canEdit && (
+                      <div className="starter-grid">
+                        <button
+                          className="starter-card"
+                          onClick={() =>
+                            void addDrumTrack(defaultDrumPattern())
+                          }
+                        >
+                          <Disc3 size={22} />
+                          <strong>Build a drum groove</strong>
+                          <span>
+                            A ready beat lands on its own channel — reshape
+                            every hit in the Drum sequencer tab.
+                          </span>
+                        </button>
+                        <button
+                          className="starter-card"
+                          onClick={addInstrument}
+                        >
+                          <AudioLines size={22} />
+                          <strong>Add an instrument</strong>
+                          <span>
+                            Keys ready to play — draw notes with your mouse in
+                            the Piano roll.
+                          </span>
+                        </button>
+                        <button className="starter-card" onClick={record}>
+                          <Mic size={22} />
+                          <strong>Record your voice</strong>
+                          <span>
+                            Up to two minutes with your mic. Wear headphones to
+                            keep takes clean.
+                          </span>
+                        </button>
+                        <button className="starter-card" onClick={browse}>
+                          <Compass size={22} />
+                          <strong>Find a beat</strong>
+                          <span>
+                            Pull a sound from the community feed, then make it
+                            yours.
+                          </span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : null}
                 <div className="add-track">
@@ -2107,6 +2199,83 @@ export default function Studio({
           />
         </div>
       )}{' '}
+      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
+        <DialogContent className="form-dialog studio-help">
+          <DialogTitle>The studio, in plain words</DialogTitle>
+          <DialogDescription>
+            Nothing here is permanent — Undo fixes anything, and nothing leaves
+            this browser until you press Save.
+          </DialogDescription>
+          <div className="help-grid">
+            <section>
+              <h3>Make a track in three steps</h3>
+              <ol>
+                <li>
+                  <strong>Lay a foundation.</strong> Add a drum groove, or bring
+                  a beat in from the feed.
+                </li>
+                <li>
+                  <strong>Add your part.</strong> Record your mic, or draw notes
+                  in the Piano roll.
+                </li>
+                <li>
+                  <strong>Shape and share it.</strong> Balance the mix, then
+                  Save the project or Export audio.
+                </li>
+              </ol>
+            </section>
+            <section>
+              <h3>The five tabs</h3>
+              <ul>
+                <li>
+                  <strong>Arrangement</strong> — the timeline of your song:
+                  every track and clip lives here.
+                </li>
+                <li>
+                  <strong>Piano roll</strong> — draw, drag, and resize notes for
+                  instrument tracks.
+                </li>
+                <li>
+                  <strong>Automation</strong> — set volume or effects to change
+                  over time, hands-free.
+                </li>
+                <li>
+                  <strong>Mixer</strong> — volume, pan, EQ, reverb, and delay
+                  for each channel.
+                </li>
+                <li>
+                  <strong>Drum sequencer</strong> — tap out drum patterns with
+                  velocity and swing.
+                </li>
+              </ul>
+            </section>
+            <section>
+              <h3>Keyboard shortcuts</h3>
+              <ul className="help-keys">
+                <li>
+                  <kbd>Space</kbd> play or stop
+                </li>
+                <li>
+                  <kbd>R</kbd> record your mic
+                </li>
+                <li>
+                  <kbd>?</kbd> open this guide
+                </li>
+              </ul>
+            </section>
+            <section>
+              <h3>Saving and sharing</h3>
+              <p>
+                <strong>Save project</strong> stores the arrangement to your
+                SESSION account; with Autosave on, edits upload after ten idle
+                seconds. <strong>Export audio</strong> downloads a finished
+                audio file. Room projects are shared live with everyone in the
+                room — your takes stay yours until you choose to publish.
+              </p>
+            </section>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
