@@ -1402,3 +1402,66 @@ main .feed {
   .trend-tile { width: 210px; }
   .permalink-card { padding: 18px 14px; }
 }
+
+/* ================= ONBOARDING TOUR ================= */
+.onboarding { max-width: 520px !important; text-align: center; }
+.onboarding-art {
+  position: relative;
+  width: 130px;
+  height: 130px;
+  margin: 6px auto 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  overflow: hidden;
+}
+.onboarding-art svg { position: relative; z-index: 3; filter: drop-shadow(0 6px 18px #000a); }
+.onboarding-ring {
+  position: absolute;
+  inset: 12%;
+  border: 2px solid #ffffff55;
+  border-radius: 50%;
+  z-index: 2;
+}
+.onboarding-ring.slow {
+  inset: -4%;
+  border-color: #ffffff22;
+  animation: tour-breathe 4.5s ease-in-out infinite;
+}
+@keyframes tour-breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.06); opacity: 0.6; }
+}
+.onboarding-art.a1 { background: radial-gradient(circle at 34% 30%, #e5314d, #b01528 68%, #2a070e); }
+.onboarding-art.a2 { background: radial-gradient(circle at 34% 30%, #3a3a40, #161618 72%); }
+.onboarding-art.a2 svg { color: var(--primary); }
+.onboarding-art.a3 { background: radial-gradient(circle at 34% 30%, #2c2c31, #131316 72%); }
+.onboarding-art.a3 svg { color: #f2eff0; }
+.onboarding-art.a4 { background: radial-gradient(circle at 34% 30%, #e5314d, #7e0f20 72%); }
+.onboarding-art.a5 { background: radial-gradient(circle at 34% 30%, #4a4a52, #1a1a1d 72%); }
+.onboarding-art.a5 svg { color: #fff; }
+.onboarding [data-slot='dialog-title'] { font-size: 26px; letter-spacing: -0.8px; }
+.onboarding [data-slot='dialog-description'] { font-size: 15px; line-height: 1.65; color: #b5b0b3; }
+.onboarding-dots {
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+  margin: 18px 0 4px;
+}
+.onboarding-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3a3a3f;
+  transition: background 0.2s, width 0.2s;
+}
+.onboarding-dots span.on { background: var(--primary); width: 22px; border-radius: 5px; }
+.onboarding-dots span.done { background: #8a858c; }
+.onboarding-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+.checklist-tour { margin-top: 10px; width: 100%; }

@@ -59,6 +59,7 @@ import LegalCenter from './legal-center';
 import Diagnostics from './diagnostics';
 import Studio from './studio';
 import Scene3D from './scene-3d';
+import Onboarding, { tourNeeded, tourDone } from './onboarding';
 import Room from './room';
 import { useDraftRecovery } from './use-draft-recovery';
 import RecoveryPanel from './recovery-panel';
@@ -126,6 +127,7 @@ export default function SessionApp({
     [detail, setDetail] = useState<Track | null>(null),
     [roomId, setRoomId] = useState(''),
     [roomModal, setRoomModal] = useState(false),
+    [tourOpen, setTourOpen] = useState(false),
     [results, setResults] = useState<any>(null),
     [searching, setSearching] = useState(false),
     [roomDiscoverable, setRoomDiscoverable] = useState('invite'),
@@ -187,6 +189,10 @@ export default function SessionApp({
       setLoading(false);
     }
   }
+  useEffect(() => {
+    if (loading || loadError) return;
+    if (tourNeeded()) setTourOpen(true);
+  }, [loading, loadError]);
   const playsCounted = useRef<Set<string>>(new Set()),
     deepLinkHandled = useRef(false),
     lastUnread = useRef(0);
@@ -1717,6 +1723,15 @@ export default function SessionApp({
                             Next: {next[0] as string}
                           </p>
                         )}
+                        <button
+                          className="button secondary small checklist-tour"
+                          onClick={() => {
+                            tourDone();
+                            setTourOpen(true);
+                          }}
+                        >
+                          Take the tour again
+                        </button>
                       </div>
                     );
                   })()}
@@ -2177,6 +2192,12 @@ export default function SessionApp({
         onSave={saveTrack}
         onRefresh={refresh}
         notify={notify}
+      />
+      <Onboarding
+        open={tourOpen}
+        signedIn={!!user}
+        onGo={go}
+        onFinish={() => setTourOpen(false)}
       />
       <Dialog open={roomModal} onOpenChange={setRoomModal}>
         <DialogContent className="form-dialog">
