@@ -76,7 +76,7 @@ export default function CoverArt({
   );
 
   const disc = (
-    <div className="cover-disc">
+    <div className="cover-vinyl">
       <span
         className="cover-disc-grooves"
         style={

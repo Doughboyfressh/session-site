@@ -670,7 +670,7 @@ main .feed {
 .cover-art.cover-fill { width: 100%; }
 
 /* ---- shared vinyl disc ---- */
-.cover-disc { position: absolute; inset: 0; }
+.cover-vinyl { position: absolute; inset: 0; }
 .cover-disc-grooves {
   position: absolute;
   inset: 0;
@@ -800,7 +800,8 @@ main .feed {
   position: absolute;
   top: 50%;
   left: 56%;
-  width: 74%;
+  height: 86%;
+  width: auto;
   aspect-ratio: 1;
   transform: translateY(-50%) translateX(0);
   transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -821,8 +822,8 @@ main .feed {
   background:
     linear-gradient(var(--sleeve-angle, 135deg), var(--cover-wash), var(--cover-deep)),
     var(--cover-deep);
-  border: 1px solid #fbfbfb17;
-  box-shadow: 0 22px 44px -18px #000d, inset 0 1px 0 #fbfbfb14;
+  border: 1px solid #fbfbfb2e;
+  box-shadow: inset 0 1px 0 #fbfbfb1c, 0 22px 44px -18px #000d;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -842,8 +843,8 @@ main .feed {
   font-size: 15px;
   font-weight: 800;
   color: #fbfbfb;
-  background: radial-gradient(circle at 34% 30%, color-mix(in srgb, var(--cover-core) 82%, #fbfbfb 18%), var(--cover-core) 64%, var(--cover-deep) 170%);
-  box-shadow: 0 0 0 1px #fbfbfb26, 0 10px 22px -8px var(--cover-core);
+  background: radial-gradient(circle at 34% 30%, #e5314d, #d11a33 64%, #6e0e1c 170%);
+  box-shadow: 0 0 0 1px #fbfbfb26, 0 10px 22px -8px #d11a33;
   text-shadow: 0 2px 6px #0008;
 }
 .cover-sleeve-title {
@@ -1399,6 +1400,8 @@ main .feed {
 }
 
 @media (max-width: 640px) {
+  .post-actions { flex-wrap: wrap; }
+  .post-act { padding: 8px 10px; font-size: 12px; }
   .trend-tile { width: 210px; }
   .permalink-card { padding: 18px 14px; }
 }
