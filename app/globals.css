@@ -1465,3 +1465,29 @@ main .feed {
   margin-top: 14px;
 }
 .checklist-tour { margin-top: 10px; width: 100%; }
+
+/* ---- creator suggestion cards in the feed ---- */
+.creator-post {
+  border-style: dashed;
+  border-color: #4a4448;
+  background: #1b1a1b;
+}
+.creator-body {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px 4px;
+}
+.creator-body:hover .creator-bio { color: #e9e6e7; }
+.creator-roles { display: flex; flex-wrap: wrap; gap: 6px; }
+.creator-bio {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #a9a4a7;
+  margin: 10px 0 8px;
+}
+.creator-meta {
+  font-size: 11px;
+  color: #8a858c;
+  letter-spacing: 0.3px;
+}

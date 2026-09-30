@@ -818,6 +818,67 @@ export default function SessionApp({
       </div>
     );
   }
+  function feedCreators(): any[] {
+    return state.profiles
+      .filter(
+        (p: any) =>
+          p.visibility === 'public' &&
+          p.id !== user?.id &&
+          !state.follows.includes(p.id),
+      )
+      .sort((a: any, b: any) => (b.followers || 0) - (a.followers || 0))
+      .slice(0, 3);
+  }
+  function creatorCard(p: any) {
+    const roles = (() => {
+      try {
+        return JSON.parse(p.roles || '[]') as string[];
+      } catch {
+        return [];
+      }
+    })();
+    return (
+      <article className="feed-post creator-post" key={'creator-' + p.id}>
+        <header className="post-head">
+          <span className="post-creator">
+            <Avatar profile={p} size={40} />
+            <span>
+              <strong>{p.name}</strong>
+              <small>@{p.username} · joined the community</small>
+            </span>
+          </span>
+          <button className="button secondary small" onClick={() => follow(p)}>
+            {state.follows.includes(p.id) ? 'Following' : 'Follow'}
+          </button>
+        </header>
+        <button
+          className="creator-body"
+          onClick={() => setSelectedProfile(p)}
+          aria-label={'View ' + p.name + '’s profile'}
+        >
+          <div className="creator-roles">
+            {roles.map((role) => (
+              <span className="chip" key={role}>
+                {role}
+              </span>
+            ))}
+          </div>
+          <p className="creator-bio">
+            {p.bio || 'Here to make something great.'}
+          </p>
+          <span className="creator-meta">
+            {p.location || 'Creating everywhere'} · {fmtNum(p.followers)}{' '}
+            followers
+          </span>
+        </button>
+        <footer className="post-actions">
+          <button className="post-act" onClick={() => setSelectedProfile(p)}>
+            View profile & music
+          </button>
+        </footer>
+      </article>
+    );
+  }
   function feedPost(t: Track) {
     const isSaved = state.saved.includes(t.id),
       active = playing?.id === t.id,
@@ -1506,7 +1567,18 @@ export default function SessionApp({
               {!results || query.trim().length < 2 ? (
                 <div className="feed-posts">
                   {filtered.length ? (
-                    filtered.slice(0, 12).map((track: Track) => feedPost(track))
+                    (() => {
+                      const creators = feedCreators();
+                      return filtered
+                        .slice(0, 12)
+                        .flatMap((track: Track, index: number) => {
+                          const card =
+                            (index === 1 || index === 6) && creators.length
+                              ? [creatorCard(creators.shift()!)]
+                              : [];
+                          return [feedPost(track), ...card];
+                        });
+                    })()
                   ) : (
                     <Empty
                       title="Nothing on this frequency yet."
