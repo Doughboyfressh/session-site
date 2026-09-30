@@ -4,57 +4,58 @@ import { Play, Pause, Heart, MessageCircle } from 'lucide-react';
 import CoverArt from './cover-art';
 import { context, trackFrom, bufferFor, playMix } from '@/lib/audio';
 
+type PermalinkTrack = {
+  id: string;
+  title: string;
+  bpm: number;
+  genre?: string;
+  plays?: number;
+  price?: number | null;
+  [key: string]: unknown;
+};
+type PermalinkCreator = { name?: string; username?: string } | null;
+type PermalinkComment = { id: string; body: string; name?: string };
+
 export default function TrackPermalink({
   track,
   creator,
   comments,
   likes,
 }: {
-  track: any;
-  creator: any;
-  comments: any[];
+  track: PermalinkTrack;
+  creator: PermalinkCreator;
+  comments: PermalinkComment[];
   likes: number;
 }) {
   const [isPlaying, setIsPlaying] = useState(false),
     [busy, setBusy] = useState(false),
-    [elapsed, setElapsed] = useState(0),
-    [duration, setDuration] = useState(0),
-    playback = useRef<any>(null),
+    playback = useRef<{
+      stop: () => void;
+    } | null>(null),
     seq = useRef(0);
-  useEffect(() => {
-    if (!isPlaying) return;
-    const timer = setInterval(() => {
-      const p = playback.current;
-      if (p?.position) setElapsed(p.position() - (p.seek || 0));
-    }, 70);
-    return () => clearInterval(timer);
-  }, [isPlaying]);
   useEffect(() => () => playback.current?.stop(), []);
   async function toggle() {
     if (isPlaying) {
       playback.current?.stop();
       playback.current = null;
       setIsPlaying(false);
-      setElapsed(0);
       return;
     }
     const mySeq = ++seq.current;
     setBusy(true);
     try {
       await context().resume();
-      const mt = trackFrom(track);
-      const b = await bufferFor(mt, track.bpm);
+      const mt = trackFrom(track as never);
+      await bufferFor(mt, track.bpm);
       if (mySeq !== seq.current) return;
-      setDuration(b.duration);
       const p = await playMix({ bpm: track.bpm, tracks: [mt] }, () => {
         setIsPlaying(false);
-        setElapsed(0);
       });
       if (mySeq !== seq.current) {
         p.stop();
         return;
       }
-      playback.current = { ...p, seek: 0 };
+      playback.current = { stop: () => p.stop() };
       setIsPlaying(true);
       void fetch('/api/action', {
         method: 'POST',
@@ -71,12 +72,18 @@ export default function TrackPermalink({
   return (
     <main className="permalink">
       <header className="permalink-top">
-        <a href="/" className="permalink-brand">
+        <button
+          className="permalink-brand"
+          onClick={() => (window.location.href = '/')}
+        >
           session<span>.</span>
-        </a>
-        <a className="button primary" href={inApp}>
+        </button>
+        <button
+          className="button primary"
+          onClick={() => (window.location.href = inApp)}
+        >
           Open in SESSION
-        </a>
+        </button>
       </header>
       <article className="permalink-card">
         <button
@@ -124,7 +131,7 @@ export default function TrackPermalink({
         {comments.length > 0 && (
           <section className="permalink-comments">
             <h2>What people are saying</h2>
-            {comments.map((c: any) => (
+            {comments.map((c) => (
               <div className="permalink-comment" key={c.id}>
                 <strong>{c.name || 'SESSION member'}</strong>
                 <p>{c.body}</p>

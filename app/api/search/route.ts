@@ -1,7 +1,19 @@
-import { all } from '@/lib/server';
+import { all, limit } from '@/lib/server';
+import { getChatGPTUser } from '@/app/chatgpt-auth';
 
 export async function GET(req: Request) {
   try {
+    // Authenticated members get their normal budget; guests share a
+    // tightened per-IP bucket so the public endpoint can't be hammered.
+    const user = await getChatGPTUser();
+    if (user) await limit(user.userId, 'search', 240);
+    else {
+      const ip =
+        req.headers.get('cf-connecting-ip') ||
+        req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+        'anonymous';
+      await limit('search-ip:' + ip, 'search-ip', 60);
+    }
     const url = new URL(req.url),
       q = (url.searchParams.get('q') || '').trim().slice(0, 80);
     if (q.length < 2) return Response.json({ tracks: [], profiles: [] });

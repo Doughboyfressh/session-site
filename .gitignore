@@ -42,3 +42,7 @@ next-env.d.ts
 *.tsbuildinfo
 /.openai/export-test.config.ts
 /.openai/.wrangler/
+
+# ZCode session artifacts
+.zcode
+.zcodeignore

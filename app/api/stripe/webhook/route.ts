@@ -146,10 +146,19 @@ export async function POST(req: Request) {
     }
 
     return Response.json({ received: true, ignored: event.type });
-  } catch (e: any) {
+  } catch (e) {
+    const error = e as { message?: unknown; status?: unknown };
     return Response.json(
-      { error: e?.message || 'Webhook failed.' },
-      { status: e?.status || 500 },
+      {
+        error:
+          typeof error?.message === 'string' ? error.message : 'Webhook failed.',
+      },
+      {
+        status:
+          typeof error?.status === 'number' && error.status >= 400
+            ? error.status
+            : 500,
+      },
     );
   }
 }

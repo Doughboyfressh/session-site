@@ -138,12 +138,23 @@ export async function POST(req: Request) {
     }
 
     fail('Unknown payments action.');
-  } catch (e: any) {
+  } catch (e) {
     if (e instanceof OrderError)
       return Response.json({ error: e.message }, { status: e.status });
+    const error = e as { message?: unknown; status?: unknown };
     return Response.json(
-      { error: e?.message || 'Payments request failed.' },
-      { status: e?.status || 500 },
+      {
+        error:
+          typeof error?.message === 'string'
+            ? error.message
+            : 'Payments request failed.',
+      },
+      {
+        status:
+          typeof error?.status === 'number' && error.status >= 400
+            ? error.status
+            : 500,
+      },
     );
   }
 }

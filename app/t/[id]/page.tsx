@@ -3,6 +3,14 @@ import TrackPermalink from '@/app/track-permalink';
 
 export const dynamic = 'force-dynamic';
 
+type PageParams = { params: Promise<{ id: string }> | { id: string } };
+
+async function resolveParams(params: PageParams['params']) {
+  return typeof (params as Promise<{ id: string }>)?.then === 'function'
+    ? await (params as Promise<{ id: string }>)
+    : (params as { id: string });
+}
+
 async function load(id: string) {
   const track = await one(
     `SELECT t.*,COALESCE(p.name,'Independent creator') AS creator,
@@ -25,8 +33,8 @@ async function load(id: string) {
   return { track, creator, comments };
 }
 
-export async function generateMetadata({ params }: { params: any }) {
-  const { id } = typeof params?.then === 'function' ? await params : params;
+export async function generateMetadata({ params }: PageParams) {
+  const { id } = await resolveParams(params);
   const data = await load(String(id || ''));
   if (!data)
     return {
@@ -44,8 +52,8 @@ export async function generateMetadata({ params }: { params: any }) {
   };
 }
 
-export default async function TrackPage({ params }: { params: any }) {
-  const { id } = typeof params?.then === 'function' ? await params : params;
+export default async function TrackPage({ params }: PageParams) {
+  const { id } = await resolveParams(params);
   const data = await load(String(id || ''));
   if (!data)
     return (
@@ -55,9 +63,11 @@ export default async function TrackPage({ params }: { params: any }) {
           <p className="permalink-footnote">
             It may have been taken down or made private by its creator.
           </p>
-          <a className="button primary" href="/">
-            Explore SESSION
-          </a>
+          <form action="/" style={{ margin: 0 }}>
+            <button className="button primary" type="submit">
+              Explore SESSION
+            </button>
+          </form>
         </div>
       </main>
     );
