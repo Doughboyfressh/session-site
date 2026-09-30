@@ -216,8 +216,36 @@ export class PeerLink {
         this.pc.removeTrack(sender);
     for (const stream of streams)
       for (const track of stream.getTracks())
-        if (!this.pc.getSenders().some((s) => s.track === track))
+        if (!this.pc.getSenders().some((s) => s.track === track)) {
           this.pc.addTrack(track, stream);
+          const sender = this.pc.getSenders().find((s) => s.track === track);
+          if (sender)
+            void this.tuneSender(sender, this.localRoles.get(stream.id));
+        }
+    for (const sender of this.pc.getSenders()) {
+      const track = sender.track;
+      if (!track) continue;
+      const stream = streams.find((s) => s.getTracks().includes(track));
+      if (stream) void this.tuneSender(sender, this.localRoles.get(stream.id));
+    }
+  }
+
+  /** Shared studio audio deserves music-grade Opus; voice keeps defaults. */
+  private async tuneSender(sender: RTCRtpSender, role?: string) {
+    if (!sender.track || sender.track.kind !== 'audio' || role !== 'music')
+      return;
+    try {
+      const params = sender.getParameters();
+      params.encodings = params.encodings?.length ? params.encodings : [{}];
+      (
+        params.encodings[0] as RTCRtpEncodingParameters & {
+          maxaveragebitrate?: number;
+        }
+      ).maxaveragebitrate = 256000;
+      await sender.setParameters(params);
+    } catch {
+      // browsers without encoding tuning keep working at default bitrate
+    }
   }
   restart() {
     if (this.closed) return;

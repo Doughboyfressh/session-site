@@ -42,7 +42,7 @@ export type CaptureHooks = {
 export type CaptureDependencies = {
   media: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
   context: () => AudioContext;
-  acquire?: () => MicrophoneLease;
+  acquire?: (deviceId?: string) => MicrophoneLease | Promise<MicrophoneLease>;
   output?: StudioOutput;
 };
 export class TakeCapture {
@@ -53,6 +53,7 @@ export class TakeCapture {
   private lease: MicrophoneLease | null = null;
   private releaseListener: (() => void) | null = null;
   private input: MediaStreamAudioSourceNode | null = null;
+  private monitorGain: GainNode | null = null;
   private node: AudioWorkletNode | null = null;
   private backing: Awaited<ReturnType<typeof playMix>> | null = null;
   private clicks = new Set<OscillatorNode>();
@@ -116,6 +117,14 @@ export class TakeCapture {
       this.node.disconnect();
       this.node = null;
     }
+    if (this.monitorGain) {
+      try {
+        this.monitorGain.gain.cancelScheduledValues(0);
+        this.monitorGain.gain.value = 0;
+      } catch {}
+      this.monitorGain.disconnect();
+      this.monitorGain = null;
+    }
     this.input?.disconnect();
     this.input = null;
     this.stream?.getTracks().forEach((t) => {
@@ -155,6 +164,28 @@ export class TakeCapture {
   }
   dispose() {
     this.cancel();
+  }
+  /** Headphone monitoring level for the input, 0 (silent) to 1. */
+  setMonitor(level: number) {
+    const target = Math.max(0, Math.min(1, Number(level) || 0));
+    if (!this.monitorGain || !this.c) return;
+    const now = this.c.currentTime;
+    try {
+      this.monitorGain.gain.cancelScheduledValues(now);
+      this.monitorGain.gain.setTargetAtTime(target, now, 0.02);
+    } catch {}
+  }
+  /** Round-trip latency estimate from the audio stack, in whole ms. */
+  latencyEstimateMs(): number {
+    const c = this.c as
+      | (AudioContext & {
+          outputLatency?: number;
+        })
+      | null;
+    if (!c) return 0;
+    const seconds =
+      (Number(c.baseLatency) || 0) + (Number(c.outputLatency) || 0);
+    return Math.max(0, Math.min(500, Math.round(seconds * 1000)));
   }
   get sampleRate() {
     return this.c?.sampleRate;
@@ -213,7 +244,7 @@ export class TakeCapture {
         );
       await c.resume();
       if (!this.valid(token)) return;
-      const lease = this.deps.acquire?.();
+      const lease = await this.deps.acquire?.(deviceId);
       const stream =
         lease?.stream ||
         (await this.deps.media({
@@ -268,6 +299,9 @@ export class TakeCapture {
           );
       };
       this.input = c.createMediaStreamSource(stream);
+      this.monitorGain = c.createGain();
+      this.monitorGain.gain.value = 0;
+      this.input.connect(this.monitorGain).connect(c.destination);
       this.node = new AudioWorkletNode(c, 'session-capture', {
         numberOfInputs: 1,
         numberOfOutputs: 1,

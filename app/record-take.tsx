@@ -132,6 +132,8 @@ export default function RecordTake({
   const [phase, setPhase] = useState<CapturePhase>('idle'),
     [level, setLevel] = useState(0),
     [clipped, setClipped] = useState(false),
+    [peakHold, setPeakHold] = useState(0),
+    [monitor, setMonitor] = useState(0),
     [seconds, setSeconds] = useState(0),
     [beats, setBeats] = useState(0),
     [bars, setBars] = useState('1'),
@@ -305,6 +307,7 @@ export default function RecordTake({
       level: (p) => {
         if (alive.current) {
           setLevel(p);
+          setPeakHold((held) => (p > held ? p : held * 0.94));
           if (p >= 0.98) setClipped(true);
         }
       },
@@ -412,7 +415,7 @@ export default function RecordTake({
             }),
           media: (constraints) =>
             navigator.mediaDevices.getUserMedia(constraints),
-          acquire: roomAudio?.acquire,
+          acquire: roomAudio?.acquireStudio || roomAudio?.acquire,
           output: roomAudio?.output,
         });
     return () => {
@@ -449,6 +452,9 @@ export default function RecordTake({
       );
     }
   }, [canEdit]);
+  useEffect(() => {
+    capture.current?.setMonitor?.(monitor);
+  }, [monitor, phase]);
   useEffect(() => {
     let active = true;
     const enumerate = () =>
@@ -753,32 +759,32 @@ export default function RecordTake({
         {taking && (
           <>
             <fieldset disabled={active || !canEdit} className="record-settings">
+              <Pick
+                label="Microphone"
+                value={device}
+                onChange={(id) => {
+                  setDevice(id);
+                  setCorrection('0');
+                  if (phase === 'ready') connect(id);
+                }}
+                options={[
+                  { value: '', label: 'System default microphone' },
+                  ...devices
+                    .filter((d) => d.deviceId !== 'default')
+                    .map((d, i) => ({
+                      value: d.deviceId,
+                      label: d.label || 'Microphone ' + (i + 1),
+                    })),
+                ]}
+              />
               {roomAudio ? (
                 <p className="record-note">
-                  Using your room microphone. Call mute does not mute this
-                  recording. The call’s echo and noise processing also applies
-                  to the take.
+                  Studio capture: echo and noise processing are bypassed for a
+                  full-fidelity take — wear headphones so the other members
+                  don’t feed back. If the raw path is unavailable, the call
+                  microphone is used instead.
                 </p>
-              ) : (
-                <Pick
-                  label="Microphone"
-                  value={device}
-                  onChange={(id) => {
-                    setDevice(id);
-                    setCorrection('0');
-                    if (phase === 'ready') connect(id);
-                  }}
-                  options={[
-                    { value: '', label: 'System default microphone' },
-                    ...devices
-                      .filter((d) => d.deviceId !== 'default')
-                      .map((d, i) => ({
-                        value: d.deviceId,
-                        label: d.label || 'Microphone ' + (i + 1),
-                      })),
-                  ]}
-                />
-              )}
+              ) : null}
               <Pick
                 label="Count-in"
                 value={bars}
@@ -824,17 +830,34 @@ export default function RecordTake({
               />
               <label className="field">
                 <span>Recording delay correction (ms)</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={500}
-                  step={1}
-                  value={correction}
-                  aria-label="Recording delay correction (ms)"
-                  aria-describedby="recording-delay-help"
-                  aria-invalid={!correctionValid}
-                  onChange={(e) => setCorrection(e.target.value)}
-                />
+                <div className="correction-row">
+                  <input
+                    type="number"
+                    min={0}
+                    max={500}
+                    step={1}
+                    value={correction}
+                    aria-label="Recording delay correction (ms)"
+                    aria-describedby="recording-delay-help"
+                    aria-invalid={!correctionValid}
+                    onChange={(e) => setCorrection(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title="Fill in the round-trip latency measured by your audio stack"
+                    onClick={() => {
+                      const ms = capture.current?.latencyEstimateMs?.() || 0;
+                      if (ms) setCorrection(String(Math.min(500, ms)));
+                      else
+                        setError?.(
+                          'Connect the microphone first, then measure.',
+                        );
+                    }}
+                  >
+                    Measure
+                  </button>
+                </div>
               </label>
             </fieldset>
             <p className="record-note" role="status">
@@ -891,11 +914,36 @@ export default function RecordTake({
                 value={Math.min(1, level)}
                 aria-label="Microphone input level"
               />
+              <div className="peak-hold" aria-hidden="true">
+                <i style={{ left: Math.min(100, peakHold * 100) + '%' }} />
+              </div>
               <p>
+                {peakHold > 0.02
+                  ? `Peak held at ${Math.max(-60, 20 * Math.log10(peakHold)).toFixed(1)} dBFS.`
+                  : ''}{' '}
                 {clipped
                   ? 'Input is near clipping. Lower the gain on your microphone or audio interface.'
                   : 'Speak or sing at your performance level. Leave space below the top of the meter.'}
               </p>
+              <div className="monitor-box">
+                <label className="field">
+                  <span>
+                    Hear yourself while recording · {Math.round(monitor * 100)}%
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={Math.round(monitor * 100)}
+                    aria-label="Headphone monitoring level"
+                    onChange={(e) => setMonitor(Number(e.target.value) / 100)}
+                  />
+                </label>
+                <p className="record-note">
+                  Headphones only — speakers will feed back into the take.
+                </p>
+              </div>
             </div>
             {active && (
               <div className="record-progress" role="status">

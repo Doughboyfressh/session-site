@@ -1422,3 +1422,37 @@
 @media (max-width: 760px) {
   .studio-help .help-grid { grid-template-columns: 1fr; }
 }
+
+/* ---- recorder: peak-hold, monitor, measure ---- */
+.peak-hold {
+  position: relative;
+  height: 4px;
+  margin: 6px 0 2px;
+  border-radius: 3px;
+  background: #262527;
+  overflow: hidden;
+}
+.peak-hold i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--primary);
+  transition: left 0.12s linear;
+  box-shadow: 0 0 8px var(--primary);
+}
+.monitor-box {
+  border: 1px solid #343136;
+  border-radius: 10px;
+  background: #1d1c1e;
+  padding: 12px 14px;
+  margin-top: 10px;
+}
+.monitor-box .field { margin: 0; }
+.monitor-box input[type='range'] { accent-color: var(--primary); }
+.monitor-box .record-note { margin: 8px 0 0; }
+.correction-row { display: flex; gap: 8px; align-items: stretch; }
+.correction-row input { flex: 1; }
+.correction-row .button { flex: none; }

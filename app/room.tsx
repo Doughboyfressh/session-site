@@ -16,8 +16,15 @@ import {
   Music2,
   UserMinus,
   Activity,
+  Settings2,
 } from 'lucide-react';
-import { action, Avatar, Confirm } from './helpers';
+import { action, Avatar, Confirm, Pick } from './helpers';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { PeerLink } from '@/lib/peer';
 import Diagnostics from './diagnostics';
 import RoomStudio from './room-studio';
@@ -122,13 +129,21 @@ export default function Room({
   const [roomAudio] = useState(() => ({
     output: broadcast.output,
     acquire: microphones.acquire,
+    acquireStudio: microphones.acquireStudio,
   }));
+
   const [state, setState] = useState<any>(null),
     [error, setError] = useState(''),
     [callNotice, setCallNotice] = useState(''),
     [chat, setChat] = useState<any[]>([]),
     [message, setMessage] = useState(''),
     [local, setLocal] = useState<MediaStream | null>(null),
+    [mediaSettings, setMediaSettings] = useState(false),
+    [mics, setMics] = useState<MediaDeviceInfo[]>([]),
+    [cams, setCams] = useState<MediaDeviceInfo[]>([]),
+    [chosenMic, setChosenMic] = useState(''),
+    [chosenCam, setChosenCam] = useState(''),
+    [camQuality, setCamQuality] = useState('360'),
     [remote, setRemote] = useState<
       Record<string, { stream: MediaStream; peer: string; role?: string }>
     >({}),
@@ -163,6 +178,102 @@ export default function Room({
     if (!r.ok) throw new Error(j.error || 'Connection interrupted.');
     return j;
   }
+  useEffect(() => {
+    if (!mediaSettings) return;
+    let active = true;
+    const enumerate = () =>
+      navigator.mediaDevices
+        ?.enumerateDevices()
+        .then((list) => {
+          if (!active) return;
+          setMics(list.filter((d) => d.kind === 'audioinput' && d.deviceId));
+          setCams(list.filter((d) => d.kind === 'videoinput' && d.deviceId));
+        })
+        .catch(() => {});
+    void enumerate();
+    navigator.mediaDevices?.addEventListener('devicechange', enumerate);
+    return () => {
+      active = false;
+      navigator.mediaDevices?.removeEventListener('devicechange', enumerate);
+    };
+  }, [mediaSettings]);
+  async function switchMic(deviceId: string) {
+    setChosenMic(deviceId);
+    try {
+      const next = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+        video: false,
+      });
+      const old = localRef.current?.getAudioTracks()[0] || null;
+      const track = next.getAudioTracks()[0];
+      if (!track) throw new Error('That microphone returned no audio.');
+      const carried: MediaStreamTrack[] = [
+        ...(localRef.current?.getVideoTracks() || []),
+      ];
+      const merged = new MediaStream([...carried, track]);
+      if (old) old.stop();
+      if (localRef.current)
+        localRef.current.getTracks().forEach((t) => {
+          if (t !== old) localRef.current!.removeTrack(t);
+        });
+      localRef.current = merged;
+      microphones.set(merged);
+      setLocal(merged);
+      for (const link of links()) {
+        const sender = link['pc'].getSenders().find((sr) => sr.track === old);
+        if (sender) await sender.replaceTrack(track);
+      }
+      syncPeers(stateRef.current || { sessions: [] });
+      setCallNotice('Microphone switched.');
+    } catch (e: any) {
+      setCallNotice(e.message || 'Could not switch microphone.');
+    }
+  }
+  async function switchCam(deviceId: string, quality = camQuality) {
+    setChosenCam(deviceId);
+    try {
+      const hd = quality === '720';
+      const next = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          width: { ideal: hd ? 1280 : 640 },
+          height: { ideal: hd ? 720 : 360 },
+          frameRate: { ideal: hd ? 30 : 24, max: 30 },
+        },
+      });
+      const old = localRef.current?.getVideoTracks()[0] || null;
+      const track = next.getVideoTracks()[0];
+      if (!track) throw new Error('That camera returned no video.');
+      const carried: MediaStreamTrack[] = [
+        ...(localRef.current?.getAudioTracks() || []),
+      ];
+      const merged = new MediaStream([...carried, track]);
+      if (old) old.stop();
+      if (localRef.current)
+        localRef.current.getTracks().forEach((t) => {
+          if (t !== old) localRef.current!.removeTrack(t);
+        });
+      localRef.current = merged;
+      setLocal(merged);
+      for (const link of links()) {
+        const sender = link['pc'].getSenders().find((sr) => sr.track === old);
+        if (sender) await sender.replaceTrack(track);
+      }
+      syncPeers(stateRef.current || { sessions: [] });
+      setCallNotice('Camera set to ' + (hd ? '720p' : '360p') + '.');
+    } catch (e: any) {
+      setCallNotice(e.message || 'Could not switch camera.');
+    }
+  }
+  function links() {
+    return [...peers.current.values()];
+  }
+
   function outgoingStreams() {
     return [localRef.current, shareRef.current, musicRef.current].filter(
       Boolean,
@@ -282,6 +393,13 @@ export default function Room({
     localRef.current?.getTracks().forEach((t) => t.stop());
     shareRef.current?.getTracks().forEach((t) => t.stop());
     localRef.current = null;
+    void navigator.mediaDevices
+      ?.enumerateDevices()
+      .then((list) => {
+        setMics(list.filter((d) => d.kind === 'audioinput' && d.deviceId));
+        setCams(list.filter((d) => d.kind === 'videoinput' && d.deviceId));
+      })
+      .catch(() => {});
     shareRef.current = null;
     setLocal(null);
     setSharing(null);
@@ -780,6 +898,15 @@ export default function Room({
                 <Send size={16} /> {showChat ? 'Hide chat' : 'Show chat'}
               </button>
             )}
+            {connected && (
+              <button
+                onClick={() => setMediaSettings(true)}
+                aria-label="Video and audio settings"
+                title="Camera, microphone, and quality"
+              >
+                <Settings2 size={16} /> Settings
+              </button>
+            )}
             <button
               className={!mic ? 'off' : ''}
               disabled={!local}
@@ -1055,6 +1182,58 @@ export default function Room({
           </button>
         </div>
       )}
+      <Dialog open={mediaSettings} onOpenChange={setMediaSettings}>
+        <DialogContent className="form-dialog">
+          <DialogTitle>Video &amp; audio settings</DialogTitle>
+          <DialogDescription>
+            Switch devices live — the call continues without reconnecting.
+          </DialogDescription>
+          <Pick
+            label="Microphone"
+            value={chosenMic}
+            onChange={(id) => void switchMic(id)}
+            options={[
+              { value: '', label: 'System default microphone' },
+              ...mics
+                .filter((d) => d.deviceId !== 'default')
+                .map((d, i) => ({
+                  value: d.deviceId,
+                  label: d.label || 'Microphone ' + (i + 1),
+                })),
+            ]}
+          />
+          <Pick
+            label="Camera"
+            value={chosenCam}
+            onChange={(id) => void switchCam(id)}
+            options={[
+              { value: '', label: 'System default camera' },
+              ...cams
+                .filter((d) => d.deviceId !== 'default')
+                .map((d, i) => ({
+                  value: d.deviceId,
+                  label: d.label || 'Camera ' + (i + 1),
+                })),
+            ]}
+          />
+          <Pick
+            label="Camera quality"
+            value={camQuality}
+            onChange={(q) => {
+              setCamQuality(q);
+              if (connected) void switchCam(chosenCam, q);
+            }}
+            options={[
+              { value: '360', label: 'Standard · 360p (kind to data)' },
+              { value: '720', label: 'High · 720p HD' },
+            ]}
+          />
+          <p className="small-note">
+            Echo and noise processing stay on for the call. The studio recorder
+            opens its own clean path when you record a take.
+          </p>
+        </DialogContent>
+      </Dialog>
       <Confirm
         open={close}
         onClose={() => setClose(false)}

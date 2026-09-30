@@ -131,6 +131,41 @@ function App() {
       );
       microphones.set(voice.stream);
 
+      // Studio-grade lease: opens its own raw capture, dies with the call,
+      // and falls back to the processed call mic when raw is unavailable.
+      let rawCalls = 0,
+        rawConstraints: MediaStreamConstraints | null = null;
+      const rawLease = await microphones.acquireStudio(
+        '',
+        async (constraints) => {
+          rawCalls++;
+          rawConstraints = constraints;
+          return (await tone(520)).stream;
+        },
+      );
+      check(rawCalls === 1, 'Studio lease opens one raw getUserMedia');
+      check(
+        !!(rawConstraints as any)?.audio?.echoCancellation === false &&
+          !!(rawConstraints as any)?.audio?.noiseSuppression === false &&
+          !!(rawConstraints as any)?.audio?.autoGainControl === false,
+        'Studio lease disables echo, noise, and gain processing for the take',
+      );
+      microphones.end();
+      check(rawLease.signal.aborted, 'Room disconnect aborts the studio lease');
+      check(
+        rawLease.stream.getAudioTracks()[0].readyState === 'ended',
+        'Studio lease track is stopped after disconnect',
+      );
+      microphones.set(voice.stream);
+      const fallbackLease = await microphones.acquireStudio('', async () => {
+        throw new Error('raw unavailable');
+      });
+      check(
+        fallbackLease.stream.getAudioTracks()[0] !== original,
+        'Studio lease falls back to a clone of the call mic',
+      );
+      fallbackLease.release();
+
       let phase: CapturePhase = 'idle',
         take: RecordedTake | null = null,
         error = '';

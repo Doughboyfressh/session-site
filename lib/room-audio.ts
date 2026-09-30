@@ -96,10 +96,16 @@ export class StudioBroadcast {
 export class RoomMicrophones {
   private source: MediaStream | null = null;
   private leases = new Set<() => void>();
+  private endListeners = new Set<() => void>();
 
   set(stream: MediaStream | null) {
     this.end();
     this.source = stream;
+  }
+
+  onEnd(callback: () => void) {
+    this.endListeners.add(callback);
+    return () => this.endListeners.delete(callback);
   }
 
   acquire = (): MicrophoneLease => {
@@ -133,10 +139,56 @@ export class RoomMicrophones {
     this.source = null;
     for (const release of [...this.leases]) release();
     this.leases.clear();
+    for (const listener of [...this.endListeners]) listener();
   }
+
+  /**
+   * Studio-grade lease: opens a second getUserMedia with call processing
+   * (echo cancellation, noise suppression, AGC) disabled so takes recorded
+   * inside a room keep full fidelity. Falls back to the processed call mic
+   * when the raw path is unavailable. The lease dies with the call.
+   */
+  acquireStudio = async (
+    deviceId = '',
+    media: (constraints: MediaStreamConstraints) => Promise<MediaStream> = (
+      constraints,
+    ) => navigator.mediaDevices.getUserMedia(constraints),
+  ): Promise<MicrophoneLease> => {
+    const live = this.source?.getAudioTracks()[0];
+    if (!live || live.readyState !== 'live')
+      throw new Error('Join the room call before enabling this recorder.');
+    const controller = new AbortController();
+    let stream: MediaStream;
+    try {
+      stream = await media({
+        audio: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          channelCount: { ideal: 1 },
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+        video: false,
+      });
+    } catch {
+      // Raw capture unavailable (device busy or permission narrowed) —
+      // the processed call mic is still a valid take source.
+      return this.acquire();
+    }
+    const off = this.onEnd(() => controller.abort());
+    const release = () => {
+      off();
+      stream.getTracks().forEach((t) => t.stop());
+    };
+    controller.signal.addEventListener('abort', release, { once: true });
+    return { stream, signal: controller.signal, release };
+  };
 }
 
 export type RoomAudio = {
   output: StudioOutput;
   acquire: () => MicrophoneLease;
+  acquireStudio?: (
+    deviceId?: string,
+  ) => Promise<MicrophoneLease> | MicrophoneLease;
 };
