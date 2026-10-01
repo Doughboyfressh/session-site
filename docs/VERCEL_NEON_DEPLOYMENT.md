@@ -1,6 +1,6 @@
 # Vercel and Neon deployment
 
-SESSION has two deployment targets. `npm run build` retains the Sites/Vinext Worker, trusted dispatcher identity, D1, and R2. `npm run build:vercel` builds Next.js for Vercel, with server-verified Neon Auth cookies, PostgreSQL, and private Neon storage. The targets use separate build directories: `.next` and `.vercel-next`. `.env.local` cannot switch the Sites build to the Vercel identity model.
+SESSION has two deployment targets. `npm run build` retains the Sites/Vinext Worker, trusted dispatcher identity, D1, and R2. `npm run build:vercel` builds Next.js for Vercel, with server-verified Neon Auth cookies, PostgreSQL, and private Neon storage. The targets use separate build directories: `.next` and `.vercel-next`. `vercel.json` explicitly selects `.vercel-next` for deployment packaging. `.env.local` cannot switch the Sites build to the Vercel identity model.
 
 ## Resources
 
@@ -9,6 +9,14 @@ SESSION has two deployment targets. `npm run build` retains the Sites/Vinext Wor
 - Neon project: `shy-bird-83273732`.
 - Isolated Neon branch: `session-production` (`br-polished-mode-auigm3oy`).
 - Fresh application database: `session`; private bucket: `session-files`.
+
+## Verified deployment — October 1, 2026
+
+Production is available at [session-site-eosin.vercel.app](https://session-site-eosin.vercel.app). Vercel deployment `dpl_FTbVD5b42iibLiiv1sBGvKQNeuZz` is Ready, built from Git SHA `aa1cc55` after merged application SHA `f6e357e`. Its immutable URL is `https://session-site-a7a5ayn5a-doughboyfressh.vercel.app`. All 12 approved production variables were stored encrypted.
+
+Seven live smoke checks and 32 actual production Auth/PostgreSQL/private-storage checks passed, including signed sessions, a 6 MiB chunked upload, authorized range reads, cross-account rejection, project persistence, and room updates. Homepage and sign-in browser checks had no console errors. Disposable fixtures were cleaned; no existing application data was migrated. Evidence is in ignored `outputs/production-smoke.json`, `outputs/deployment-result.json`, and the earlier validation directories.
+
+The deployment was made through the authenticated CLI. Automatic deployment from GitHub pushes is not connected; enabling it requires repository integration access. Vercel's existing deployment protection remains enabled, and the assigned production alias serves the application.
 
 The Neon parent's existing application data is preserved. This deployment starts with an empty SESSION database and separate Neon accounts. Existing Sites accounts, uploads, and project data are not copied. Vercel access protection and Sites access restrictions are separate provider settings; deploying does not establish approval for a public launch.
 

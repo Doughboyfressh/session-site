@@ -23,5 +23,5 @@ SESSION is a browser music studio with private projects, community features, and
 ## Lessons
 
 - 2026-10-01 — Validate raw SQL changes against PostgreSQL as well as SQLite; nullable comparisons and upsert target references require explicit translation.
-- 2026-10-01 — Select each build target explicitly and use separate output directories so local Vercel environment files cannot change Sites identity behavior.
+- 2026-10-01 — Select each build target explicitly, keep separate output directories, and match Vercel's outputDirectory to Next.js distDir; local Vercel environment files must not change Sites identity behavior.
 - 2026-10-01 — Reject protocol-relative return paths both before and after URL normalization, and validate upload-purpose keys with own-property checks.
