@@ -19,6 +19,7 @@ export async function GET() {
       trending,
       liveRooms,
       pulse,
+      mediaPosts,
     ] = await Promise.all([
       one('SELECT * FROM profiles WHERE id=?', id),
       all(
@@ -68,6 +69,19 @@ export async function GET() {
            (SELECT COUNT(*) FROM rooms WHERE visibility='public') AS publicRooms`,
         Date.now() - 86400000,
       ),
+      all(
+        `SELECT p.id,p.owner,p.kind,p.fileId,p.track,p.caption,p.plays,p.created,
+                COALESCE(pr.name,'Independent creator') AS creator,
+                pr.username,pr.avatar,
+                (SELECT COUNT(*) FROM post_likes l WHERE l.post=p.id) AS likes,
+                EXISTS(SELECT 1 FROM post_likes l WHERE l.post=p.id AND l.user=?) AS likedByMe,
+                (SELECT t.title FROM tracks t WHERE t.id=p.track) AS trackTitle
+         FROM posts p LEFT JOIN profiles pr ON pr.id=p.owner
+         WHERE p.visibility='public' OR p.owner=?
+         ORDER BY p.created DESC LIMIT 40`,
+        id,
+        id,
+      ),
     ]);
     return Response.json(
       {
@@ -87,6 +101,7 @@ export async function GET() {
         orders,
         trending,
         liveRooms,
+        posts: mediaPosts,
         pulse: {
           tracks: Number(pulse?.tracks || 0),
           creators: Number(pulse?.creators || 0),

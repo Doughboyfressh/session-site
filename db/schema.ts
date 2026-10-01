@@ -365,3 +365,31 @@ export const stripeEvents = sqliteTable('stripe_events', {
   eventId: text().primaryKey(),
   processedAt: integer().notNull(),
 });
+
+export const posts = sqliteTable(
+  'posts',
+  {
+    id: text().primaryKey(),
+    owner: text().notNull(),
+    kind: text().notNull(),
+    fileId: text().notNull(),
+    track: text(),
+    caption: text().notNull().default(''),
+    visibility: text().notNull().default('public'),
+    plays: integer().notNull().default(0),
+    created: integer().notNull(),
+  },
+  (t) => [
+    index('idx_posts_owner_created').on(t.owner, t.created),
+    index('idx_posts_visibility_created').on(t.visibility, t.created),
+  ],
+);
+
+export const postLikes = sqliteTable(
+  'post_likes',
+  {
+    user: text().notNull(),
+    post: text().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.user, t.post] }), index('idx_post_likes_post').on(t.post)],
+);

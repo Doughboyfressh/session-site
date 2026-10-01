@@ -23,13 +23,30 @@ export async function POST(req: Request) {
     await limit(user.userId, 'upload', 30);
     const form = await uploadForm(req),
       file = form.get('file');
-    const purpose = choice(form.get('purpose'), ['audio', 'avatar', 'take']);
+    const purpose = choice(form.get('purpose'), [
+      'audio',
+      'avatar',
+      'take',
+      'photo',
+      'video',
+    ]);
     if (!(file instanceof File) || file.size === 0) fail('Choose a file.');
-    if (file.size > (purpose === 'avatar' ? 3 : 25) * 1024 * 1024)
+    const purposeCap = {
+      avatar: 3,
+      audio: 25,
+      photo: 8,
+      video: 60,
+      take: 25,
+    }[purpose] as number;
+    if (file.size > purposeCap * 1024 * 1024)
       fail(
         purpose === 'avatar'
           ? 'Choose a photo smaller than 3 MB.'
-          : 'Choose audio smaller than 25 MB.',
+          : purpose === 'photo'
+            ? 'Choose a photo smaller than 8 MB.'
+            : purpose === 'video'
+              ? 'Choose a video smaller than 60 MB.'
+              : 'Choose audio smaller than 25 MB.',
         413,
       );
     if (purpose === 'take')
@@ -65,6 +82,25 @@ export async function POST(req: Request) {
       else if (text.startsWith('RIFF') && text.slice(8, 12) === 'WEBP')
         mime = 'image/webp';
       else fail('Use a PNG, JPEG or WebP photo.');
+    } else if (purpose === 'photo') {
+      if (bytes[0] === 137 && text.slice(1, 4) === 'PNG') mime = 'image/png';
+      else if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255)
+        mime = 'image/jpeg';
+      else if (text.startsWith('RIFF') && text.slice(8, 12) === 'WEBP')
+        mime = 'image/webp';
+      else if (bytes[0] === 71 && bytes[1] === 73 && bytes[2] === 70)
+        mime = 'image/gif';
+      else fail('Use a PNG, JPEG, WebP or GIF photo.');
+    } else if (purpose === 'video') {
+      if (text.slice(4, 8) === 'ftyp') mime = 'video/mp4';
+      else if (
+        bytes[0] === 26 &&
+        bytes[1] === 69 &&
+        bytes[2] === 223 &&
+        bytes[3] === 163
+      )
+        mime = 'video/webm';
+      else fail('Use an MP4 or WebM video.');
     } else {
       if (text.startsWith('RIFF') && text.slice(8, 12) === 'WAVE')
         mime = 'audio/wav';

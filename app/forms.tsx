@@ -46,9 +46,11 @@ import { genres, type Track } from '@/lib/catalog';
 export function UploadForm({
   onDone,
   notify,
+  tracks = [],
 }: {
   onDone: () => void;
   notify: (s: string) => void;
+  tracks?: Track[];
 }) {
   const [file, setFile] = useState<File | null>(null),
     [title, setTitle] = useState(''),
@@ -60,17 +62,31 @@ export function UploadForm({
     [permission, setPermission] = useState('listen'),
     [rights, setRights] = useState(false),
     [price, setPrice] = useState(''),
+    [caption, setCaption] = useState(''),
+    [attachedTrack, setAttachedTrack] = useState('none'),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const input = useRef<HTMLInputElement>(null);
   function choose(f?: File) {
     if (!f) return;
-    if (f.size > 25 * 1024 * 1024) {
+    const isPhoto = f.type.startsWith('image/');
+    const isVideo = f.type.startsWith('video/');
+    if (isPhoto && f.size > 8 * 1024 * 1024) {
+      setError('Choose a photo smaller than 8 MB.');
+      return;
+    }
+    if (isVideo && f.size > 60 * 1024 * 1024) {
+      setError('Choose a video smaller than 60 MB.');
+      return;
+    }
+    if (!isPhoto && !isVideo && f.size > 25 * 1024 * 1024) {
       setError('Choose a file smaller than 25 MB.');
       return;
     }
     setFile(f);
-    setTitle((t) => t || f.name.replace(/\.[^.]+$/, ''));
+    if (!isPhoto && !isVideo)
+      setTitle((t) => t || f.name.replace(/\.[^.]+$/, ''));
+    else setCaption((c) => c || f.name.replace(/\.[^.]+$/, '').slice(0, 200));
     setError('');
   }
   return (
@@ -82,6 +98,24 @@ export function UploadForm({
         setBusy(true);
         setError('');
         try {
+          if (kind === 'photo' || kind === 'video') {
+            const f = await upload(file, kind);
+            await action({
+              action: 'post',
+              kind,
+              fileId: f.id,
+              caption,
+              track: attachedTrack === 'none' ? null : attachedTrack,
+              visibility,
+            });
+            notify(
+              visibility === 'public'
+                ? 'Shared with the community.'
+                : 'Saved privately.',
+            );
+            onDone();
+            return;
+          }
           const f = await upload(file);
           await action({
             action: 'track',
@@ -133,13 +167,25 @@ export function UploadForm({
             ? (file.size / 1024 / 1024).toFixed(1) + ' MB · Click to change'
             : 'or click to choose a file'}
         </span>
-        <small>WAV, MP3, FLAC, M4A, OGG, WebM · up to 25 MB</small>
+        <small>
+          {kind === 'photo'
+            ? 'PNG, JPEG, WebP, GIF · up to 8 MB'
+            : kind === 'video'
+              ? 'MP4 or WebM · up to 60 MB'
+              : 'WAV, MP3, FLAC, M4A, OGG, WebM · up to 25 MB'}
+        </small>
       </button>
       <input
         hidden
         ref={input}
         type="file"
-        accept="audio/*,.wav,.mp3,.flac,.m4a"
+        accept={
+          kind === 'photo'
+            ? 'image/png,image/jpeg,image/webp,image/gif'
+            : kind === 'video'
+              ? 'video/mp4,video/webm'
+              : 'audio/*,.wav,.mp3,.flac,.m4a'
+        }
         onChange={(e) => choose(e.target.files?.[0])}
       />
       <label className="field">
@@ -152,53 +198,85 @@ export function UploadForm({
           onChange={(e) => setTitle(e.target.value)}
         />
       </label>
-      <div className="form-grid">
-        <Pick
-          label="I'm uploading"
-          value={kind}
-          onChange={setKind}
-          options={[
-            { value: 'beat', label: 'A beat' },
-            { value: 'song', label: 'A song' },
-          ]}
-        />
-        <Pick
-          label="Genre"
-          value={genre}
-          onChange={setGenre}
-          options={genres.slice(1)}
-        />
-        <label className="field">
-          <span>Tempo (BPM)</span>
-          <input
-            required
-            type="number"
-            min={40}
-            max={240}
-            value={bpm}
-            onChange={(e) => setBpm(+e.target.value)}
+      {kind === 'photo' || kind === 'video' ? (
+        <>
+          <label className="field">
+            <span>Caption</span>
+            <input
+              maxLength={200}
+              placeholder="Say something about it…"
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+            />
+          </label>
+          {tracks.length > 0 && (
+            <Pick
+              label="Attach to one of your tracks (optional)"
+              value={attachedTrack}
+              onChange={setAttachedTrack}
+              options={[
+                { value: 'none', label: 'No track' },
+                ...tracks.map((t) => ({ value: t.id, label: t.title })),
+              ]}
+            />
+          )}
+          <p className="small-note">
+            {kind === 'video'
+              ? 'Videos play right in the feed. Keep them under 60 MB (MP4 or WebM).'
+              : 'Photos appear in the feed. Up to 8 MB.'}
+          </p>
+        </>
+      ) : (
+        <div className="form-grid">
+          <Pick
+            label="I'm uploading"
+            value={kind}
+            onChange={setKind}
+            options={[
+              { value: 'beat', label: 'A beat' },
+              { value: 'song', label: 'A song' },
+              { value: 'photo', label: 'A photo' },
+              { value: 'video', label: 'A video' },
+            ]}
           />
-        </label>
-        <Pick
-          label="Musical key"
-          value={key}
-          onChange={setKey}
-          options={[
-            'C',
-            'C#',
-            'D',
-            'D#',
-            'E',
-            'F',
-            'F#',
-            'G',
-            'G#',
-            'A',
-            'A#',
-            'B',
-          ].flatMap((n) => [n + ' minor', n + ' major'])}
-        />
-      </div>
+          <Pick
+            label="Genre"
+            value={genre}
+            onChange={setGenre}
+            options={genres.slice(1)}
+          />
+          <label className="field">
+            <span>Tempo (BPM)</span>
+            <input
+              required
+              type="number"
+              min={40}
+              max={240}
+              value={bpm}
+              onChange={(e) => setBpm(+e.target.value)}
+            />
+          </label>
+          <Pick
+            label="Musical key"
+            value={key}
+            onChange={setKey}
+            options={[
+              'C',
+              'C#',
+              'D',
+              'D#',
+              'E',
+              'F',
+              'F#',
+              'G',
+              'G#',
+              'A',
+              'A#',
+              'B',
+            ].flatMap((n) => [n + ' minor', n + ' major'])}
+          />
+        </div>
+      )}
       <div className="privacy-box">
         <div className="switch-row">
           <div>
@@ -273,10 +351,16 @@ export function UploadForm({
         disabled={busy || !rights || !file}
       >
         {busy
-          ? 'Uploading your music…'
-          : visibility === 'public'
-            ? 'Publish track'
-            : 'Save private track'}
+          ? kind === 'photo' || kind === 'video'
+            ? 'Sharing…'
+            : 'Uploading your music…'
+          : kind === 'photo' || kind === 'video'
+            ? visibility === 'public'
+              ? 'Share to the feed'
+              : 'Save privately'
+            : visibility === 'public'
+              ? 'Publish track'
+              : 'Save private track'}
         <ArrowUpRight size={17} />
       </button>
     </form>

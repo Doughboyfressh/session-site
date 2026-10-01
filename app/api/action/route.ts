@@ -471,6 +471,93 @@ export async function POST(req: Request) {
         result = { id: r.id };
         break;
       }
+      case 'post': {
+        const kind = choice(b.kind, ['photo', 'video']);
+        const fileId = str(b.fileId, 120);
+        if (
+          !(await one(
+            'SELECT id FROM files WHERE id=? AND owner=? AND purpose=?',
+            fileId,
+            uid,
+            kind,
+          ))
+        )
+          fail('Upload the ' + kind + ' first.');
+        const track = b.track ? str(b.track, 120) : null;
+        if (
+          track &&
+          !(await one(
+            "SELECT id FROM tracks WHERE id=? AND owner=? AND visibility='public'",
+            track,
+            uid,
+          ))
+        )
+          fail('Attach one of your own public tracks.');
+        const id = crypto.randomUUID();
+        await run(
+          'INSERT INTO posts (id,owner,kind,fileId,track,caption,visibility,created) VALUES (?,?,?,?,?,?,?,?)',
+          id,
+          uid,
+          kind,
+          fileId,
+          track,
+          String(b.caption || '').slice(0, 200),
+          choice(b.visibility, ['private', 'public']),
+          now,
+        );
+        result = { id };
+        break;
+      }
+      case 'deletePost': {
+        const postId = str(b.id);
+        const owned = await one(
+          'SELECT id FROM posts WHERE id=? AND owner=?',
+          postId,
+          uid,
+        );
+        if (!owned) fail('That post is not yours to delete.', 403);
+        await run('DELETE FROM post_likes WHERE post=?', owned.id);
+        await run('DELETE FROM posts WHERE id=? AND owner=?', owned.id, uid);
+        break;
+      }
+      case 'postLike': {
+        const post = await one(
+          "SELECT id FROM posts WHERE id=? AND visibility='public'",
+          str(b.id),
+        );
+        if (!post) fail('That post is unavailable.', 404);
+        const existing = await one(
+          'SELECT post FROM post_likes WHERE user=? AND post=?',
+          uid,
+          post.id,
+        );
+        if (existing) {
+          await run(
+            'DELETE FROM post_likes WHERE user=? AND post=?',
+            uid,
+            post.id,
+          );
+        } else {
+          await run(
+            'INSERT OR IGNORE INTO post_likes (user,post) VALUES (?,?)',
+            uid,
+            post.id,
+          );
+        }
+        const count = await one(
+          'SELECT COUNT(*) AS n FROM post_likes WHERE post=?',
+          post.id,
+        );
+        result = { liked: !existing, likes: Number(count.n) };
+        break;
+      }
+      case 'watch': {
+        await run(
+          "UPDATE posts SET plays=plays+1 WHERE id=? AND visibility='public'",
+          str(b.id),
+        );
+        break;
+      }
       case 'play': {
         // count one play of a public track (rate-limited per user per minute)
         await run(

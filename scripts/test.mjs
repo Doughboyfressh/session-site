@@ -26,6 +26,8 @@ const suites = [
   'backend',
   'payments',
   'growth',
+  'posts',
+  'posts-e2e',
   'production',
 ];
 const results = [];

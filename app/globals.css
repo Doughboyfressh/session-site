@@ -1494,3 +1494,49 @@ main .feed {
   color: #8a858c;
   letter-spacing: 0.3px;
 }
+
+/* ---- photo/video posts ---- */
+.media-post .post-media { padding: 6px 16px 0; }
+.post-photo {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: cover;
+  border-radius: 12px;
+  background: #131213;
+}
+.post-video {
+  display: block;
+  width: 100%;
+  max-height: 560px;
+  border-radius: 12px;
+  background: #000;
+}
+.media-caption {
+  padding: 10px 16px 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #e6e3e4;
+  white-space: pre-wrap;
+}
+.chip.track-chip {
+  color: #d9a7ae;
+  border-color: #5a3038;
+  background: #2a1519;
+  text-transform: none;
+  letter-spacing: 0.2px;
+  font-weight: 600;
+}
+.chip.track-chip:hover { border-color: var(--primary); color: #fff; }
+.button.danger { background: #6e2230; color: #ffd7db; border-color: #8d3342; }
+.permalink-video,
+.permalink-photo {
+  display: block;
+  width: 100%;
+  max-height: 480px;
+  border-radius: 12px;
+  background: #000;
+  object-fit: contain;
+}
+.permalink-track { font-size: 13px; color: #a9a4a7; margin-top: 8px; }
+.permalink-track strong { color: #e9e6e7; }

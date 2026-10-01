@@ -87,6 +87,7 @@ const empty = {
   orders: [],
   trending: [],
   liveRooms: [],
+  posts: [],
   pulse: { tracks: 0, creators: 0, tracksToday: 0, publicRooms: 0 },
 } as any;
 const captions: Record<string, string> = {
@@ -194,6 +195,8 @@ export default function SessionApp({
     if (tourNeeded()) setTourOpen(true);
   }, [loading, loadError]);
   const playsCounted = useRef<Set<string>>(new Set()),
+    watchedPosts = useRef<Set<string>>(new Set()),
+    armedDelete = useRef(''),
     deepLinkHandled = useRef(false),
     lastUnread = useRef(0);
   useEffect(() => {
@@ -816,6 +819,161 @@ export default function SessionApp({
         </span>
         <span className="order-amount">{formatPrice(o.amountCents)}</span>
       </div>
+    );
+  }
+  function mediaPost(p: any) {
+    const ownerProfile = state.profiles.find((x: any) => x.id === p.owner),
+      liked = !!p.likedByMe,
+      own = p.owner === user?.id,
+      attached = p.trackTitle
+        ? state.tracks.find((t: Track) => t.id === p.track)
+        : null;
+    return (
+      <article className="feed-post media-post" key={p.id}>
+        <header className="post-head">
+          <button
+            className="post-creator"
+            onClick={() =>
+              ownerProfile ? setSelectedProfile(ownerProfile) : undefined
+            }
+          >
+            <Avatar profile={ownerProfile || { name: p.creator }} size={40} />
+            <span>
+              <strong>{p.creator}</strong>
+              <small>
+                {ownerProfile ? '@' + ownerProfile.username : 'creator'} ·{' '}
+                {p.kind === 'video' ? 'video' : 'photo'}
+              </small>
+            </span>
+          </button>
+          <div className="post-head-actions">
+            {p.owner !== user?.id && ownerProfile && (
+              <button
+                className="button secondary small"
+                onClick={() => follow(ownerProfile)}
+              >
+                Follow
+              </button>
+            )}
+            {own && (
+              <button
+                className={
+                  'button small ' +
+                  (armedDelete.current === p.id ? 'danger' : 'secondary')
+                }
+                onClick={async () => {
+                  if (armedDelete.current !== p.id) {
+                    armedDelete.current = p.id;
+                    notify('Tap delete again to remove this post.');
+                    return;
+                  }
+                  armedDelete.current = '';
+                  try {
+                    await action({ action: 'deletePost', id: p.id });
+                    await refresh();
+                    notify('Post removed.');
+                  } catch (e: any) {
+                    notify(e.message);
+                  }
+                }}
+              >
+                {armedDelete.current === p.id ? 'Confirm' : 'Delete'}
+              </button>
+            )}
+          </div>
+        </header>
+        <div className="post-media">
+          {p.kind === 'video' ? (
+            <video
+              className="post-video"
+              controls
+              playsInline
+              preload="metadata"
+              src={'/api/file/' + p.fileId}
+              onPlay={() => {
+                if (watchedPosts.current.has(p.id)) return;
+                watchedPosts.current.add(p.id);
+                void action({ action: 'watch', id: p.id }).catch(() => {});
+              }}
+            />
+          ) : (
+            <img
+              className="post-photo"
+              src={'/api/file/' + p.fileId}
+              alt={p.caption || 'Shared photo'}
+            />
+          )}
+        </div>
+        {p.caption && <p className="media-caption">{p.caption}</p>}
+        <div className="post-info">
+          <div className="post-chips">
+            {p.trackTitle && (
+              <button
+                className="chip track-chip"
+                onClick={() => attached && setDetail(attached)}
+              >
+                ♪ {p.trackTitle}
+              </button>
+            )}
+            {p.kind === 'video' && (
+              <span className="chip plays-chip">
+                ▶ {p.plays ? fmtNum(p.plays) : 'New'}
+              </span>
+            )}
+          </div>
+        </div>
+        <footer className="post-actions">
+          <button
+            className={'post-act' + (liked ? ' liked' : '')}
+            onClick={async () => {
+              if (!signIn()) return;
+              try {
+                const r = await action({ action: 'postLike', id: p.id });
+                setState((st: any) => ({
+                  ...st,
+                  posts: st.posts.map((x: any) =>
+                    x.id === p.id
+                      ? { ...x, likedByMe: r.liked, likes: r.likes }
+                      : x,
+                  ),
+                }));
+              } catch (e: any) {
+                notify(e.message);
+              }
+            }}
+            aria-label={liked ? 'Unlike' : 'Like'}
+          >
+            <Heart size={17} /> {fmtNum(p.likes)}
+          </button>
+          <button
+            className="post-act"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(
+                  window.location.origin + '/p/' + p.id,
+                );
+                notify('Link copied.');
+              } catch {
+                notify('Could not copy the link on this browser.');
+              }
+            }}
+          >
+            <Share2 size={16} /> Share
+          </button>
+          {attached && (
+            <button
+              className="post-act"
+              disabled={
+                attached.permission !== 'collaborate' &&
+                attached.owner !== user?.id
+              }
+              onClick={() => useTrack(attached)}
+            >
+              <SlidersHorizontal size={16} /> Studio
+            </button>
+          )}
+        </footer>
+      </article>
     );
   }
   function feedCreators(): any[] {
@@ -1566,18 +1724,33 @@ export default function SessionApp({
               ) : null}
               {!results || query.trim().length < 2 ? (
                 <div className="feed-posts">
-                  {filtered.length ? (
+                  {filtered.length || state.posts.length ? (
                     (() => {
                       const creators = feedCreators();
-                      return filtered
-                        .slice(0, 12)
-                        .flatMap((track: Track, index: number) => {
-                          const card =
-                            (index === 1 || index === 6) && creators.length
-                              ? [creatorCard(creators.shift()!)]
-                              : [];
-                          return [feedPost(track), ...card];
-                        });
+                      const posts = (state.posts || []).filter(
+                        (p: any) =>
+                          feedMode !== 'Following' ||
+                          state.follows.includes(p.owner),
+                      );
+                      const merged = [
+                        ...filtered.slice(0, 12).map((t: Track) => ({
+                          created: t.created || 0,
+                          render: () => feedPost(t),
+                        })),
+                        ...posts.map((p: any) => ({
+                          created: p.created || 0,
+                          render: () => mediaPost(p),
+                        })),
+                      ]
+                        .sort((a, b) => b.created - a.created)
+                        .slice(0, 14);
+                      return merged.flatMap((item, index) => {
+                        const card =
+                          (index === 1 || index === 6) && creators.length
+                            ? [creatorCard(creators.shift()!)]
+                            : [];
+                        return [item.render(), ...card];
+                      });
                     })()
                   ) : (
                     <Empty
@@ -1736,6 +1909,10 @@ export default function SessionApp({
             user ? (
               <UploadForm
                 notify={notify}
+                tracks={state.tracks.filter(
+                  (t: Track) =>
+                    t.owner === user?.id && t.visibility === 'public',
+                )}
                 onDone={() => {
                   refresh();
                   go('Discover');
