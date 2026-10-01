@@ -53,7 +53,7 @@ import ImportMidi from './import-midi';
 import { appendMidi } from '@/lib/midi-import';
 import { applyNotePatch } from '@/lib/note-edit';
 import { checkSampleBuffer, defaultSample } from '@/lib/sample-instrument';
-import { keepMidi, midiPlan } from '@/lib/midi-notes';
+import { keepMidi, midiPlan, defaultMidiRange } from '@/lib/midi-notes';
 import type { RestoredBank } from '@/lib/take-bank';
 import type { RecordedTake } from '@/lib/recording';
 import {
@@ -2059,21 +2059,13 @@ export default function Studio({
               onRecord={() => {
                 if (!editAllowed.current || structuralLocked || !focus?.notes)
                   return;
-                const start = Math.max(
-                  0,
-                  ((position - focus.offset) * data.bpm) / 60,
+                const { start, beats } = defaultMidiRange(
+                  focus,
+                  data.bpm,
+                  position,
                 );
                 try {
-                  midiPlan(
-                    focus,
-                    data.bpm,
-                    start,
-                    Math.min(
-                      8,
-                      256 - start,
-                      ((300 - focus.offset) * data.bpm) / 60 - start,
-                    ),
-                  );
+                  midiPlan(focus, data.bpm, start, beats);
                   setMidiSnapshot(
                     structuredClone({ data, target: focus, start }),
                   );

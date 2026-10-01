@@ -2,6 +2,23 @@ import type { Arrangement, MixerTrack, Note } from './audio';
 import { applyNotePatch, checkNotes, noteTimingLocked } from './note-edit';
 import { playlistClips, playlistTrackEnd } from './playlist-clips';
 
+export function defaultMidiRange(
+  track: MixerTrack,
+  bpm: number,
+  position: number,
+) {
+  const raw = Math.max(0, ((position - track.offset) * bpm) / 60);
+  const start = track.noteLoopBeats
+    ? Math.floor((raw % track.noteLoopBeats) * 4) / 4
+    : raw;
+  const beats = Math.min(
+    8,
+    (track.noteLoopBeats ?? 256) - start,
+    ((300 - track.offset) * bpm) / 60 - start,
+  );
+  return { start, beats };
+}
+
 export type MidiEvent =
   | { kind: 'on'; channel: number; pitch: number; velocity: number }
   | { kind: 'off'; channel: number; pitch: number }

@@ -52,7 +52,7 @@ export default function RecordMidi({
       String(
         Math.min(
           8,
-          256 - start,
+          (target.noteLoopBeats ?? 256) - start,
           ((300 - target.offset) * data.bpm) / 60 - start,
         ),
       ),

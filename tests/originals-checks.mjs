@@ -16,7 +16,7 @@ const { changeArrangementTempo } = loadTS('lib/arrangement-tempo.ts');
 const { recoverySnapshot } = loadTS('lib/draft-recovery.ts');
 const { AudioCache } = loadTS('lib/audio-cache.ts');
 const { checkNotes, editNotes, applyNotePatch } = loadTS('lib/note-edit.ts');
-const { midiPlan } = loadTS('lib/midi-notes.ts');
+const { midiPlan, defaultMidiRange } = loadTS('lib/midi-notes.ts');
 assert.equal(originals.length, 48);
 assert.equal(demos.length, 58);
 assert.equal(legacyDemos.length, 10);
@@ -35,6 +35,15 @@ for (const o of originals) {
   assert.ok(JSON.stringify(full).length < 250000);
   for (const stem of full.tracks.filter((t) => t.notes)) {
     midiPlan(stem, full.bpm, 0, 16);
+    for (const beat of [12, 28, 15.9]) {
+      const range = defaultMidiRange(
+        stem,
+        full.bpm,
+        stem.offset + (beat * 60) / full.bpm,
+      );
+      midiPlan(stem, full.bpm, range.start, range.beats);
+      assert.ok(range.start + range.beats <= 16 && range.beats >= 0.25);
+    }
     assert.throws(() => midiPlan(stem, full.bpm, 0, 32), /recording range/);
     editNotes(
       stem,
