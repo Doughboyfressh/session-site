@@ -1303,7 +1303,7 @@ export default function SessionApp({
         href="/signin-with-chatgpt?return_to=/"
         target="_top"
       >
-        Sign in with ChatGPT <ArrowUpRight size={16} />
+        {process.env.NEXT_PUBLIC_DEPLOYMENT_TARGET === 'vercel' ? 'Sign in to SESSION' : 'Sign in with ChatGPT'} <ArrowUpRight size={16} />
       </a>
     </div>
   );

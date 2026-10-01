@@ -29,6 +29,7 @@ const suites = [
   'posts',
   'posts-e2e',
   'production',
+  'deployment',
 ];
 const results = [];
 const out = path.resolve('outputs/release-checks');

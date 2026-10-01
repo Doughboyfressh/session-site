@@ -2,6 +2,10 @@
 
 A private development release for artists, producers, and engineers.
 
+## Deploying to Vercel and Neon
+
+The Vercel target uses Next.js, Neon Auth, PostgreSQL, and private Neon object storage. See [deployment setup and verification](docs/VERCEL_NEON_DEPLOYMENT.md). The original Sites target remains available with `npm run build`; `npm run build:vercel` builds the Vercel target separately.
+
 ## Studio
 
 - Custom sampled instruments: open Studio → Piano roll, select an instrument and choose Load sample. Mono/stereo files from 0.01–30 seconds and up to 25 MB are supported. Set the recorded root pitch, playback region, attack and release; Apply commits the settings as one Undo step. Replacing the sound keeps its notes and mixer settings. Switching to a built-in instrument clears the sampled source and is reversible with Undo.

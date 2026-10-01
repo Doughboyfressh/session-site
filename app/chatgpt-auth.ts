@@ -19,6 +19,13 @@ const SIGN_OUT_PATH = '/signout-with-chatgpt';
 const CALLBACK_PATH = '/callback';
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
+  if (typeof process !== 'undefined' && process.env.DEPLOYMENT_TARGET === 'vercel') {
+    const { neonAuth } = await import('@/lib/deployment/auth');
+    const { data } = await neonAuth().getSession();
+    if (!data?.user) return null;
+    return { userId: data.user.id, displayName: data.user.name || data.user.email,
+      email: data.user.email, fullName: data.user.name || null };
+  }
   const requestHeaders = await headers();
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);
@@ -50,11 +57,14 @@ export async function requireChatGPTUser(
 
 export function chatGPTSignInPath(returnTo: string): string {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
+  if (typeof process !== 'undefined' && process.env.DEPLOYMENT_TARGET === 'vercel')
+    return `/auth/sign-in?return_to=${encodeURIComponent(safeReturnTo)}`;
   return `${SIGN_IN_PATH}?return_to=${encodeURIComponent(safeReturnTo)}`;
 }
 
 export function chatGPTSignOutPath(returnTo = '/'): string {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
+  if (typeof process !== 'undefined' && process.env.DEPLOYMENT_TARGET === 'vercel') return '/auth/sign-out';
   return `${SIGN_OUT_PATH}?return_to=${encodeURIComponent(safeReturnTo)}`;
 }
 
