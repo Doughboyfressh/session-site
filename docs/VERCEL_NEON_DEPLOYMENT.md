@@ -1,6 +1,6 @@
 # Vercel and Neon deployment
 
-SESSION has two deployment targets. `npm run build` retains the Sites/Vinext Worker, trusted dispatcher identity, D1, and R2. `npm run build:vercel` builds Next.js for Vercel, with server-verified Neon Auth cookies, PostgreSQL, and private Neon storage. The targets use separate build directories: `.next` and `.vercel-next`. `.env.local` cannot switch the Sites build to the Vercel identity model.
+SESSION has two deployment targets. `npm run build` retains the Sites/Vinext Worker, trusted dispatcher identity, D1, and R2. `npm run build:vercel` builds Next.js for Vercel, with server-verified Neon Auth cookies, PostgreSQL, and private Neon storage. The targets use separate build directories: `.next` and `.vercel-next`. `vercel.json` explicitly selects `.vercel-next` for deployment packaging. `.env.local` cannot switch the Sites build to the Vercel identity model.
 
 ## Resources
 
