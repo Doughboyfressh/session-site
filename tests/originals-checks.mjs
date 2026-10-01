@@ -35,6 +35,11 @@ for (const o of originals) {
   assert.ok(JSON.stringify(full).length < 250000);
   for (const stem of full.tracks.filter((t) => t.notes)) {
     midiPlan(stem, full.bpm, 0, 16);
+    for (const clip of playlistClips(stem)) {
+      const range = defaultMidiRange(stem, full.bpm, clip.offset);
+      assert.equal(range.start, 0, `${o.title} ${stem.name} at clip boundary`);
+      assert.equal(range.beats, 8);
+    }
     for (const beat of [12, 28, 15.9]) {
       const range = defaultMidiRange(
         stem,

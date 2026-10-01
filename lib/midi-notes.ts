@@ -8,8 +8,14 @@ export function defaultMidiRange(
   position: number,
 ) {
   const raw = Math.max(0, ((position - track.offset) * bpm) / 60);
+  let wrapped = track.noteLoopBeats ? raw % track.noteLoopBeats : raw;
+  if (
+    track.noteLoopBeats &&
+    (wrapped < 1e-8 || track.noteLoopBeats - wrapped < 1e-8)
+  )
+    wrapped = 0;
   const start = track.noteLoopBeats
-    ? Math.floor((raw % track.noteLoopBeats) * 4) / 4
+    ? Math.floor((wrapped + 1e-8) * 4) / 4
     : raw;
   const beats = Math.min(
     8,
