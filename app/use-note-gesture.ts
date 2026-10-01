@@ -60,6 +60,7 @@ export function useNoteGesture(options: {
   const source = JSON.stringify([
     t?.id,
     t?.notes,
+    t?.noteLoopBeats,
     t?.sound,
     t?.sample,
     t?.offset,

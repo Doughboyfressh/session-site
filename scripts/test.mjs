@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const suites = [
+  'originals',
   'audio-files',
   'recording',
   'recording-timing',

@@ -1,3 +1,4 @@
+import { originalTracks, ORIGINAL_GENRES } from './originals';
 export type Track = {
   id: string;
   title: string;
@@ -18,7 +19,7 @@ export type Track = {
   comments?: number;
   created?: number;
 };
-export const demos: Track[] = [
+export const legacyDemos: Track[] = [
   {
     id: 'demo-1',
     title: 'AFTER HOURS',
@@ -150,15 +151,8 @@ export const demos: Track[] = [
     color: 'blue',
   },
 ];
-export const genres = [
-  'All genres',
-  'Hip-hop',
-  'R&B',
-  'Trap',
-  'Lo-fi',
-  'Pop',
-  'Electronic',
-];
+export const demos: Track[] = [...legacyDemos, ...originalTracks];
+export const genres = ['All genres', ...ORIGINAL_GENRES];
 export const defaultPattern = [
   [1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0],
   [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],

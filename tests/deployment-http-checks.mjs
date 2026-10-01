@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import pg from 'pg';
+import {loadTS} from './load-ts.mjs';
+const {originalArrangement}=loadTS('lib/originals.ts');
+const {editNotes,applyNotePatch}=loadTS('lib/note-edit.ts');
 const base = process.env.SESSION_VERIFY_BASE || 'http://localhost:3101';
 const tag = crypto.randomBytes(4).toString('hex');
 const actors = [];
@@ -74,6 +77,17 @@ try {
   await action(bob,{action:'projectRead',id:project.id},403);
   const state=await (await request(alice,'/api/state')).json();
   check(state.projects[0].bpm===92 && state.projects[0].trackCount===1,'PostgreSQL JSON summaries have numeric fields');
+  const score=originalArrangement('demo-original-v1-12-1');
+  const stem=score.tracks.find(t=>t.notes);
+  const edited=applyNotePatch(score,score.bpm,stem,{notes:editNotes(stem,score.bpm,[stem.notes[0].id],{kind:'delete'}).notes});
+  const originalProject=await action(alice,{action:'project',title:'Disposable Originals check',creation:{key:crypto.randomUUID(),checkpoint:true},data:edited});
+  const reopened=await action(alice,{action:'projectRead',id:originalProject.id});
+  check(JSON.stringify(reopened.data)===JSON.stringify(edited),'actual PostgreSQL save/reopen preserves editable original score, loop lengths and placements');
+  await action(bob,{action:'projectRead',id:originalProject.id},403);
+  for(const id of ['demo-original-v1-12-1','demo-original-v1-24-2','demo-1']) {
+    const page=await (await request(null,'/t/'+id)).text();
+    check(page.includes('SESSION Originals') && !page.includes('This track is private or unavailable.'),'public original permalink resolves '+id);
+  }
   room=await action(alice,{action:'room',title:'Disposable check room',visibility:'invite'});
   await action(alice,{action:'roomProject',id:room.id,mode:'attach',project:project.id,expectedProject:null});
   await action(alice,{action:'roomProject',id:room.id,mode:'detach',expectedProject:project.id});

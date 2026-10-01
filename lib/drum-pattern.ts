@@ -13,6 +13,8 @@ export const DRUM_KITS = [
   { id: 'studio', label: 'Studio punch' },
   { id: 'analog', label: 'Analog machine' },
   { id: 'dusty', label: 'Dusty tape' },
+  { id: 'acoustic', label: 'Synth acoustic' },
+  { id: 'latin', label: 'Latin percussion' },
 ] as const;
 
 export const DRUM_STEP_COUNTS = [16, 32, 64] as const;

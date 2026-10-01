@@ -41,6 +41,7 @@ const fields = [
   'sequence',
   'drumPattern',
   'notes',
+  'noteLoopBeats',
   'sound',
   'sample',
   'volume',

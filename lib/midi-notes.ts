@@ -1,5 +1,5 @@
 import type { Arrangement, MixerTrack, Note } from './audio';
-import { applyNotePatch, checkNotes } from './note-edit';
+import { applyNotePatch, checkNotes, noteTimingLocked } from './note-edit';
 import { playlistClips, playlistTrackEnd } from './playlist-clips';
 
 export type MidiEvent =
@@ -52,10 +52,7 @@ export function midiPlan(
     track.demo
   )
     throw Error('Select an instrument track to record MIDI.');
-  if (
-    playlistClips(track).some((clip) => clip.trimStart || clip.trimEnd) ||
-    track.splitFrom
-  )
+  if (noteTimingLocked(track))
     throw Error(
       'Use an untrimmed instrument track for MIDI recording. You can add a new instrument track.',
     );
@@ -68,6 +65,8 @@ export function midiPlan(
     beats < 0.25 ||
     beats > 32 ||
     start + beats > 256 ||
+    (track.noteLoopBeats !== undefined &&
+      start + beats > track.noteLoopBeats) ||
     track.offset < 0 ||
     playlistClips(track).some(
       (clip) => clip.offset + ((start + beats) * 60) / bpm > 300,
@@ -79,7 +78,12 @@ export function midiPlan(
   const capacity = 256 - track.notes.length;
   checkNotes(track, bpm, track.notes);
   const sourceEnd =
-    (Math.max(8, start + beats, ...track.notes.map((n) => n.start + n.length)) *
+    ((track.noteLoopBeats ??
+      Math.max(
+        8,
+        start + beats,
+        ...track.notes.map((n) => n.start + n.length),
+      )) *
       60) /
       bpm +
     0.5;
@@ -246,6 +250,7 @@ export function keepMidi(
       t.offset,
       t.trimStart,
       t.trimEnd,
+      t.noteLoopBeats,
       t.splitFrom,
       t.clipName,
       t.clips,

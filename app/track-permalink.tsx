@@ -3,12 +3,18 @@ import { useEffect, useRef, useState } from 'react';
 import { Play, Pause, Heart, MessageCircle } from 'lucide-react';
 import CoverArt from './cover-art';
 import { context, trackFrom, bufferFor, playMix } from '@/lib/audio';
+import {
+  originalArrangement,
+  originalFor,
+  originalBars,
+} from '@/lib/originals';
 
 type PermalinkTrack = {
   id: string;
   title: string;
   bpm: number;
   genre?: string;
+  musicalKey?: string;
   plays?: number;
   price?: number | null;
   [key: string]: unknown;
@@ -33,7 +39,15 @@ export default function TrackPermalink({
       stop: () => void;
     } | null>(null),
     seq = useRef(0);
-  useEffect(() => () => playback.current?.stop(), []);
+  const abort = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      seq.current++;
+      abort.current?.abort();
+      playback.current?.stop();
+    },
+    [],
+  );
   async function toggle() {
     if (isPlaying) {
       playback.current?.stop();
@@ -42,33 +56,45 @@ export default function TrackPermalink({
       return;
     }
     const mySeq = ++seq.current;
+    abort.current?.abort();
+    playback.current?.stop();
+    const controller = new AbortController();
+    abort.current = controller;
     setBusy(true);
     try {
       await context().resume();
-      const mt = trackFrom(track as never);
-      await bufferFor(mt, track.bpm);
+      const score = originalArrangement(track.id, { preview: true });
+      const mt = score ? null : trackFrom(track as never);
+      if (mt) await bufferFor(mt, track.bpm, { signal: controller.signal });
       if (mySeq !== seq.current) return;
-      const p = await playMix({ bpm: track.bpm, tracks: [mt] }, () => {
-        setIsPlaying(false);
-      });
+      const p = await playMix(
+        score || { bpm: track.bpm, tracks: [mt!] },
+        () => {
+          setIsPlaying(false);
+        },
+        { signal: controller.signal },
+      );
       if (mySeq !== seq.current) {
         p.stop();
         return;
       }
       playback.current = { stop: () => p.stop() };
       setIsPlaying(true);
-      void fetch('/api/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'play', id: track.id }),
-      }).catch(() => {});
+      if (!track.demo)
+        void fetch('/api/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'play', id: track.id }),
+        }).catch(() => {});
     } catch {
-      window.location.href = '/?track=' + track.id;
+      if (mySeq === seq.current && !controller.signal.aborted)
+        window.location.href = '/?track=' + track.id;
     } finally {
-      setBusy(false);
+      if (mySeq === seq.current) setBusy(false);
     }
   }
   const inApp = '/?track=' + track.id;
+  const original = originalFor(track.id);
   return (
     <main className="permalink">
       <header className="permalink-top">
@@ -108,6 +134,7 @@ export default function TrackPermalink({
           by <strong>{creator?.name || 'Independent creator'}</strong>
           {creator?.username ? ` · @${creator.username}` : ''} · {track.genre} ·{' '}
           {track.bpm} BPM
+          {track.musicalKey ? ` · ${track.musicalKey}` : ''}
         </p>
         <div className="permalink-stats">
           <span>
@@ -128,6 +155,18 @@ export default function TrackPermalink({
         >
           {isPlaying ? 'Pause' : 'Play this track'}
         </button>
+        {original && (
+          <>
+            <p className="permalink-footnote">
+              8-bar preview ·{' '}
+              {Math.round((originalBars(original) * 4 * 60) / original.bpm)}{' '}
+              second arrangement · editable drums and instruments
+            </p>
+            <a className="button secondary" href={inApp + '&view=Studio'}>
+              Open full arrangement in Studio
+            </a>
+          </>
+        )}
         {comments.length > 0 && (
           <section className="permalink-comments">
             <h2>What people are saying</h2>

@@ -14,7 +14,8 @@ import {
   type MixerRouting,
 } from './mixer-routing';
 import { buildInsertFx, type DriveType, type ModType } from './effects';
-import { voiceFor } from './instruments';
+import { voiceFor, type Sound } from './instruments';
+import { AudioCache } from './audio-cache';
 import { schedulePump } from './pump';
 import {
   AUTOMATION_TARGETS,
@@ -72,7 +73,8 @@ export type MixerTrack = {
   sequence?: number[][];
   drumPattern?: DrumPattern;
   notes?: Note[];
-  sound?: 'keys' | 'bass' | 'pad' | 'lead' | 'pluck' | 'organ' | 'bell';
+  noteLoopBeats?: number;
+  sound?: Sound;
   sample?: SampleSettings;
   volume: number;
   pan: number;
@@ -135,7 +137,10 @@ export type TransportOptions = {
   output?: StudioOutput;
 };
 let audio: AudioContext | null = null;
-const cache = new Map<string, AudioBuffer>();
+const cache = new AudioCache<AudioBuffer>();
+export function audioCacheStats() {
+  return cache.stats();
+}
 export function context() {
   if (!audio || audio.state === 'closed')
     audio = new AudioContext({ latencyHint: 'interactive' });
@@ -267,6 +272,8 @@ export function drumHit(
   if (!velocity || remaining <= 0) return;
   const soft = kit === 'dusty',
     analog = kit === 'analog',
+    acoustic = kit === 'acoustic',
+    latin = kit === 'latin',
     level = velocity * (soft ? 0.7 : 0.85),
     available = Math.max(1 / c.sampleRate, remaining - 1 / c.sampleRate);
   if (lane === 'kick') {
@@ -274,9 +281,12 @@ export function drumHit(
       gain = c.createGain(),
       duration = Math.min(soft ? 0.34 : 0.28, available);
     oscillator.type = analog ? 'triangle' : 'sine';
-    oscillator.frequency.setValueAtTime(analog ? 125 : 155, time);
+    oscillator.frequency.setValueAtTime(
+      acoustic ? 110 : latin ? 135 : analog ? 125 : 155,
+      time,
+    );
     oscillator.frequency.exponentialRampToValueAtTime(
-      soft ? 42 : 48,
+      acoustic ? 58 : latin ? 52 : soft ? 42 : 48,
       time + Math.min(soft ? 0.2 : 0.14, duration),
     );
     gain.gain.setValueAtTime(Math.max(0.0001, level), time);
@@ -293,7 +303,7 @@ export function drumHit(
       time,
       Math.min(soft ? 0.14 : 0.19, available),
       level * 0.48,
-      soft ? 1200 : 1700,
+      latin ? 2500 : acoustic ? 2100 : soft ? 1200 : 1700,
       'highpass',
       random,
     );
@@ -301,7 +311,7 @@ export function drumHit(
       gain = c.createGain(),
       duration = Math.min(0.12, available);
     body.type = analog ? 'triangle' : 'sine';
-    body.frequency.value = soft ? 145 : 185;
+    body.frequency.value = latin ? 240 : acoustic ? 160 : soft ? 145 : 185;
     gain.gain.setValueAtTime(Math.max(0.0001, level * 0.22), time);
     gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
     body.connect(gain).connect(dest);
@@ -338,7 +348,7 @@ export function drumHit(
       time,
       Math.min(open ? (soft ? 0.32 : 0.48) : soft ? 0.045 : 0.065, available),
       level * (open ? 0.22 : 0.16),
-      soft ? 5200 : analog ? 6800 : 7600,
+      acoustic ? 8500 : latin ? 6300 : soft ? 5200 : analog ? 6800 : 7600,
       'highpass',
       random,
     );
@@ -348,9 +358,12 @@ export function drumHit(
     gain = c.createGain(),
     duration = Math.min(0.16, available);
   oscillator.type = analog ? 'square' : soft ? 'sine' : 'triangle';
-  oscillator.frequency.setValueAtTime(analog ? 310 : soft ? 190 : 420, time);
+  oscillator.frequency.setValueAtTime(
+    latin ? 680 : acoustic ? 920 : analog ? 310 : soft ? 190 : 420,
+    time,
+  );
   oscillator.frequency.exponentialRampToValueAtTime(
-    analog ? 220 : soft ? 145 : 300,
+    latin ? 280 : acoustic ? 560 : analog ? 220 : soft ? 145 : 300,
     time + Math.min(0.12, duration),
   );
   gain.gain.setValueAtTime(Math.max(0.0001, level * 0.28), time);
@@ -418,6 +431,11 @@ export function playNote(
     gain = c.createGain(),
     filter = c.createBiquadFilter();
   oscillator.type = v.type;
+  if (v.harmonics) {
+    const real = new Float32Array(v.harmonics.length + 1);
+    const imaginary = new Float32Array([0, ...v.harmonics]);
+    oscillator.setPeriodicWave(c.createPeriodicWave(real, imaginary));
+  }
   oscillator.frequency.value = 440 * Math.pow(2, (pitch - 69) / 12);
   filter.type = 'lowpass';
   filter.frequency.value = v.cutoff;
@@ -521,7 +539,7 @@ export async function bufferFor(
     (t.sample
       ? `sample-${t.fileId}-${bpm}-${JSON.stringify(t.sample)}-${JSON.stringify(t.notes)}`
       : t.fileId ||
-        `${t.demo || 'seq'}-${bpm}-${t.sound}-${JSON.stringify(t.notes ?? t.drumPattern ?? t.sequence ?? [])}`) +
+        `${t.demo || 'seq'}-${bpm}-${t.sound}-${t.noteLoopBeats || ''}-${JSON.stringify(t.notes ?? t.drumPattern ?? t.sequence ?? [])}`) +
     ':' +
     (options.sampleRate || 'playback') +
     (t.denoise || t.autoPitch
@@ -544,7 +562,11 @@ export async function bufferFor(
     const source = await sampleBuffer(t, options);
     if (cached) return cached;
     const duration =
-      (Math.max(8, ...t.notes.map((n) => n.start + n.length)) * 60) / bpm + 0.5;
+      ((t.noteLoopBeats ??
+        Math.max(8, ...t.notes.map((n) => n.start + n.length))) *
+        60) /
+        bpm +
+      0.5;
     if (duration > 300)
       throw new Error(
         'These notes extend beyond the five-minute instrument limit.',
@@ -602,7 +624,10 @@ export async function bufferFor(
   } else if (t.drumPattern) {
     b = await renderDrumPattern(bpm, t.drumPattern, sampleRate);
   } else if (t.notes) {
-    const beats = Math.max(8, ...t.notes.map((n) => n.start + n.length));
+    const beats =
+      t.noteLoopBeats ?? Math.max(8, ...t.notes.map((n) => n.start + n.length));
+    if (t.noteLoopBeats && (beats * 60) / bpm + 0.5 > 300)
+      throw new Error('This instrument loop exceeds the five-minute limit.');
     const c = new OfflineAudioContext(
       2,
       Math.ceil(Math.min(300, (beats * 60) / bpm + 0.5) * sampleRate),
@@ -627,15 +652,9 @@ export async function bufferFor(
     throw new Error(
       'Use mono or stereo audio within the studio memory limit. Shorten or convert this source before importing.',
     );
+  if (options.signal?.aborted)
+    throw new DOMException('Playback cancelled.', 'AbortError');
   cache.set(key, b);
-  let bytes = 0;
-  for (const v of cache.values()) bytes += v.length * v.numberOfChannels * 4;
-  while (bytes > 180 * 1024 * 1024 && cache.size > 1) {
-    const first = cache.keys().next().value!;
-    const old = cache.get(first)!;
-    bytes -= old.length * old.numberOfChannels * 4;
-    cache.delete(first);
-  }
   return b;
 }
 export async function sampleBuffer(
@@ -1323,8 +1342,7 @@ export async function playMix(
         per = Math.max(1, Math.floor(usable / 24));
       for (let band = 0; band < 24; band++) {
         let sum = 0;
-        for (let i = 0; i < per; i++)
-          sum += spectrumBins[band * per + i] || 0;
+        for (let i = 0; i < per; i++) sum += spectrumBins[band * per + i] || 0;
         bands.push(sum / per / 255);
       }
       return bands;
