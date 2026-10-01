@@ -3,12 +3,10 @@ import TrackPermalink from '@/app/track-permalink';
 
 export const dynamic = 'force-dynamic';
 
-type PageParams = { params: Promise<{ id: string }> | { id: string } };
+type PageParams = { params: Promise<{ id: string }> };
 
 async function resolveParams(params: PageParams['params']) {
-  return typeof (params as Promise<{ id: string }>)?.then === 'function'
-    ? await (params as Promise<{ id: string }>)
-    : (params as { id: string });
+  return await params;
 }
 
 async function load(id: string) {

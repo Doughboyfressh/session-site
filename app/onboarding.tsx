@@ -79,7 +79,7 @@ export default function Onboarding({
       title: signedIn ? 'Make it yours.' : 'Join SESSION.',
       body: signedIn
         ? 'Set your role, add a photo, list paid services — beats, features, mixes, videos — and connect payouts to get paid by card.'
-        : 'Sign in with ChatGPT to claim your handle, build a profile, list paid services, and start making things with people worldwide.',
+        : 'Sign in to claim your handle, build a profile, list paid services, and start making things with people worldwide.',
       cta: 'My profile',
     },
   ];

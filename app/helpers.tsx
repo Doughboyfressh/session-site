@@ -65,6 +65,28 @@ export async function upload(
     takeId?: string;
   } = {},
 ) {
+  if (process.env.NEXT_PUBLIC_DEPLOYMENT_TARGET === 'vercel') {
+    const send = async (body: Record<string, unknown>, signal?: AbortSignal) => {
+      const response = await fetch('/api/upload-session', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
+      const result = await response.json() as any;
+      if (!response.ok) throw new Error(result.error || 'Upload failed.');
+      return result;
+    };
+    const session = await send({ operation: 'start', name: file.name, size: file.size, purpose,
+      projectId: options.projectId, bankId: options.bankId, takeId: options.takeId }, options.signal);
+    try {
+      for (let part = 0; part < session.parts; part++) {
+        const response = await fetch(`/api/upload-session?id=${session.id}&part=${part}`, { method: 'PUT',
+          body: file.slice(part * session.chunkSize, (part + 1) * session.chunkSize), signal: options.signal });
+        if (!response.ok) { const result = await response.json() as any; throw new Error(result.error || 'Upload failed.'); }
+      }
+      return await send({ operation: 'complete', id: session.id }, options.signal);
+    } catch (error) {
+      await send({ operation: 'cancel', id: session.id }).catch(() => {});
+      throw error;
+    }
+  }
   const fd = new FormData();
   fd.set('file', file);
   fd.set('purpose', purpose);

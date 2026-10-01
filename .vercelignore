@@ -1,0 +1,14 @@
+node_modules
+.next
+.vercel-next
+.vinext
+.wrangler
+dist
+outputs
+work
+tests
+plans
+.zcode
+.git
+.env*
+!.env.example

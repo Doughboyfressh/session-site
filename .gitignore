@@ -13,6 +13,7 @@
 
 # next.js
 /.next/
+/.vercel-next/
 /.vinext/
 /out/
 
