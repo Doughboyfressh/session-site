@@ -56,7 +56,7 @@ export default async function PostPage({ params }: PageParams) {
           <p className="permalink-footnote">
             It may have been removed by its creator.
           </p>
-          <form action="/" style={{ margin: 0 }}>
+          <form action="/app" style={{ margin: 0 }}>
             <button className="button primary" type="submit">
               Explore SESSION
             </button>
@@ -67,18 +67,12 @@ export default async function PostPage({ params }: PageParams) {
   return (
     <main className="permalink">
       <header className="permalink-top">
-        <button
-          className="permalink-brand"
-          onClick={() => (window.location.href = '/')}
-        >
+        <a className="permalink-brand" href="/" aria-label="SESSION home">
           session<span>.</span>
-        </button>
-        <button
-          className="button primary"
-          onClick={() => (window.location.href = '/')}
-        >
+        </a>
+        <a className="button primary" href="/app">
           Open in SESSION
-        </button>
+        </a>
       </header>
       <article className="permalink-card">
         {post.kind === 'video' ? (

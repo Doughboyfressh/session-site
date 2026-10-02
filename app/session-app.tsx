@@ -71,6 +71,7 @@ import { loadBank } from './take-bank-client';
 import { bankProject } from '@/lib/take-bank';
 import { recoveredProject, type RecoveryDraft } from '@/lib/draft-recovery';
 import { creationHash } from '@/lib/project-creation';
+import { WorkspaceSignInLink } from './workspace-sign-in-link';
 import {
   ActivityView,
   CollaborationInbox,
@@ -166,7 +167,6 @@ export default function SessionApp({
       title: 'Untitled session',
       data: { bpm: 92, tracks: [] },
     }),
-    init = useRef(false),
     appendMode = useRef(false);
   const notify = (m: string) => {
     setNotice(m);
@@ -215,7 +215,7 @@ export default function SessionApp({
     if (track) {
       if (params.get('view') === 'Studio') useTrack(track);
       else setDetail(track);
-      window.history.replaceState(null, '', '/');
+      window.history.replaceState(null, '', '/app');
     }
   }, [loading, state.tracks]);
   useEffect(() => {
@@ -301,6 +301,7 @@ export default function SessionApp({
     workspaceRequest.current++;
     setView(next);
     const url = new URL(window.location.href);
+    url.pathname = '/app';
     url.search = next === 'Discover' ? '' : '?view=' + encodeURIComponent(next);
     url.hash = '';
     window.history.replaceState(null, '', url);
@@ -425,8 +426,6 @@ export default function SessionApp({
     go('Studio');
   }
   useEffect(() => {
-    if (init.current) return;
-    init.current = true;
     const request = workspaceRequest.current;
     refresh().then(async (j) => {
       if (request !== workspaceRequest.current) return;
@@ -1335,16 +1334,12 @@ export default function SessionApp({
         Sign in to create your profile, keep your projects, and connect with
         collaborators.
       </p>
-      <a
-        className="button primary"
-        href="/signin-with-chatgpt?return_to=/"
-        target="_top"
-      >
+      <WorkspaceSignInLink className="button primary">
         {process.env.NEXT_PUBLIC_DEPLOYMENT_TARGET === 'vercel'
           ? 'Sign in to SESSION'
           : 'Sign in with ChatGPT'}{' '}
         <ArrowUpRight size={16} />
-      </a>
+      </WorkspaceSignInLink>
     </div>
   );
   return (

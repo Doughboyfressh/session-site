@@ -31,6 +31,7 @@ const suites = [
   'posts-e2e',
   'production',
   'deployment',
+  'workspace-entry',
 ];
 const results = [];
 const out = path.resolve('outputs/release-checks');

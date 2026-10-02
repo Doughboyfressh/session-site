@@ -112,7 +112,7 @@ export default function RoomStudio({
           )}
           <a
             className="button secondary"
-            href="/?view=Studio"
+            href="/app?view=Studio"
             target="_blank"
             rel="noopener noreferrer"
           >

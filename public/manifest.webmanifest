@@ -2,7 +2,7 @@
   "name": "SESSION — Make music together",
   "short_name": "SESSION",
   "description": "A shared creative space for artists, producers and engineers. Discover beats, record music and collaborate in private studio rooms.",
-  "start_url": "/",
+  "start_url": "/app",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",

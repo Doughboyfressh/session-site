@@ -1,4 +1,5 @@
 'use client';
+import { WorkspaceSignInLink } from './workspace-sign-in-link';
 import { useEffect, useRef, useState } from 'react';
 import {
   Upload,
@@ -910,13 +911,9 @@ export function TrackDetail({
                   </button>
                 </form>
               ) : (
-                <a
-                  href="/signin-with-chatgpt?return_to=/"
-                  target="_top"
-                  className="button secondary"
-                >
+                <WorkspaceSignInLink className="button secondary">
                   Sign in to join the conversation
-                </a>
+                </WorkspaceSignInLink>
               )}
               {comments.map((c) => (
                 <div className="comment" key={c.id}>
