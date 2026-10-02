@@ -1,0 +1,13 @@
+# Feed hero rendering repair — October 2, 2026
+
+The reported screenshot showed a jagged red strip inside an opaque black rectangle covering the feed description. Live measurement confirmed 104.75 px of overlap between the artwork and copy.
+
+The artwork now occupies its own grid cell and stacks below the copy on mobile. Separate pillar/cap geometry fits the current viewport aspect ratio. Removing the enormous opaque floor lets the canvas blend into the existing banner background; brighter pillars remain distinguishable from their red caps.
+
+The same renderer also had lifecycle defects: cleanup before the asynchronous Three import completed could create a stale second canvas; a reduced-motion scene used nearly uniform initial heights and could go blank after resize; WebGL context loss had no fallback. Cleanup now cancels initialization immediately, static frames have fully initialized heights and repaint on resize, live motion preference changes update the loop, and import/setup/render/context failures release resources and show a static SVG equalizer. The Studio visualizer receives the full height of its existing container instead of a collapsed inner host.
+
+The actual feed hero is extracted into `app/feed-hero.tsx` for production and the browser fixture. `tests/scene-harness.html` mounts it and the Studio scene under React StrictMode. Its controls exercise unmount/remount, reduced-motion changes, and synthetic context loss; `?motion=reduce` starts static, and `?webgl=off` simulates unavailable WebGL. These controls exist only in the fixture.
+
+`tests/scene-layout-checks.mjs` checks separated bars and projects 864 bounding corners through the actual Three camera across both variants, six aspect ratios, and the permitted orbit extremes. It is part of the 32-suite offline runner. Release checks include TypeScript, scoped lint, Sites build, and Vercel build. Browser acceptance is separate from the mechanical pipeline's skipped CLI e2e stage.
+
+Local browser checks confirmed zero copy/artwork overlap, one canvas per scene under StrictMode, a 166 px Studio canvas host, readable 390/320 px layouts without horizontal overflow, static rendering after resize, zero canvases after unmount, successful remount, visible fallback after context-loss/unsupported-WebGL simulation, and the hero action callback. Evidence is under ignored `outputs/hero-layout-evidence`. These are desktop browser and viewport checks; they do not certify all physical mobile GPUs.
