@@ -88,12 +88,12 @@ export default function TrackPermalink({
         }).catch(() => {});
     } catch {
       if (mySeq === seq.current && !controller.signal.aborted)
-        window.location.href = '/?track=' + track.id;
+        window.location.href = '/app?track=' + encodeURIComponent(track.id);
     } finally {
       if (mySeq === seq.current) setBusy(false);
     }
   }
-  const inApp = '/?track=' + track.id;
+  const inApp = '/app?track=' + encodeURIComponent(track.id);
   const original = originalFor(track.id);
   return (
     <main className="permalink">

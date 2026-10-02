@@ -1,4 +1,5 @@
 'use client';
+import { workspaceSignInHref } from '@/lib/workspace-entry';
 import { useEffect, useRef, useState } from 'react';
 import {
   Upload,
@@ -911,7 +912,10 @@ export function TrackDetail({
                 </form>
               ) : (
                 <a
-                  href="/signin-with-chatgpt?return_to=/"
+                  href={workspaceSignInHref()}
+                  onClick={(event) => {
+                    event.currentTarget.href = workspaceSignInHref(window.location);
+                  }}
                   target="_top"
                   className="button secondary"
                 >

@@ -69,7 +69,7 @@ export default async function TrackPage({ params }: PageParams) {
           <p className="permalink-footnote">
             It may have been taken down or made private by its creator.
           </p>
-          <form action="/" style={{ margin: 0 }}>
+          <form action="/app" style={{ margin: 0 }}>
             <button className="button primary" type="submit">
               Explore SESSION
             </button>

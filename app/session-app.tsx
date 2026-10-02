@@ -71,6 +71,7 @@ import { loadBank } from './take-bank-client';
 import { bankProject } from '@/lib/take-bank';
 import { recoveredProject, type RecoveryDraft } from '@/lib/draft-recovery';
 import { creationHash } from '@/lib/project-creation';
+import { workspaceSignInHref } from '@/lib/workspace-entry';
 import {
   ActivityView,
   CollaborationInbox,
@@ -215,7 +216,7 @@ export default function SessionApp({
     if (track) {
       if (params.get('view') === 'Studio') useTrack(track);
       else setDetail(track);
-      window.history.replaceState(null, '', '/');
+      window.history.replaceState(null, '', '/app');
     }
   }, [loading, state.tracks]);
   useEffect(() => {
@@ -301,6 +302,7 @@ export default function SessionApp({
     workspaceRequest.current++;
     setView(next);
     const url = new URL(window.location.href);
+    url.pathname = '/app';
     url.search = next === 'Discover' ? '' : '?view=' + encodeURIComponent(next);
     url.hash = '';
     window.history.replaceState(null, '', url);
@@ -1337,7 +1339,10 @@ export default function SessionApp({
       </p>
       <a
         className="button primary"
-        href="/signin-with-chatgpt?return_to=/"
+        href={workspaceSignInHref()}
+        onClick={(event) => {
+          event.currentTarget.href = workspaceSignInHref(window.location);
+        }}
         target="_top"
       >
         {process.env.NEXT_PUBLIC_DEPLOYMENT_TARGET === 'vercel'

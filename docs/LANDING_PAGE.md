@@ -1,0 +1,11 @@
+# SESSION landing page
+
+The public homepage at `/` introduces SESSION Originals, the browser studio, and private collaboration rooms. The page renders on the server without initializing the studio audio engine, camera, microphone, or community API polling. Beat and genre counts and featured track metadata come from the real catalog. Featured artwork links to existing public track pages, and the primary actions open the actual studio and library.
+
+`/app` is the workspace entry for guests and signed-in members. It uses the existing server identity wrapper and preserves the per-account component key. Installed-app startup now opens `/app`. Draft recovery and onboarding storage names remain unchanged.
+
+Legacy root URLs containing nonempty `view`, `room`, `project`, `track`, `stripe`, or `order` parameters still render the workspace in place. This preserves old invitation fragments, shared tracks/projects, and payment returns. Workspace navigation and new track/room links use `/app`. Workspace sign-in links retain the current query and fragment at activation, with `/app` as the fallback destination; provider redirects still use the existing return-path validation.
+
+The landing page is responsive, uses semantic links and native FAQ disclosures, includes a skip link and visible keyboard focus, and respects reduced-motion preferences. It introduces existing features without fabricated activity, testimonials, pricing, or new license claims. Its studio and room diagrams are illustrations.
+
+Verification: `tests/workspace-entry-checks.mjs` covers guest marketing traffic, supported legacy links, and sign-in destinations containing room invitation fragments and track/payment state. Run the normal release checks and both production builds. Browser acceptance must cover desktop and mobile layout, FAQ keyboard interaction, studio/library/room actions, featured-track playback, legacy root entry, and navigation back to the workspace feed. Keep generated screenshots and HTTP evidence under ignored `outputs/landing-evidence`.

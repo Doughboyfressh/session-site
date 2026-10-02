@@ -745,6 +745,7 @@ export default function Room({
   async function copy() {
     try {
       const url = new URL(window.location.href);
+      url.pathname = '/app';
       url.search = '?room=' + id;
       url.hash = 'invite=' + state.room.invite;
       await navigator.clipboard.writeText(url.href);
