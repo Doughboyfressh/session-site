@@ -24,3 +24,12 @@ Browser acceptance covered Space on Help's Close button, valid In/Out changes, a
 Full release checks comprise TypeScript, all 31 offline suites, scoped hardening lint, and separate Sites and Vercel builds. The mechanical pipeline's CLI e2e stage is skipped; actual browser acceptance is performed separately. Repository-wide lint has an existing baseline and is not certified clean. Viewport simulation and synthetic media do not certify physical mobile recording or cross-network TURN calls. Remaining operational acceptance is documented in `PRODUCTION_READINESS.md`.
 
 The final local pipeline passed for application source `14ec3a2bf2bb0105a3708384b811096cc21528d5`, with logs in `outputs/ui-defects-evidence/final-validation`. Fresh independent review of the full UI diff and the guest checkout follow-up found zero actionable high or medium findings and repeated both new offline suites successfully.
+
+## Live release acceptance
+
+- Deployed source: `5bc52e36232a3a4992b852fb305644ab3406ab1c`; production deployment `dpl_JvyiwB4oVCyk8yDWYoc94hgkZf5H`, READY.
+- Live alias: https://session-site-eosin.vercel.app/ ; immutable artifact: https://session-site-aobjjwacr-doughboyfressh.vercel.app/ .
+- The live browser confirmed mobile More destinations, 390 px feed and 320 px menu layout, saved-project/saved-track navigation, guest Alerts sign-in, Space closing Studio Help without playback, and valid loop bounds. `live-browser.json`, `live-mobile-more.png`, and `live-studio-loop.png` record these checks.
+- All 14 read-only landing/workspace HTTP checks passed on the production alias; evidence remains under `outputs/landing-evidence`. No production account writes or media permission requests were made by this UI acceptance.
+- Tracked source and client output passed an exact-value check against six configured secrets, with no matches in 473 files. This is a scoped credential check, not a general security audit.
+- Pull request: https://github.com/Doughboyfressh/session-site/pull/6 , based on the landing-page branch. Deployment retains the existing authorization and production environment settings.
