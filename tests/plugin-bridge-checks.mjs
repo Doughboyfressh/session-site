@@ -61,7 +61,14 @@ const runner = async ({ command, requestPath, responsePath, signal, jobDirectory
     if (command === 'scan') {
       assert.equal(Object.keys(request).join(','), 'modulePath');
       assert.ok(request.modulePath.startsWith(pluginsRoot));
-      await fs.writeFile(responsePath, JSON.stringify({ plugins: [{ classId: ID.toUpperCase(), name: 'Synthetic Piano', vendor: 'SESSION test', version: '1.0' }] }));
+      const plugin = { classId: ID.toUpperCase(), name: 'Synthetic Piano', vendor: 'SESSION test', version: '1.0' };
+      if (behavior === 'empty-vendor') plugin.vendor = '';
+      if (behavior === 'metadata') {
+        plugin.name = `Synthetic${String.fromCharCode(0, 9, 10, 127)}${'N'.repeat(200)}`;
+        plugin.vendor = String.fromCharCode(0, 9, 10, 127);
+        plugin.version = 'V'.repeat(200);
+      }
+      await fs.writeFile(responsePath, JSON.stringify({ plugins: [plugin] }));
     } else if (command === 'editor') {
       assert.equal(request.classId, ID);
       assert.equal(Object.hasOwn(request, 'audioPath'), false);
@@ -71,9 +78,10 @@ const runner = async ({ command, requestPath, responsePath, signal, jobDirectory
       assert.equal(path.dirname(request.audioPath), jobDirectory);
       assert.equal(path.dirname(requestPath), jobDirectory);
       assert.equal(path.dirname(responsePath), jobDirectory);
-      let audio = wav(request.sampleRate);
+      const frames = Math.ceil((request.beats * 60 / request.bpm + 0.5) * request.sampleRate);
+      let audio = wav(request.sampleRate, behavior === 'truncated-wav' ? frames - 1 : frames);
       if (behavior === 'bad-wav') audio.writeUInt32LE(4, 4);
-      if (behavior === 'wrong-rate') audio = wav(22050);
+      if (behavior === 'wrong-rate') audio = wav(22050, frames);
       await fs.writeFile(request.audioPath, audio);
       await fs.writeFile(responsePath, JSON.stringify({ ok: true }));
     }
@@ -167,6 +175,19 @@ try {
     assert.equal(calls.length, 4);
     await cleanJobs();
   });
+  await check('metadata clamps long values, strips controls and supplies vendor fallback', async () => {
+    nextBehavior = 'empty-vendor';
+    const empty = await request('/v1/rescan', { method: 'POST', body: {} });
+    assert.equal(empty.json().plugins[0].vendor, 'Unknown vendor');
+    nextBehavior = 'metadata';
+    const response = await request('/v1/rescan', { method: 'POST', body: {} });
+    const plugin = response.json().plugins[0];
+    assert.equal(plugin.name.length, 100);
+    assert.equal(plugin.version.length, 100);
+    assert.equal(plugin.vendor, 'Unknown vendor');
+    assert.equal([...plugin.name].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127), false);
+    await cleanJobs();
+  });
   await check('reject browser paths, unknown classes and malformed state', async () => {
     const count = calls.length;
     assert.equal((await request('/v1/rescan', { method: 'POST', body: { directory: ROOT } })).status, 400);
@@ -206,15 +227,20 @@ try {
     assert.equal(response.headers['content-disposition'], 'attachment; filename="session-vst3-render.wav"');
     assert.equal(response.headers['cache-control'], 'private, no-store');
     assert.equal(response.buffer.toString('ascii', 0, 4), 'RIFF');
+    assert.equal(response.buffer.readUInt32LE(40), Math.ceil((renderPayload.beats * 60 / renderPayload.bpm + 0.5) * renderPayload.sampleRate) * 4);
     const call = calls.at(-1);
     assert.equal(call.request.classId, ID);
     assert.equal(Object.hasOwn(call.request, 'pluginId'), false);
     assert.deepEqual(call.request.state, { component: 'AQID', controller: '' });
     await assert.rejects(fs.stat(call.directory), { code: 'ENOENT' });
     await cleanJobs();
+    const fractional = { ...renderPayload, bpm: 121.5, beats: 4 / 3, sampleRate: 44100 };
+    const exact = await request('/v1/render', { method: 'POST', body: fractional });
+    assert.equal(exact.status, 200);
+    assert.equal(exact.buffer.readUInt32LE(40), Math.ceil((fractional.beats * 60 / fractional.bpm + 0.5) * fractional.sampleRate) * 4);
   });
   await check('native output validation and safe crash errors', async () => {
-    for (const behavior of ['bad-wav', 'wrong-rate', 'crash']) {
+    for (const behavior of ['bad-wav', 'wrong-rate', 'truncated-wav', 'crash']) {
       nextBehavior = behavior;
       const response = await request('/v1/render', { method: 'POST', body: renderPayload });
       assert.equal(response.status, 502);
@@ -309,6 +335,39 @@ try {
       assert.equal(calls.length - before, 128);
       assert.equal(calls.slice(before).some((call) => call.request.modulePath.endsWith('too-deep.vst3')), false);
     } finally { await bounded.close(); }
+    assert.deepEqual(await fs.readdir(tempRoot), []);
+  });
+  await check('total scan deadline cancels slow modules and retains completed instruments', async () => {
+    const slowRoot = path.join(pluginsRoot, 'slow-fixture');
+    await fs.mkdir(slowRoot);
+    await fs.writeFile(path.join(slowRoot, 'first.vst3'), 'fixture');
+    await fs.writeFile(path.join(slowRoot, 'second.vst3'), 'fixture');
+    let scanCalls = 0;
+    const slow = createCompanion({
+      token: TOKEN, platform: 'win32', pluginRoots: [slowRoot], tempDirectory: tempRoot,
+      timeouts: { scan: 1000, scanTotal: 50 },
+      nativeRunner: async (args) => {
+        if (++scanCalls > 1) nextBehavior = 'hold';
+        return runner(args);
+      },
+    });
+    const target = await slow.start(0);
+    const before = aborted;
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(`http://127.0.0.1:${target.port}/v1/plugins`, { headers });
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.plugins.length, 1);
+      assert.equal(result.plugins[0].classId, ID);
+      assert.equal(result.warnings, 1);
+      assert.equal(scanCalls, 2);
+      assert.equal(aborted, before + 1);
+      assert.equal(active, 0);
+      assert.ok(Date.now() - startedAt < 1000);
+      const health = await fetch(`http://127.0.0.1:${target.port}/v1/health`, { headers });
+      assert.equal((await health.json()).busy, false);
+    } finally { await slow.close(); }
     assert.deepEqual(await fs.readdir(tempRoot), []);
   });
   console.log(`PASS plugin-bridge: ${output.length} offline HTTP checks`);

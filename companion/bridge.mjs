@@ -91,7 +91,7 @@ function safeMetadata(value, fallback = '') {
   if (typeof value !== 'string') return fallback;
   // Metadata never includes native error output or machine paths.
   if (/[A-Za-z]:[\\/]|\\\\|(?:^|\s)\/(?:Users|home|tmp|var|etc)\//i.test(value)) return fallback;
-  return value.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 128).trim() || fallback;
+  return value.replace(/\p{Cc}/gu, '').slice(0, 100).trim() || fallback;
 }
 async function checkedFile(file, jobDir, maxSize) {
   const stat = await fs.lstat(file);
@@ -103,7 +103,7 @@ function validateWav(buffer, payload) {
   const fail = () => { throw new BridgeError(502, 'INVALID_AUDIO', 'The native host returned invalid audio.'); };
   if (buffer.length < 44 || buffer.length > WAV_LIMIT || buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WAVE' || buffer.readUInt32LE(4) !== buffer.length - 8) fail();
   let offset = 12, format = false, audio = false, chunks = 0;
-  const maxFrames = Math.ceil((payload.beats * 60 / payload.bpm + 0.5) * payload.sampleRate);
+  const expectedFrames = Math.ceil((payload.beats * 60 / payload.bpm + 0.5) * payload.sampleRate);
   while (offset < buffer.length) {
     if (++chunks > 256 || offset + 8 > buffer.length) fail();
     const id = buffer.toString('ascii', offset, offset + 4);
@@ -115,7 +115,7 @@ function validateWav(buffer, payload) {
       if (format || size < 16 || buffer.readUInt16LE(start) !== 1 || buffer.readUInt16LE(start + 2) !== 2 || buffer.readUInt32LE(start + 4) !== payload.sampleRate || buffer.readUInt32LE(start + 8) !== payload.sampleRate * 4 || buffer.readUInt16LE(start + 12) !== 4 || buffer.readUInt16LE(start + 14) !== 16) fail();
       format = true;
     } else if (id === 'data') {
-      if (!format || audio || size === 0 || size % 4 !== 0 || size > maxFrames * 4) fail();
+      if (!format || audio || size === 0 || size !== expectedFrames * 4) fail();
       audio = true;
     }
     offset = end + (size & 1);
@@ -162,7 +162,7 @@ export function createCompanion(options = {}) {
   const tokenHash = createHash('sha256').update(token).digest();
   const platform = options.platform || process.platform;
   const roots = options.pluginRoots || standardRoots();
-  const timeouts = { scan: 10_000, render: 120_000, editor: 30 * 60_000, ...options.timeouts };
+  const timeouts = { scan: 10_000, scanTotal: 45_000, render: 120_000, editor: 30 * 60_000, ...options.timeouts };
   let executable;
   let nativeAvailable = false;
   let privateRoot;
@@ -267,26 +267,51 @@ export function createCompanion(options = {}) {
   }
   async function scan(signal) {
     return withJob(signal, async (job) => {
-      const found = await discover(job.signal);
       const next = new Map();
-      let warnings = found.warnings;
-      for (let i = 0; i < found.modules.length; i++) {
+      let warnings = 0;
+      let budgetExceeded = false;
+      const budgetController = new AbortController();
+      const forward = () => budgetController.abort(job.signal.reason || abortError());
+      job.signal.addEventListener('abort', forward, { once: true });
+      if (job.signal.aborted) forward();
+      const timer = setTimeout(() => {
+        budgetExceeded = true;
+        budgetController.abort(new BridgeError(504, 'SCAN_BUDGET', 'The installed-instrument scan reached its time limit.'));
+      }, timeouts.scanTotal);
+      timer.unref();
+      const budgetJob = { ...job, signal: budgetController.signal };
+      try {
+        let found;
+        try { found = await discover(budgetJob.signal); }
+        catch (error) {
+          checkAbort(job.signal);
+          if (!budgetExceeded) throw error;
+          warnings++;
+          found = { modules: [], warnings: 0 };
+        }
+        warnings += found.warnings;
+        for (let i = 0; i < found.modules.length; i++) {
+          checkAbort(job.signal);
+          if (budgetExceeded) { warnings++; break; }
+          const moduleInfo = found.modules[i];
+          try {
+            const result = await runNative('scan', { modulePath: moduleInfo.modulePath }, budgetJob, i);
+            if (!isObject(result) || !Array.isArray(result.plugins) || result.plugins.length > 256) throw new Error('Invalid scan.');
+            for (const plugin of result.plugins) {
+              if (!isObject(plugin) || typeof plugin.classId !== 'string' || !CLASS_ID.test(plugin.classId) || next.size >= 256) { warnings++; continue; }
+              const classId = plugin.classId.toLowerCase();
+              if (!next.has(classId)) next.set(classId, { ...moduleInfo, classId, name: safeMetadata(plugin.name, 'VST3 instrument'), vendor: safeMetadata(plugin.vendor, 'Unknown vendor'), version: safeMetadata(plugin.version) });
+            }
+          } catch { checkAbort(job.signal); warnings++; if (budgetExceeded) break; }
+        }
         checkAbort(job.signal);
-        const module = found.modules[i];
-        try {
-          const result = await runNative('scan', { modulePath: module.modulePath }, job, i);
-          if (!isObject(result) || !Array.isArray(result.plugins) || result.plugins.length > 256) throw new Error('Invalid scan.');
-          for (const plugin of result.plugins) {
-            if (!isObject(plugin) || typeof plugin.classId !== 'string' || !CLASS_ID.test(plugin.classId) || next.size >= 256) { warnings++; continue; }
-            const classId = plugin.classId.toLowerCase();
-            if (!next.has(classId)) next.set(classId, { ...module, classId, name: safeMetadata(plugin.name, 'VST3 instrument'), vendor: safeMetadata(plugin.vendor), version: safeMetadata(plugin.version) });
-          }
-        } catch (error) { checkAbort(job.signal); warnings++; }
+        registry = next;
+        cache = { plugins: [...registry.values()].map(({ classId, name, vendor, version }) => ({ id: classId, classId, name, vendor, version })), scannedAt: new Date().toISOString(), warnings };
+        return cache;
+      } finally {
+        clearTimeout(timer);
+        job.signal.removeEventListener('abort', forward);
       }
-      checkAbort(job.signal);
-      registry = next;
-      cache = { plugins: [...registry.values()].map(({ classId, name, vendor, version }) => ({ id: classId, classId, name, vendor, version })), scannedAt: new Date().toISOString(), warnings };
-      return cache;
     });
   }
   async function registeredPlugin(pluginId) {
@@ -380,7 +405,8 @@ export function createCompanion(options = {}) {
           const payload = validatePayload(data, command);
           const output = await withJob(controller.signal, async (job) => {
             const plugin = await registeredPlugin(payload.pluginId);
-            const { pluginId, ...nativePayload } = payload;
+            const nativePayload = { ...payload };
+            delete nativePayload.pluginId;
             const audioPath = path.join(job.directory, 'audio.wav');
             const result = await runNative(command, { modulePath: plugin.modulePath, classId: plugin.classId, ...nativePayload, ...(command === 'render' ? { audioPath } : {}) }, job);
             if (command === 'editor') {
