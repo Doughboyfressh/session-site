@@ -1,10 +1,10 @@
-// Read-only acceptance against an explicitly selected running deployment.
+// Read-only acceptance against an explicitly selected Vercel/Neon runtime.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { loadTS } from './load-ts.mjs';
 const { originalFor } = loadTS('lib/originals.ts');
 const base = process.env.SESSION_VERIFY_BASE;
-assert.ok(base, 'Set SESSION_VERIFY_BASE to the local or production origin.');
+assert.ok(base, 'Set SESSION_VERIFY_BASE to the local or production Vercel/Neon origin.');
 const evidence = [];
 async function page(path) {
   const response = await fetch(new URL(path, base), {

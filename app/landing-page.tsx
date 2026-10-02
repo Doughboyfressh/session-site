@@ -169,6 +169,7 @@ export default function LandingPage() {
             prefetch={false}
             className="landing-signin"
             href="/signin-with-chatgpt?return_to=%2Fapp"
+            target="_top"
           >
             Sign in
           </Link>
