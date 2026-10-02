@@ -29,8 +29,9 @@ export async function GET(req: Request) {
         like,
       ),
       all(
-        `SELECT p.id,p.username,p.name,p.roles,p.bio,p.avatar,
-                (SELECT COUNT(*) FROM follows f WHERE f.target=p.id) AS followers
+        `SELECT p.id,p.username,p.name,p.roles,p.bio,p.avatar,p.location,p.rates,
+                (SELECT COUNT(*) FROM follows f WHERE f.target=p.id) AS followers,
+                (SELECT COALESCE(MAX(chargesEnabled),0) FROM stripe_accounts a WHERE a.user=p.id) AS chargesEnabled
          FROM profiles p
          WHERE p.visibility='public'
            AND (LOWER(p.name) LIKE ?1 OR LOWER(p.username) LIKE ?1 OR LOWER(p.bio) LIKE ?1)
