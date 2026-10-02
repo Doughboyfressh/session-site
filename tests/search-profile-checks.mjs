@@ -37,7 +37,7 @@ for (const [id, visibility] of [
 db.prepare(
   'INSERT INTO stripe_accounts(user,accountId,chargesEnabled,payoutsEnabled,created) VALUES (?,?,?,?,?)',
 ).run('public', 'acct_private_fixture_only', 1, 1, 1);
-const module = { exports: {} };
+const routeModule = { exports: {} };
 const queries = [];
 const limits = [];
 let user = null;
@@ -52,8 +52,8 @@ const code = ts.transpileModule(
   },
 ).outputText;
 vm.runInNewContext(code, {
-  module,
-  exports: module.exports,
+  module: routeModule,
+  exports: routeModule.exports,
   Request,
   Response,
   URL,
@@ -72,7 +72,7 @@ vm.runInNewContext(code, {
     throw new Error('Unexpected dependency: ' + id);
   },
 });
-const { GET } = module.exports;
+const { GET } = routeModule.exports;
 const request = (query) =>
   new Request(
     'https://fixture.invalid/api/search?q=' + encodeURIComponent(query),
