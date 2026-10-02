@@ -799,6 +799,7 @@ export default function SessionApp({
   }
   const [payBusy, setPayBusy] = useState(false);
   async function payForService(profile: any, serviceIndex: number) {
+    if (!signIn()) return;
     setPayBusy(true);
     try {
       const { url } = await stripeAction({
@@ -814,6 +815,7 @@ export default function SessionApp({
     }
   }
   async function payForTrack(track: Track) {
+    if (!signIn()) return;
     setPayBusy(true);
     try {
       const { url } = await stripeAction({

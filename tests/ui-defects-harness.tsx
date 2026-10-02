@@ -12,9 +12,10 @@ const creator = {
   id: 'fixture-creator',
   name: 'Fixture Creator',
   username: 'fixture_creator',
-  roles: ['Producer'],
+  roles: JSON.stringify(['Producer']),
   bio: 'Synthetic local UI fixture',
   visibility: 'public',
+  chargesEnabled: true,
   services: [],
   rates: JSON.stringify([
     { service: 'Fixture mix review', role: 'Engineer', amountCents: 1000 },
@@ -25,7 +26,7 @@ const member = {
   id: 'fixture-member',
   name: 'Fixture Member',
   username: 'fixture_member',
-  roles: ['Artist'],
+  roles: JSON.stringify(['Artist']),
   visibility: 'private',
 };
 const nativeFetch = window.fetch.bind(window);
@@ -50,11 +51,16 @@ window.fetch = async (input, init) => {
       trending: [],
       liveRooms: [],
       pulse: { tracks: 0, creators: 1, tracksToday: 0, publicRooms: 0 },
-      payments: {},
+      payments: { configured: true, chargesEnabled: false },
       unreadNotifications: 2,
       unreadCollaborations: 1,
     });
   if (url.startsWith('/api/')) {
+    if (url === '/api/stripe')
+      return Response.json(
+        { error: 'Synthetic checkout is disabled.' },
+        { status: 401 },
+      );
     const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}');
     if (body.action === 'socialInbox')
       return Response.json({
