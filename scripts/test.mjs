@@ -41,6 +41,7 @@ const suites = [
   'drum-editor',
   'automation-editor',
   'social-ui',
+  'track-detail',
 ];
 const results = [];
 const out = path.resolve('outputs/release-checks');

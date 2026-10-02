@@ -40,6 +40,7 @@ const checks = [
     'tests/automation-editor-checks.mjs',
     'tests/automation-editor-harness.tsx',
     'tests/social-ui-checks.mjs',
+    'tests/track-detail-checks.mjs',
     'tests/social-ui-harness.tsx',
     'app/scene-3d.tsx',
     'app/feed-hero.tsx',
