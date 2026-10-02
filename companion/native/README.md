@@ -1,0 +1,31 @@
+# Windows native instrument host
+
+Build with `node scripts/build-companion.mjs` on Windows x64 with Visual Studio 2022 C++ Build Tools and the Windows SDK already installed. The helper downloads Steinberg's official MIT SDK at commit `9fad9770f2ae8542ab1a548a68c1ad1ac690abe0` (3.8.0 build 66) and its pinned submodules, plus nlohmann/json 3.12.0 with SHA-256 verification. Source dependencies, compiler products and test fixtures stay under ignored `outputs/companion`. It never installs a plug-in or downloads Serum.
+
+`outputs/companion/session-vst3-host.exe` uses static MSVC runtime linkage. `outputs/companion/licenses` supplies the SDK and JSON notices for redistribution; VSTGUI's notice accompanies the SDK test fixture. Keep those notices with any companion download. The executable's imports are Windows system DLLs only. The SDK test instrument is a development fixture and should not be included in the user's companion package.
+
+Primary references: [official SDK](https://github.com/steinbergmedia/vst3sdk), [component](https://steinbergmedia.github.io/vst3_doc/vstinterfaces/classSteinberg_1_1Vst_1_1IComponent.html), [processor](https://steinbergmedia.github.io/vst3_doc/vstinterfaces/classSteinberg_1_1Vst_1_1IAudioProcessor.html), [controller](https://steinbergmedia.github.io/vst3_doc/vstinterfaces/classSteinberg_1_1Vst_1_1IEditController.html).
+
+## CLI
+
+`session-vst3-host.exe <command> <absolute-request.json> <absolute-response.json>`
+
+The request exists; the response must be a new file. Both share a private job directory. All paths are absolute local Windows drive paths; module paths accept VST3 bundles or loose VST3 files. JSON requests are at most 12 MiB. Unknown fields fail. Native failures exit nonzero and write `{ "ok": false, "error": "host-owned message" }` when the response path can be written. A native crash can terminate without a response; the bridge must handle that and enforce subprocess timeouts. A plug-in is executable code and subprocess isolation does not make an untrusted plug-in safe.
+
+| Command | Request | Response |
+| --- | --- | --- |
+| `scan` | `{modulePath}` | `{plugins:[{classId,name,vendor,version}]}` |
+| `render` | `{modulePath,classId,state?,bpm,beats,sampleRate,notes,audioPath}` | `{ok:true}` and WAV |
+| `editor` | `{modulePath,classId,state?,bpm}` | `{state:{component,controller},audioAvailable:boolean}` after closing |
+
+Scan returns only factory audio classes with the `Instrument` subcategory. IDs use lowercase 32-character VST3 hexadecimal strings. State strings are canonical base64 with a combined decoded limit of 8 MiB; empty strings are valid. Restore order is component `setState`, controller `setComponentState`, then controller `setState`. The host initializes and connects processor/controller, installs the handler before restore, activates the buses, configures processing before activation, then stops processing and deactivates before termination/unloading.
+
+Render validates tempo 40–240 BPM; score length greater than zero and at most 512 beats; sample rate 44100 or 48000; at most 256 notes; and total duration including a 0.5-second release tail at most 300 seconds. Each note is `{pitch:integer0..127,start:beats>=0,length:beats>0,velocity:0..1}` and ends within the score. Notes must last at least one sample after rounding. On/off events include unique note IDs and precise block offsets, with note-offs before note-ons at a shared boundary. Process context supplies playing state, tempo, musical/sample position and 4/4 time. The first output bus is written as two-channel PCM16 WAV; mono is duplicated. Output must be a new `.wav` file in the same private job directory. Nonfinite samples or raw peaks above full scale fail with instructions to adjust the plug-in; the host never silently clips or normalizes the result.
+
+The editor embeds the actual `IPlugView` in a Win32 window and monitors through shared-mode WASAPI at 48 kHz. The native footer auditions A4 and supports Z/S/X/D/C/V/G/B/H/N/J/M while the host frame or audition control has focus. Plug-in controls retain their keys. Audition releases on focus loss and close. UI edits enter the processor through `IComponentHandler` parameter queues; final edits are processed before state is saved. When no Windows audio output is available, settings can still be edited and saved and `audioAvailable` is false.
+
+## Verification and current limits
+
+`node companion/native/test.mjs` builds no fake processor. It uses the compiled official Note Expression Synth to check instrument scanning, exact state roundtrip, changed-state sound recall, note onset/release, two tempos, both sample rates, empty-score silence, native payload rejection, full-scale sample rejection, and actual editor attachment/parameter forwarding/close with WASAPI availability. Evidence is under `outputs/companion/native-checks/result.json`. `state` is an internal snapshot command with `{modulePath,classId,state?}`. `editor-check` is an internal hidden editor lifecycle test restricted to the official fixture class; it changes that fixture's master volume to 0.25 through the standard host callback and closes automatically. Neither internal command needs a public bridge endpoint.
+
+The host supports Windows x64 VST3 instruments exposing float32 audio and a note input. It is not a VST2 host. Rendering is offline; editor monitoring processes on the UI thread to preserve plug-in/controller ownership, and can stutter during heavy editor interactions. There is no MIDI hardware input, automation lane, transport looping, MPE, surround export or plug-in latency compensation. The host fixes a stereo output and 4/4 context. Serum 2 requires a separately installed, licensed VST3 module, its factory content and any vendor authorization; those are not supplied. Real Serum 2 operation cannot be claimed solely from the official SDK fixture results.
