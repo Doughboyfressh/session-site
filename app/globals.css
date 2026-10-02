@@ -428,6 +428,55 @@ body::before {
 /* mobile tab bar */
 .social-tabs { display: none; }
 
+.navigation-more { position: relative; }
+.workspace-navigation-dialog {
+  width: min(420px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px) !important;
+  max-height: calc(100dvh - 32px) !important;
+  padding: 24px;
+}
+.workspace-navigation {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.workspace-destination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #3c3939;
+  border-radius: 8px;
+  background: #242222;
+  color: #eeeeee;
+  text-align: left;
+}
+.workspace-destination:hover,
+.workspace-destination[aria-current='page'] { background: #363030; }
+.workspace-destination > span:first-of-type { flex: 1; min-width: 0; }
+.workspace-destination strong { display: block; font-size: 14px; }
+.workspace-destination small {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #b5b0b3;
+  overflow-wrap: anywhere;
+}
+.workspace-unread {
+  flex: none;
+  min-width: 24px;
+  padding: 4px 6px;
+  border-radius: 12px;
+  background: #d11a33;
+  color: #ffffff;
+  font-size: 11px;
+  text-align: center;
+}
+
 /* ================= FEED ================= */
 main .feed {
   max-width: 640px;
@@ -905,6 +954,7 @@ main .feed {
   }
   .social-tabs .tab {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -914,6 +964,7 @@ main .feed {
   }
   .social-tabs .tab.active { color: #d11a33; }
   .social-tabs .tab small { font-size: 10px; letter-spacing: 0.4px; }
+  .social-tabs .navigation-more .rail-badge { right: calc(50% - 24px); }
   .player { left: 0; bottom: 60px; }
   .social-shell main { padding: 18px 14px 150px; }
   .feed-hero { grid-template-columns: 1fr; min-height: 0; }
