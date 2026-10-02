@@ -45,7 +45,7 @@ export async function privacyAction(b: any, uid: string) {
     }))
       result[key] = await all(sql, uid);
     result.activity = await all(
-      'SELECT * FROM notifications WHERE user=? ORDER BY created DESC',
+      'SELECT id,user,actor,kind,resourceType,resourceId,body,created,readAt FROM notifications WHERE user=? ORDER BY created DESC',
       uid,
     );
     result.collaborationRequests = await all(

@@ -1,0 +1,56 @@
+.room-invitation-dialog .field > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.room-invite-results {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.room-invite-results li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #3b3838;
+}
+.room-invite-results li > div {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.room-invite-results strong,
+.room-invite-results small {
+  display: block;
+}
+.room-invite-results small {
+  margin-top: 4px;
+  color: #aaa6a6;
+}
+.room-invite-results .button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.room-invite-expired {
+  display: grid;
+  gap: 10px;
+  font-size: 14px;
+}
+.room-invite-actions {
+  margin-top: 12px;
+}
+.room-invite-actions small {
+  flex-basis: 100%;
+}
+@media (max-width: 480px) {
+  .room-invite-results li {
+    gap: 8px;
+  }
+  .room-invite-results .button {
+    padding: 9px 10px;
+    font-size: 12px;
+  }
+}

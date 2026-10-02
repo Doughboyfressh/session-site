@@ -1,6 +1,7 @@
 import { saveProject, resolveProjectCreation } from '@/lib/project-save';
 import { takeBankAction } from '@/lib/take-bank-server';
 import { setRoomEditor } from '@/lib/room-editors';
+import { roomInviteAction } from '@/lib/room-invites';
 import { privacyAction } from '@/lib/privacy';
 import { prepareNotification } from '@/lib/social-server';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
@@ -32,6 +33,14 @@ export async function POST(req: Request) {
       fail('This request is too large.', 413);
     await limit(uid, 'action', 120);
     const b = await readJSON(req);
+    if (
+      ['roomInviteCandidates', 'inviteRoom', 'respondRoomInvite'].includes(
+        b.action,
+      )
+    )
+      return Response.json(await roomInviteAction(b, uid), {
+        headers: { 'Cache-Control': 'private, no-store' },
+      });
     if (
       ['takeBanks', 'takeBankRead', 'takeBankSave', 'takeBankDelete'].includes(
         b.action,
