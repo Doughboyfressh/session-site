@@ -22,6 +22,10 @@ SESSION is a browser music studio with private projects, community features, and
 
 ## Lessons
 
+- 2026-10-01 — Preserve current mute/camera intent before publishing replacement tracks; test toggles, overlapping switches, disconnects, and replacement failures with synthetic media.
+
+- 2026-10-01 — Let focused controls and dialogs own keyboard actions; keep Studio shortcuts synchronized with current playback settings and verify mobile access to saved music and alerts.
+
 - 2026-10-01 — Verify direct workspace links under React StrictMode; avoid one-shot initialization refs when effect cleanup invalidates the first request.
 
 - 2026-10-01 — Test invitation actions after voluntary departure as well as removal; every enabled Invite action must restore a usable unread alert under the same permission guards.
