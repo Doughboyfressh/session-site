@@ -61,7 +61,7 @@ import { UploadForm, ProfileForm, TrackDetail } from './forms';
 import LegalCenter from './legal-center';
 import Diagnostics from './diagnostics';
 import Studio from './studio';
-import Scene3D from './scene-3d';
+import FeedHero from './feed-hero';
 import Onboarding, { tourNeeded, tourDone } from './onboarding';
 import Room from './room';
 import { useDraftRecovery } from './use-draft-recovery';
@@ -1543,34 +1543,7 @@ export default function SessionApp({
           )}
           {view === 'Discover' ? (
             <div className="feed">
-              <section className="feed-hero">
-                <div className="feed-hero-copy">
-                  <span className="pill">
-                    <span className="status-dot" /> THE MUSIC COMMUNITY
-                  </span>
-                  <h2>
-                    Your music world
-                    <br />
-                    <em>lives here.</em>
-                  </h2>
-                  <p>
-                    Sounds from people you follow, rooms happening now, and the
-                    next thing you'll wish you made.
-                  </p>
-                  <button
-                    className="button primary"
-                    onClick={() => go('Studio')}
-                  >
-                    Start a session <ArrowUpRight size={17} />
-                  </button>
-                </div>
-                <Scene3D
-                  variant="hero"
-                  poster="/session-hero.png"
-                  alt="3D equalizer pillars glowing red in a black mirror studio"
-                  label="Interactive 3D equalizer canyon. Drag to orbit."
-                />
-              </section>
+              <FeedHero onStart={() => go('Studio')} />
               <div className="stories-rail" aria-label="Rooms and creators">
                 <button
                   className="story story-add"
