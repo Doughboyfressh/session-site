@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/dialog';
 import type { Track } from '@/lib/catalog';
 import { changeArrangementTempo } from '@/lib/arrangement-tempo';
+import { loopStartRange, studioShortcut } from '@/lib/studio-ui';
 import { originalArrangement } from '@/lib/originals';
 import { validateArrangement } from '@/lib/arrangement-validation';
 import {
@@ -315,27 +316,60 @@ export default function Studio({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.closest('input, textarea, select, [contenteditable="true"]') ||
-          target.isContentEditable)
-      )
-        return;
-      if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
+      const interactive =
+        !!target &&
+        (!!target.closest(
+          'input, textarea, select, button, a, [contenteditable], [role="button"], [role="tab"], [role="slider"], [role="switch"], [role="checkbox"], [role="combobox"], [role="menuitem"], [role="listbox"], [role="dialog"], [role="alertdialog"]',
+        ) ||
+          target.isContentEditable);
+      const shortcut = studioShortcut(
+        e,
+        interactive ||
+          recording ||
+          !!exportSnapshot ||
+          !!busy ||
+          helpOpen ||
+          versions !== null ||
+          library ||
+          !!remove ||
+          gesturing ||
+          noteGesturing,
+      );
+      if (shortcut === 'play') {
         e.preventDefault();
-        if (recording || recordSnapshot || exportSnapshot) return;
         if (playing) stop();
         else void play();
-      } else if (e.key === 'r' || e.key === 'R') {
-        if (!recordSnapshot && !exportSnapshot) record();
-      } else if (e.key === '?') {
+      } else if (shortcut === 'record' && canEdit) {
+        e.preventDefault();
+        record();
+      } else if (shortcut === 'help') {
         e.preventDefault();
         setHelpOpen(true);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [playing, recording, recordSnapshot, exportSnapshot]);
+  }, [
+    playing,
+    recording,
+    exportSnapshot,
+    busy,
+    helpOpen,
+    versions,
+    library,
+    remove,
+    gesturing,
+    noteGesturing,
+    canEdit,
+    data,
+    position,
+    id,
+    loop,
+    loopStart,
+    loopEnd,
+    metronome,
+    roomAudio,
+  ]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -1496,11 +1530,15 @@ export default function Studio({
                 max={Math.max(0, length - 0.25)}
                 step={0.25}
                 value={loopStart}
-                onChange={(e) =>
-                  setLoopStart(
-                    Math.max(0, Math.min(length - 0.25, +e.target.value)),
-                  )
-                }
+                onChange={(e) => {
+                  const range = loopStartRange(
+                    +e.target.value,
+                    loopEnd,
+                    length,
+                  );
+                  setLoopStart(range.start);
+                  setLoopEnd(range.end);
+                }}
               />
             </label>
             <label>

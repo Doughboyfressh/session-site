@@ -107,16 +107,22 @@ export function Pick({
   value,
   onChange,
   options,
+  disabled,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: (string | { value: string; label: string })[];
+  disabled?: boolean;
 }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <Select value={value} onValueChange={(v) => onChange(String(v))}>
+      <Select
+        value={value}
+        disabled={disabled}
+        onValueChange={(v) => onChange(String(v))}
+      >
         <SelectTrigger aria-label={label}>
           <SelectValue>
             {options
@@ -145,6 +151,7 @@ export function Range({
   min = 0,
   max = 1,
   step = 0.01,
+  disabled,
 }: {
   label: string;
   value: number;
@@ -152,12 +159,14 @@ export function Range({
   min?: number;
   max?: number;
   step?: number;
+  disabled?: boolean;
 }) {
   return (
     <label className="range">
       <span>{label}</span>
       <Slider
         aria-label={label}
+        disabled={disabled}
         min={min}
         max={max}
         step={step}

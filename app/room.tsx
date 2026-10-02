@@ -32,6 +32,7 @@ import RoomStudio from './room-studio';
 import RoomInvitations from './room-invitations';
 import Studio from './studio';
 import { StudioBroadcast, RoomMicrophones } from '@/lib/room-audio';
+import { RoomMediaControls } from '@/lib/room-media-controls';
 import type { Track } from '@/lib/catalog';
 function MediaTile({
   stream,
@@ -129,6 +130,7 @@ export default function Room({
       }),
   );
   const [microphones] = useState(() => new RoomMicrophones());
+  const mediaControls = useRef(new RoomMediaControls());
   const [roomAudio] = useState(() => ({
     output: broadcast.output,
     acquire: microphones.acquire,
@@ -202,75 +204,83 @@ export default function Room({
   }, [mediaSettings]);
   async function switchMic(deviceId: string) {
     setChosenMic(deviceId);
+    const epoch = generation.current;
+    const active = session.current;
+    const current = () =>
+      alive.current &&
+      !!active &&
+      session.current === active &&
+      generation.current === epoch;
     try {
-      const next = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: deviceId ? { exact: deviceId } : undefined,
-          echoCancellation: true,
-          noiseSuppression: true,
+      const switched = await mediaControls.current.switchTrack(
+        'audio',
+        () =>
+          navigator.mediaDevices.getUserMedia({
+            audio: {
+              deviceId: deviceId ? { exact: deviceId } : undefined,
+              echoCancellation: true,
+              noiseSuppression: true,
+            },
+            video: false,
+          }),
+        {
+          isCurrent: current,
+          local: () => localRef.current,
+          senders: () => links().flatMap((link) => link.pc.getSenders()),
+          publish: (merged) => {
+            localRef.current = merged;
+            microphones.set(merged);
+            setLocal(merged);
+          },
         },
-        video: false,
-      });
-      const old = localRef.current?.getAudioTracks()[0] || null;
-      const track = next.getAudioTracks()[0];
-      if (!track) throw new Error('That microphone returned no audio.');
-      const carried: MediaStreamTrack[] = [
-        ...(localRef.current?.getVideoTracks() || []),
-      ];
-      const merged = new MediaStream([...carried, track]);
-      if (old) old.stop();
-      if (localRef.current)
-        localRef.current.getTracks().forEach((t) => {
-          if (t !== old) localRef.current!.removeTrack(t);
-        });
-      localRef.current = merged;
-      microphones.set(merged);
-      setLocal(merged);
-      for (const link of links()) {
-        const sender = link['pc'].getSenders().find((sr) => sr.track === old);
-        if (sender) await sender.replaceTrack(track);
-      }
+      );
+      if (!switched || !current()) return;
+      updateStreams();
       syncPeers(stateRef.current || { sessions: [] });
       setCallNotice('Microphone switched.');
     } catch (e: any) {
-      setCallNotice(e.message || 'Could not switch microphone.');
+      if (current()) setCallNotice(e.message || 'Could not switch microphone.');
     }
   }
   async function switchCam(deviceId: string, quality = camQuality) {
     setChosenCam(deviceId);
+    const epoch = generation.current;
+    const active = session.current;
+    const current = () =>
+      alive.current &&
+      !!active &&
+      session.current === active &&
+      generation.current === epoch;
     try {
       const hd = quality === '720';
-      const next = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          deviceId: deviceId ? { exact: deviceId } : undefined,
-          width: { ideal: hd ? 1280 : 640 },
-          height: { ideal: hd ? 720 : 360 },
-          frameRate: { ideal: hd ? 30 : 24, max: 30 },
+      const switched = await mediaControls.current.switchTrack(
+        'video',
+        () =>
+          navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              deviceId: deviceId ? { exact: deviceId } : undefined,
+              width: { ideal: hd ? 1280 : 640 },
+              height: { ideal: hd ? 720 : 360 },
+              frameRate: { ideal: hd ? 30 : 24, max: 30 },
+            },
+          }),
+        {
+          isCurrent: current,
+          local: () => localRef.current,
+          senders: () => links().flatMap((link) => link.pc.getSenders()),
+          publish: (merged) => {
+            localRef.current = merged;
+            setLocal(merged);
+          },
         },
-      });
-      const old = localRef.current?.getVideoTracks()[0] || null;
-      const track = next.getVideoTracks()[0];
-      if (!track) throw new Error('That camera returned no video.');
-      const carried: MediaStreamTrack[] = [
-        ...(localRef.current?.getAudioTracks() || []),
-      ];
-      const merged = new MediaStream([...carried, track]);
-      if (old) old.stop();
-      if (localRef.current)
-        localRef.current.getTracks().forEach((t) => {
-          if (t !== old) localRef.current!.removeTrack(t);
-        });
-      localRef.current = merged;
-      setLocal(merged);
-      for (const link of links()) {
-        const sender = link['pc'].getSenders().find((sr) => sr.track === old);
-        if (sender) await sender.replaceTrack(track);
-      }
+      );
+      if (!switched || !current()) return;
+      updateStreams();
       syncPeers(stateRef.current || { sessions: [] });
       setCallNotice('Camera set to ' + (hd ? '720p' : '360p') + '.');
     } catch (e: any) {
-      setCallNotice(e.message || 'Could not switch camera.');
+      if (current()) setCallNotice(e.message || 'Could not switch camera.');
     }
   }
   function links() {
@@ -386,6 +396,7 @@ export default function Room({
   }
   function disconnect(announce = true) {
     generation.current++;
+    mediaControls.current.cancelPending();
     microphones.end();
     stopMusic();
     const previous = session.current;
@@ -567,6 +578,7 @@ export default function Room({
       ended = true;
       alive.current = false;
       generation.current++;
+      mediaControls.current.cancelPending();
       clearTimeout(timer);
       clearInterval(st);
       const previous = session.current;
@@ -622,6 +634,8 @@ export default function Room({
       }
       session.current = token;
       cursor.current = result.cursor;
+      mediaControls.current.setEnabled('audio', true, stream);
+      mediaControls.current.setEnabled('video', video, stream);
       localRef.current = stream;
       microphones.set(stream);
       setLocal(stream);
@@ -933,10 +947,13 @@ export default function Room({
               disabled={!local}
               aria-label={mic ? 'Mute microphone' : 'Unmute microphone'}
               onClick={() => {
-                localRef.current
-                  ?.getAudioTracks()
-                  .forEach((t) => (t.enabled = !mic));
-                setMic(!mic);
+                const enabled = !mediaControls.current.isEnabled('audio');
+                mediaControls.current.setEnabled(
+                  'audio',
+                  enabled,
+                  localRef.current,
+                );
+                setMic(enabled);
               }}
             >
               {mic ? <Mic size={19} /> : <MicOff size={19} />}
@@ -946,10 +963,13 @@ export default function Room({
               disabled={!local?.getVideoTracks().length}
               aria-label={cam ? 'Turn camera off' : 'Turn camera on'}
               onClick={() => {
-                localRef.current
-                  ?.getVideoTracks()
-                  .forEach((t) => (t.enabled = !cam));
-                setCam(!cam);
+                const enabled = !mediaControls.current.isEnabled('video');
+                mediaControls.current.setEnabled(
+                  'video',
+                  enabled,
+                  localRef.current,
+                );
+                setCam(enabled);
               }}
             >
               {cam ? <Video size={19} /> : <VideoOff size={19} />}

@@ -32,6 +32,8 @@ const suites = [
   'production',
   'deployment',
   'workspace-entry',
+  'studio-ui',
+  'room-media-controls',
 ];
 const results = [];
 const out = path.resolve('outputs/release-checks');

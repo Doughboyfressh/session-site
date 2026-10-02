@@ -132,6 +132,7 @@ export default function SessionApp({
     [detail, setDetail] = useState<Track | null>(null),
     [roomId, setRoomId] = useState(''),
     [roomModal, setRoomModal] = useState(false),
+    [moreOpen, setMoreOpen] = useState(false),
     [tourOpen, setTourOpen] = useState(false),
     [results, setResults] = useState<any>(null),
     [searching, setSearching] = useState(false),
@@ -295,7 +296,7 @@ export default function SessionApp({
       notify(
         'Finish or close the studio dialog before leaving this workspace.',
       );
-      return;
+      return false;
     }
     if (next === 'Studio' || next === 'Room') stopPreview();
     workspaceRequest.current++;
@@ -306,6 +307,7 @@ export default function SessionApp({
     url.hash = '';
     window.history.replaceState(null, '', url);
     window.scrollTo({ top: 0, behavior: 'instant' });
+    return true;
   }
   function showRecovery() {
     if (
@@ -530,8 +532,17 @@ export default function SessionApp({
   }
   function signIn() {
     if (user) return true;
+    if (!go('My profile')) return false;
+    setSelectedProfile(null);
+    setDetail(null);
+    setRoomModal(false);
+    setMoreOpen(false);
+    setRequestTarget(null);
+    setRequestTrack(null);
+    setRecoveryOpen(false);
+    setTakesOpen(false);
+    setTourOpen(false);
     notify('Sign in to save, upload, and collaborate.');
-    go('My profile');
     return false;
   }
   async function saveTrack(t: Track) {
@@ -788,6 +799,7 @@ export default function SessionApp({
   }
   const [payBusy, setPayBusy] = useState(false);
   async function payForService(profile: any, serviceIndex: number) {
+    if (!signIn()) return;
     setPayBusy(true);
     try {
       const { url } = await stripeAction({
@@ -803,6 +815,7 @@ export default function SessionApp({
     }
   }
   async function payForTrack(track: Track) {
+    if (!signIn()) return;
     setPayBusy(true);
     try {
       const { url } = await stripeAction({
@@ -1342,6 +1355,22 @@ export default function SessionApp({
       </WorkspaceSignInLink>
     </div>
   );
+  const moreDestinations = [
+    [FolderClosed, 'My projects', 'Saved sessions, recovery, and takes'],
+    [Heart, 'Saved tracks', 'The sounds you want to return to'],
+    [MessagesSquare, 'Collaborations', 'Requests and private conversations'],
+    [Bell, 'Activity', 'Invitations and community activity'],
+    [Users, 'My profile', 'Your profile, services, and payments'],
+    [ShieldCheck, 'Rights & privacy', 'Permissions and account data'],
+  ] as const;
+  const moreLabel = state.unreadNotifications
+    ? `More navigation, ${state.unreadNotifications} unread alerts`
+    : 'More navigation';
+  const unreadBadge = state.unreadNotifications > 0 && (
+    <span className="rail-badge">
+      {state.unreadNotifications > 99 ? '99+' : state.unreadNotifications}
+    </span>
+  );
   return (
     <div className="social-app">
       <aside className="social-rail" aria-label="Primary">
@@ -1394,12 +1423,16 @@ export default function SessionApp({
         </button>
         <div className="rail-spacer" />
         <button
-          className="rail-button"
-          onClick={() => go('Rights & privacy')}
-          aria-label="Rights and privacy"
+          className="rail-button navigation-more"
+          onClick={() => setMoreOpen(true)}
+          aria-label={moreLabel}
+          aria-haspopup="dialog"
+          aria-expanded={moreOpen}
+          aria-controls={moreOpen ? 'workspace-navigation' : undefined}
         >
-          <ShieldCheck size={20} />
-          <span className="rail-tip">Rights</span>
+          <MoreHorizontal size={20} />
+          {unreadBadge}
+          <span className="rail-tip">More</span>
         </button>
         <button
           className={'rail-avatar' + (view === 'My profile' ? ' active' : '')}
@@ -2389,6 +2422,18 @@ export default function SessionApp({
               <small>{label}</small>
             </button>
           ))}
+          <button
+            className={'tab navigation-more' + (moreOpen ? ' active' : '')}
+            onClick={() => setMoreOpen(true)}
+            aria-label={moreLabel}
+            aria-haspopup="dialog"
+            aria-expanded={moreOpen}
+            aria-controls={moreOpen ? 'workspace-navigation' : undefined}
+          >
+            <MoreHorizontal size={20} />
+            {unreadBadge}
+            <small>More</small>
+          </button>
         </nav>
         <footer
           className="player"
@@ -2468,6 +2513,52 @@ export default function SessionApp({
           </div>
         </footer>
       </div>
+      <Dialog open={moreOpen} onOpenChange={setMoreOpen}>
+        <DialogContent
+          id="workspace-navigation"
+          className="workspace-navigation-dialog"
+        >
+          <DialogTitle>More in SESSION</DialogTitle>
+          <DialogDescription>
+            Your saved music, conversations, and account.
+          </DialogDescription>
+          <nav className="workspace-navigation" aria-label="Workspace pages">
+            {moreDestinations.map(([Icon, target, description]) => (
+              <button
+                key={target}
+                className="workspace-destination"
+                aria-current={view === target ? 'page' : undefined}
+                onClick={() => {
+                  setMoreOpen(false);
+                  go(target);
+                }}
+              >
+                <Icon size={20} />
+                <span>
+                  <strong>
+                    {target === 'Collaborations'
+                      ? 'Messages'
+                      : target === 'Activity'
+                        ? 'Alerts'
+                        : target}
+                  </strong>
+                  <small>{description}</small>
+                </span>
+                {target === 'Activity' && state.unreadNotifications > 0 && (
+                  <span
+                    className="workspace-unread"
+                    aria-label={`${state.unreadNotifications} unread alerts`}
+                  >
+                    {state.unreadNotifications > 99
+                      ? '99+'
+                      : state.unreadNotifications}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
+        </DialogContent>
+      </Dialog>
       <TrackDetail
         track={detail}
         user={user}
