@@ -1,6 +1,7 @@
 import { GROUP_IDS, validateRouting } from './mixer-routing';
 import { sampleSettings } from './sample-instrument';
 import { SOUNDS } from './instruments';
+import { validateInstrumentPlugin } from './instrument-plugins';
 import { validateDrumPattern } from './drum-pattern';
 import {
   AUTOMATION_SPECS,
@@ -34,6 +35,13 @@ export function validateArrangement(d: any, draft = false) {
     ids.add(t.id);
     if (t.sound !== undefined && !SOUNDS.includes(t.sound))
       fail('Choose an available instrument.');
+    if (t.plugin !== undefined) {
+      try { validateInstrumentPlugin(t.plugin); }
+      catch (error) { fail((error as Error).message); }
+      if (!Array.isArray(t.notes) || t.fileId || t.sample || t.demo ||
+        t.sequence || t.drumPattern || t.sound !== undefined)
+        fail('An instrument plugin needs its own note track.');
+    }
     if (
       typeof t.name !== 'string' ||
       t.name.length > 100 ||

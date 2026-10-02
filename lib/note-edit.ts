@@ -36,6 +36,7 @@ export function applyNotePatch(
       t.notes,
       t.noteLoopBeats,
       t.sound,
+      t.plugin,
       t.sample,
       t.offset,
       t.trimStart,

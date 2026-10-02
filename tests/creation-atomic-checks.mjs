@@ -69,6 +69,10 @@ function load(file) {
         : load(
             id.includes('mixer-routing')
               ? 'lib/mixer-routing.ts'
+              : id.includes('instrument-plugins')
+                ? 'lib/instrument-plugins.ts'
+                : id.includes('browser-instruments')
+                  ? 'lib/browser-instruments.ts'
               : id.includes('project-creation')
                 ? 'lib/project-creation.ts'
                 : id.includes('privacy')

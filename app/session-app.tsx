@@ -47,6 +47,7 @@ import { demos, genres, type Track } from '@/lib/catalog';
 import { mergeSearchTracks, trackPermalink } from '@/lib/community-search';
 import { useCommunitySearch } from './use-community-search';
 import { context, trackFrom, bufferFor, playMix } from '@/lib/audio';
+import { disconnectCompanion } from '@/lib/plugin-companion';
 import { originalArrangement } from '@/lib/originals';
 import { validateArrangement } from '@/lib/arrangement-validation';
 import { playlistTrackEnd } from '@/lib/playlist-clips';
@@ -118,6 +119,10 @@ export default function SessionApp({
 }: {
   user: { id: string; name: string } | null;
 }) {
+  useEffect(() => {
+    disconnectCompanion();
+    return disconnectCompanion;
+  }, [user?.id]);
   const [view, setView] = useState('Discover'),
     [genre, setGenre] = useState('All genres'),
     [role, setRole] = useState('Everyone'),

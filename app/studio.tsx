@@ -482,6 +482,7 @@ export default function Studio({
           JSON.stringify(t.notes || t.drumPattern || t.sequence || []) +
           JSON.stringify(t.sample || null) +
           (t.sound || '') +
+          JSON.stringify(t.plugin || null) +
           (t.fileId || '') +
           JSON.stringify([
             t.denoise,
@@ -811,6 +812,7 @@ export default function Studio({
           fileId: uploaded.id,
           sample,
           sound: undefined,
+          plugin: undefined,
         }),
       );
       notify(
@@ -2088,9 +2090,10 @@ export default function Studio({
             />
           ) : tab === 'Piano roll' ? (
             <PianoRoll
-              key={focus?.id || 'empty-instrument'}
+              key={(id || recoveryId.current) + ':' + (focus?.id || 'empty-instrument')}
               track={focus}
               bpm={data.bpm}
+              projectId={id}
               disabled={!canEdit || pianoLocked}
               onGestureActivity={setNoteGesturing}
               onLoadSample={(file) => void loadSample(file)}

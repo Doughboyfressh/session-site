@@ -2,6 +2,7 @@
 import { useState, useRef } from 'react';
 import { useInstrumentAudition } from './use-instrument-audition';
 import SampleControls from './sample-controls';
+import PluginInstruments from './plugin-instruments';
 import { useNoteGesture } from './use-note-gesture';
 import {
   checkNotes,
@@ -26,7 +27,8 @@ export default function PianoRoll({
   onRecord,
   onGestureActivity,
   onLoadSample,
-  disabled = false,
+  projectId,
+  disabled: externallyDisabled = false,
 }: {
   track?: MixerTrack;
   bpm: number;
@@ -35,8 +37,12 @@ export default function PianoRoll({
   onRecord?: () => void;
   onGestureActivity?: (active: boolean) => void;
   onLoadSample?: (file: File) => void;
+  projectId?: string;
   disabled?: boolean;
 }) {
+  const [pluginBusy, setPluginBusy] = useState(false);
+  const pluginActivity = useRef(false), noteActivity = useRef(false);
+  const disabled = externallyDisabled || pluginBusy;
   const [selection, setSelection] = useState<{ track: string; ids: string[] }>({
       track: '',
       ids: [],
@@ -141,7 +147,10 @@ export default function PianoRoll({
     onSelect: select,
     onCommit: commit,
     onError: setError,
-    onActivity: onGestureActivity,
+    onActivity: (active) => {
+      noteActivity.current = active;
+      onGestureActivity?.(active || pluginActivity.current);
+    },
   });
   if (!track?.notes)
     return (
@@ -228,6 +237,13 @@ export default function PianoRoll({
           });
       }}
     >
+      <PluginInstruments track={track} bpm={bpm} projectId={projectId}
+        disabled={externallyDisabled} onChange={onChange}
+        onActivity={(active) => {
+          pluginActivity.current = active;
+          setPluginBusy(active);
+          onGestureActivity?.(active || noteActivity.current);
+        }} />
       <fieldset disabled={disabled}>
         <div className="section-title">
           <div>
@@ -239,7 +255,7 @@ export default function PianoRoll({
           </div>
           <div className="actions">
             {onRecord && (
-              <button className="button primary" onClick={onRecord}>
+              <button className="button primary" onClick={onRecord} disabled={track.plugin?.format === 'vst3'}>
                 Record MIDI keyboard
               </button>
             )}
@@ -265,17 +281,18 @@ export default function PianoRoll({
           />
           <Pick
             label="Instrument"
-            value={track.sample ? 'sample' : track.sound || 'keys'}
+            value={track.plugin ? 'plugin' : track.sample ? 'sample' : track.sound || 'keys'}
             onChange={(v) => {
               if (
                 disabled ||
                 !SOUNDS.includes(v as Sound) ||
-                (!track.sample && v === (track.sound || 'keys'))
+                (!track.sample && !track.plugin && v === (track.sound || 'keys'))
               )
                 return;
               try {
                 onChange({
                   sound: v as any,
+                  plugin: undefined,
                   sample: undefined,
                   fileId: undefined,
                   peaks: undefined,
@@ -287,6 +304,7 @@ export default function PianoRoll({
               }
             }}
             options={[
+              ...(track.plugin ? [{ value: 'plugin', label: track.plugin.format === 'vst3' ? track.plugin.name : 'SESSION plugin' }] : []),
               ...(track.sample
                 ? [{ value: 'sample', label: 'Your sample' }]
                 : []),
@@ -335,6 +353,7 @@ export default function PianoRoll({
             </>
           )}
         </div>
+        {track.plugin?.format === 'vst3' && <p>Record keyboard MIDI with a browser instrument, then choose your VST3 instrument to render that performance.</p>}
         {onLoadSample && !track.sample && (
           <p className="small-note">
             Load your own sound to play it across the keyboard. Use mono or

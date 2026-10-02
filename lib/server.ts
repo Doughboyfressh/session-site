@@ -87,6 +87,11 @@ export async function fileAccess(id: string, user: string) {
       user,
       user,
     );
+  if (take?.purpose === 'plugin-state')
+    return one(
+      "SELECT f.* FROM files f WHERE f.id=? AND f.purpose='plugin-state' AND (f.owner=? OR EXISTS (SELECT 1 FROM project_files pf JOIN projects p ON p.id=pf.project WHERE pf.file=f.id AND (p.owner=? OR EXISTS (SELECT 1 FROM rooms r JOIN members m ON m.room=r.id WHERE r.project=p.id AND m.user=?))))",
+      id, user, user, user,
+    );
   return one(
     "SELECT f.* FROM files f WHERE f.id=? AND (f.owner=? OR EXISTS (SELECT 1 FROM tracks t WHERE t.fileId=f.id AND t.visibility='public') OR EXISTS (SELECT 1 FROM profiles p WHERE p.avatar=f.id AND (p.visibility='public' OR p.id=? OR EXISTS (SELECT 1 FROM members self JOIN members other ON self.room=other.room WHERE self.user=? AND other.user=p.id))) OR EXISTS (SELECT 1 FROM project_files pf JOIN projects p ON p.id=pf.project WHERE pf.file=f.id AND (p.owner=? OR EXISTS (SELECT 1 FROM rooms r JOIN members m ON m.room=r.id WHERE r.project=p.id AND m.user=?))))",
     id,

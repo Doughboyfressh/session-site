@@ -9,6 +9,7 @@ import {
 } from './server';
 import { validateArrangement } from './privacy';
 import { creationHash, validCreation } from './project-creation';
+import { projectInstrumentFiles } from './instrument-plugins';
 
 export async function resolveProjectCreation(key: unknown, uid: string) {
   if (!validCreation({ key, checkpoint: true }))
@@ -102,15 +103,15 @@ export async function saveProject(b: any, uid: string, now: number) {
       ? b.forkedFrom
       : null;
   if (data.length > 250000) fail('This arrangement is too large.');
-  const files = [
-    ...new Set(b.data.tracks.map((t: any) => t.fileId).filter(Boolean)),
-  ] as string[];
-  const sources = `NOT EXISTS (SELECT 1 FROM json_each(?) source WHERE NOT EXISTS (SELECT 1 FROM files f WHERE f.id=source.value AND f.purpose='audio' AND (f.owner=? OR EXISTS (SELECT 1 FROM tracks t WHERE t.fileId=f.id AND t.visibility='public' AND t.permission='collaborate') OR EXISTS (SELECT 1 FROM project_files pf WHERE pf.project=? AND pf.file=f.id))))`;
+  const references = projectInstrumentFiles(b.data);
+  const files = references.map((reference) => reference.id);
+  const sourcesValue = JSON.stringify(references);
+  const sources = `NOT EXISTS (SELECT 1 FROM json_each(?) source WHERE NOT EXISTS (SELECT 1 FROM files f WHERE f.id=json_extract(source.value,'$.id') AND f.purpose=json_extract(source.value,'$.purpose') AND (f.owner=? OR (f.purpose='audio' AND EXISTS (SELECT 1 FROM tracks t WHERE t.fileId=f.id AND t.visibility='public' AND t.permission='collaborate')) OR EXISTS (SELECT 1 FROM project_files pf WHERE pf.project=? AND pf.file=f.id))))`;
   if (
     !creation &&
     !(await one(
       `SELECT 1 AS ok WHERE ${sources}`,
-      JSON.stringify(files),
+      sourcesValue,
       uid,
       id,
     ))
@@ -138,7 +139,7 @@ export async function saveProject(b: any, uid: string, now: number) {
             existing.revision,
             uid,
             uid,
-            JSON.stringify(files),
+            sourcesValue,
             uid,
             id,
           )
@@ -156,7 +157,7 @@ export async function saveProject(b: any, uid: string, now: number) {
             uid,
             receipt,
             forkedFrom,
-            JSON.stringify(files),
+            sourcesValue,
             uid,
             id,
             ...(creation ? [uid, creation.key] : []),

@@ -4,6 +4,10 @@ import path from 'node:path';
 
 const suites = [
   'originals',
+  'browser-instruments',
+  'instrument-plugins',
+  'plugin-bridge',
+  'plugin-companion',
   'audio-files',
   'recording',
   'recording-timing',

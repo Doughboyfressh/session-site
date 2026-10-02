@@ -15,5 +15,6 @@ export default defineConfig({
   css: { postcss: { plugins: [tailwindcss()] } },
   plugins: [react()],
   resolve: { alias: { '@': root } },
-  server: { host: '127.0.0.1', port: 4173, strictPort: true },
+  server: { host: '127.0.0.1', port: 4173, strictPort: true,
+    watch: { ignored: ['**/.treehouse/**', '**/outputs/**'] } },
 });

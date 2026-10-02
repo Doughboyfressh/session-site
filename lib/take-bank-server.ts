@@ -8,6 +8,7 @@ import {
   projectEditCondition,
 } from './server';
 import { bankId, takeId, validateBank } from './take-bank';
+import { projectInstrumentFiles } from './instrument-plugins';
 
 const projectGuard = `( ?='' OR EXISTS (SELECT 1 FROM projects p WHERE p.id=? AND ${projectEditCondition('p')}))`;
 const args = (project: string, uid: string) => [project, project, uid, uid];
@@ -281,14 +282,9 @@ export async function takeBankAction(b: Record<string, unknown>, uid: string) {
     return { id: old.id, revision: old.revision, updated: old.updated };
   }
   const originalGuard = `NOT EXISTS(SELECT 1 FROM json_each(?) t WHERE NOT EXISTS(SELECT 1 FROM take_bank_files tf JOIN files f ON f.id=tf.file WHERE tf.bank=? AND tf.owner=? AND tf.project=? AND tf.take=json_extract(t.value,'$.id') AND tf.file=json_extract(t.value,'$.fileId') AND tf.size=json_extract(t.value,'$.size') AND tf.sampleRate=json_extract(t.value,'$.sampleRate') AND tf.depth=json_extract(t.value,'$.depth') AND tf.frames=CAST(round(json_extract(t.value,'$.seconds')*tf.sampleRate) AS INTEGER) AND f.purpose='take' AND f.owner=?))`;
-  const sourceGuard = `NOT EXISTS(SELECT 1 FROM json_each(?) s WHERE NOT EXISTS(SELECT 1 FROM files f WHERE f.id=s.value AND f.purpose='audio' AND (f.owner=? OR EXISTS(SELECT 1 FROM tracks t WHERE t.fileId=f.id AND t.visibility='public' AND t.permission='collaborate') OR EXISTS(SELECT 1 FROM project_files pf WHERE pf.file=f.id AND pf.project=?))))`;
-  const sources = [
-    ...new Set(
-      [...data.backing.tracks.map((t) => t.fileId), data.target?.fileId].filter(
-        Boolean,
-      ),
-    ),
-  ];
+  const sourceGuard = `NOT EXISTS(SELECT 1 FROM json_each(?) s WHERE NOT EXISTS(SELECT 1 FROM files f WHERE f.id=json_extract(s.value,'$.id') AND f.purpose=json_extract(s.value,'$.purpose') AND (f.owner=? OR (f.purpose='audio' AND EXISTS(SELECT 1 FROM tracks t WHERE t.fileId=f.id AND t.visibility='public' AND t.permission='collaborate')) OR EXISTS(SELECT 1 FROM project_files pf WHERE pf.file=f.id AND pf.project=?))))`;
+  const sources = projectInstrumentFiles({ bpm: data.backing.bpm,
+    tracks: [...data.backing.tracks, ...(data.target ? [data.target] : [])] });
   const bindings = [
     ...args(data.projectId, uid),
     JSON.stringify(data.takes),
