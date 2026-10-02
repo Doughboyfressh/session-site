@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, useState } from 'react';
+import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import PianoRoll from '@/app/piano-roll';
 import ExportAudio from '@/app/export-audio';
@@ -110,10 +110,16 @@ window.fetch = async (input, init) => {
     }
     if (url.pathname === '/api/upload' && request.method === 'POST') {
       const body = await request.formData(),
-        file = body.get('file');
-      if (!(file instanceof Blob) || body.get('projectId') !== projectId)
+        file = body.get('file'),
+        purpose = body.get('purpose');
+      if (
+        !(file instanceof Blob) ||
+        body.get('projectId') !== projectId ||
+        typeof purpose !== 'string' ||
+        !['audio', 'plugin-state'].includes(purpose)
+      )
         return json({ error: 'Use this fixture project only.' }, 403);
-      return json(await storeFile(file, String(body.get('purpose'))));
+      return json(await storeFile(file, purpose));
     }
     if (url.pathname === '/api/upload-session') {
       if (request.method === 'PUT') {
@@ -310,7 +316,12 @@ function suite() {
         metrics,
         ...(error === undefined
           ? {}
-          : { error: error instanceof Error ? error.message : String(error) }),
+          : {
+              error:
+                error instanceof Error
+                  ? error.message
+                  : 'Fixture operation failed.',
+            }),
       };
     },
   };
@@ -326,7 +337,7 @@ function App() {
   const [download, setDownload] = useState<{ url: string; name: string }>();
   const [playing, setPlaying] = useState(false),
     [activity, setActivity] = useState(false);
-  const stats = useRef({
+  const [stats, setStats] = useState({
     engineEdits: 0,
     parameterEdits: 0,
     noteEdits: 0,
@@ -337,14 +348,15 @@ function App() {
   );
   const alive = useRef(false),
     playEpoch = useRef(0);
+  const disposePlayback = useCallback(() => {
+    alive.current = false;
+    playEpoch.current++;
+    playback.current?.stop();
+  }, []);
   useEffect(() => {
     alive.current = true;
-    return () => {
-      alive.current = false;
-      playEpoch.current++;
-      playback.current?.stop();
-    };
-  }, []);
+    return disposePlayback;
+  }, [disposePlayback]);
   useEffect(
     () => () => {
       if (download) URL.revokeObjectURL(download.url);
@@ -352,24 +364,31 @@ function App() {
     [download],
   );
   const track = data.tracks[0];
-  function patch(patch: Partial<MixerTrack>) {
-    if (patch.plugin) {
+  function changeTrack(changes: Partial<MixerTrack>) {
+    let engine = false,
+      parameter = false;
+    if (changes.plugin) {
       const prior = track.plugin;
       if (
         !prior ||
-        prior.format !== patch.plugin.format ||
+        prior.format !== changes.plugin.format ||
         (prior.format === 'browser' &&
-          patch.plugin.format === 'browser' &&
-          prior.id !== patch.plugin.id)
+          changes.plugin.format === 'browser' &&
+          prior.id !== changes.plugin.id)
       )
-        stats.current.engineEdits++;
-      else if (JSON.stringify(prior) !== JSON.stringify(patch.plugin))
-        stats.current.parameterEdits++;
+        engine = true;
+      else if (JSON.stringify(prior) !== JSON.stringify(changes.plugin))
+        parameter = true;
     }
-    if (patch.notes) stats.current.noteEdits++;
+    setStats((prior) => ({
+      ...prior,
+      engineEdits: prior.engineEdits + Number(engine),
+      parameterEdits: prior.parameterEdits + Number(parameter),
+      noteEdits: prior.noteEdits + Number(!!changes.notes),
+    }));
     setData((previous) => ({
       ...previous,
-      tracks: [{ ...previous.tracks[0], ...patch }],
+      tracks: [{ ...previous.tracks[0], ...changes }],
     }));
   }
   function save() {
@@ -477,7 +496,7 @@ function App() {
     });
   const editedChecks = () =>
     run('Editor fixture', async (test) => {
-      for (const [key, value] of Object.entries(stats.current)) {
+      for (const [key, value] of Object.entries(stats)) {
         test.metrics[key] = value;
         test.check(
           value > 0,
@@ -569,6 +588,99 @@ function App() {
       test.check(
         JSON.stringify(loadSaved()) === JSON.stringify(data),
         'Native state and frozen audio reference survive save/reopen.',
+      );
+      const unavailable = async (candidate: MixerTrack, bpm = data.bpm) => {
+        validateArrangement({ bpm, tracks: [candidate] });
+        try {
+          await bufferFor(candidate, bpm, { revalidate: true });
+          return '';
+        } catch (error) {
+          if (!(error instanceof Error)) throw error;
+          return error.message;
+        }
+      };
+      const ownedFile = files[plugin.freeze.fileId];
+      let revokedError = '';
+      try {
+        delete files[plugin.freeze.fileId];
+        revokedError = await unavailable(track);
+      } finally {
+        files[plugin.freeze.fileId] = ownedFile;
+      }
+      test.metrics.revokedCacheError = revokedError;
+      test.check(
+        /private|available/i.test(revokedError),
+        'A cached native freeze is rejected when its private fixture-file access is revoked.',
+      );
+      test.check(
+        audioMetrics(await bufferFor(track, data.bpm)).peak > 0.001,
+        'Restoring fixture-file access makes the cached freeze playable again.',
+      );
+      const decoded44100 = await bufferFor(track, data.bpm, {
+          sampleRate: 44100,
+        }),
+        decoded48000 = await bufferFor(track, data.bpm, { sampleRate: 48000 });
+      test.metrics.frames44100 = decoded44100.length;
+      test.metrics.frames48000 = decoded48000.length;
+      test.check(
+        decoded44100.sampleRate === 44100 &&
+          decoded48000.sampleRate === 48000 &&
+          audioMetrics(decoded44100).peak > 0.001 &&
+          audioMetrics(decoded48000).peak > 0.001,
+        'The actual native freeze decodes audibly at both requested sample rates.',
+      );
+      test.check(
+        decoded44100 !== decoded48000 &&
+          (await bufferFor(track, data.bpm, { sampleRate: 44100 })) ===
+            decoded44100 &&
+          (await bufferFor(track, data.bpm, { sampleRate: 48000 })) ===
+            decoded48000,
+        'Sample-rate cache entries remain distinct and reuse their own decoded buffers.',
+      );
+      const staleNotes: MixerTrack = {
+        ...track,
+        notes: track.notes!.map((note, index) =>
+          index === 0 ? { ...note, pitch: (note.pitch + 1) % 128 } : note,
+        ),
+      };
+      test.check(
+        (await pluginFingerprint(staleNotes, data.bpm)) !==
+          plugin.freeze.fingerprint,
+        'Changing a note invalidates the native freeze fingerprint.',
+      );
+      const noteError = await unavailable(staleNotes);
+      test.metrics.staleNoteError = noteError;
+      test.check(
+        /connect|private|available/i.test(noteError),
+        'Changed notes require a companion instead of returning old frozen audio.',
+      );
+      const changedTempo = data.bpm === 240 ? 239 : data.bpm + 1;
+      test.check(
+        (await pluginFingerprint(track, changedTempo)) !==
+          plugin.freeze.fingerprint,
+        'Changing tempo invalidates the native freeze fingerprint.',
+      );
+      const tempoError = await unavailable(track, changedTempo);
+      test.metrics.staleTempoError = tempoError;
+      test.check(
+        /connect|private|available/i.test(tempoError),
+        'Changed tempo requires a companion instead of returning old frozen audio.',
+      );
+      const staleState: MixerTrack = {
+        ...track,
+        plugin: { ...plugin, stateFileId: 'fixture-plugin-unavailable-state' },
+      };
+      test.check(
+        (await pluginFingerprint(staleState, data.bpm)) !==
+          plugin.freeze.fingerprint,
+        'Changing saved instrument state invalidates the native freeze fingerprint.',
+      );
+      const stateError = await unavailable(staleState);
+      test.metrics.staleStateError = stateError;
+      test.check(
+        /connect|private|available/i.test(stateError) &&
+          traffic.companionRequests === bridgeBefore,
+        'Changed state rejects old audio, and all disconnected checks avoid companion requests.',
       );
       setDownload({ url: URL.createObjectURL(wav.blob), name: wav.name });
       setMessage(
@@ -687,12 +799,12 @@ function App() {
               localStorage.removeItem(prefix + suffix);
             files = {};
             sessions.clear();
-            stats.current = {
+            setStats({
               engineEdits: 0,
               parameterEdits: 0,
               noteEdits: 0,
               tempoEdits: 0,
-            };
+            });
             setData(seed());
             setResults({});
             setDownload(undefined);
@@ -714,15 +826,18 @@ function App() {
           onChange={(event) => {
             const bpm = Number(event.target.value);
             if (bpm >= 40 && bpm <= 240) {
-              stats.current.tempoEdits++;
+              setStats((prior) => ({
+                ...prior,
+                tempoEdits: prior.tempoEdits + 1,
+              }));
               setData((prior) => ({ ...prior, bpm }));
             }
           }}
         />
       </label>
-      <p role="status">
+      <output aria-live="polite">
         {busy || message || 'Ready. Fixture save is local; no account is used.'}
-      </p>
+      </output>
       {download && (
         <a className="button" href={download.url} download={download.name}>
           Download verified fixture WAV
@@ -737,7 +852,7 @@ function App() {
           {JSON.stringify(
             {
               results,
-              editorChanges: stats.current,
+              editorChanges: stats,
               traffic,
               fixtureFiles: Object.keys(files).length,
               current: {
@@ -757,7 +872,7 @@ function App() {
           key={generation}
           track={track}
           bpm={data.bpm}
-          onChange={patch}
+          onChange={changeTrack}
           onAdd={() => {}}
           projectId={projectId}
           disabled={!!busy || playing || !!exportSnapshot}
