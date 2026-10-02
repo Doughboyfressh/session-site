@@ -36,6 +36,12 @@ const suites = [
   'room-media-controls',
   'scene-layout',
   'scene-lifecycle',
+  'community-search',
+  'search-profile',
+  'drum-editor',
+  'automation-editor',
+  'social-ui',
+  'track-detail',
 ];
 const results = [];
 const out = path.resolve('outputs/release-checks');

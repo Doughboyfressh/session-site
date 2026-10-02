@@ -60,11 +60,27 @@ export default function DrumSequencer({
           : defaultDrumPattern(),
     [track],
   );
-  const [pattern, setPattern] = useState(initial),
+  const source = JSON.stringify([
+    track?.id,
+    track?.drumPattern ? 'pattern' : track?.sequence ? 'legacy' : 'draft',
+    initial,
+  ]);
+  const [draftSource, setDraftSource] = useState(source),
+    [pattern, setPattern] = useState(initial),
     [selected, setSelected] = useState<{ lane: DrumLane; step: number }>({
       lane: 'kick',
       step: 0,
     });
+  // Undo, redo, and collaborator updates replace the committed score. Keep
+  // drafts through name, mix, and waveform updates on this same channel.
+  if (draftSource !== source) {
+    setDraftSource(source);
+    setPattern(initial);
+    setSelected((current) => ({
+      lane: current.lane,
+      step: Math.min(current.step, initial.steps - 1),
+    }));
+  }
   const committed = track?.drumPattern
       ? JSON.stringify(cleanDrumPattern(track.drumPattern))
       : '',
