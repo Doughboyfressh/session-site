@@ -82,9 +82,11 @@ window.fetch = async (input, init) => {
               ? 'expired'
               : members.some((m) => m.user === user)
                 ? 'joined'
-                : full
-                  ? 'full'
-                  : 'pending',
+                : n.kind === 'room_invite_joined'
+                  ? 'unavailable'
+                  : full
+                    ? 'full'
+                    : 'pending',
       }));
     return Response.json({ items, unread: items.length });
   }
@@ -108,7 +110,7 @@ window.fetch = async (input, init) => {
           inviteStatus:
             invitations.get(p.id)?.kind === 'room_invite_declined'
               ? 'declined'
-              : invitations.has(p.id)
+              : invitations.get(p.id)?.kind === 'room_invite'
                 ? 'pending'
                 : null,
         })),
@@ -146,13 +148,18 @@ window.fetch = async (input, init) => {
       body.response === 'declined'
         ? 'room_invite_declined'
         : 'room_invite_joined';
-    if (body.response === 'accepted')
+    if (body.response === 'accepted' && !members.some((m) => m.user === user))
       members.push({
         user,
         name: profiles.find((p) => p.id === user)?.name || user,
       });
     update();
     return Response.json({ status: body.response, id: room.id });
+  }
+  if (body.action === 'leaveRoom') {
+    members = members.filter((m) => m.user !== user);
+    update();
+    return Response.json({ ok: true });
   }
   return Response.json({ ok: true });
 };

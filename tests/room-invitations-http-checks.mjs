@@ -164,6 +164,50 @@ try {
     { action: 'inviteRoom', id: room.id, recipient: host.id },
     403,
   );
+  await action(guest, { action: 'leaveRoom', id: room.id });
+  const formerMember = await action(host, {
+    action: 'roomInviteCandidates',
+    id: room.id,
+    query: guest.username,
+  });
+  check(
+    formerMember.profiles[0].inviteStatus === null,
+    'A former member can be invited again',
+  );
+  await action(
+    guest,
+    { action: 'respondRoomInvite', id: notices[0].id, response: 'accepted' },
+    403,
+  );
+  await action(host, {
+    action: 'inviteRoom',
+    id: room.id,
+    recipient: guest.id,
+  });
+  await action(host, {
+    action: 'inviteRoom',
+    id: room.id,
+    recipient: guest.id,
+  });
+  const reissued = (await activity(guest)).items.filter(
+    (n) => n.resourceId === room.id,
+  );
+  check(
+    reissued.length === 1 &&
+      reissued[0].id === notices[0].id &&
+      reissued[0].inviteStatus === 'pending' &&
+      reissued[0].readAt === null,
+    'Re-inviting after voluntary departure restores one unread alert',
+  );
+  await action(guest, {
+    action: 'respondRoomInvite',
+    id: reissued[0].id,
+    response: 'accepted',
+  });
+  check(
+    (await request(guest, '/api/room/' + room.id)).members.length === 2,
+    'A re-invited guest can rejoin',
+  );
   await action(host, { action: 'removeMember', id: room.id, user: guest.id });
   await action(
     guest,
@@ -237,6 +281,11 @@ try {
     (await activity(guest)).items.find((n) => n.id === notice.id)
       .inviteStatus === 'declined',
     'Decline persists in PostgreSQL',
+  );
+  await action(
+    host,
+    { action: 'inviteRoom', id: room.id, recipient: guest.id },
+    409,
   );
   await action(host, { action: 'rotateInvite', id: room.id });
   await action(host, {

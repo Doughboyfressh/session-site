@@ -1367,6 +1367,101 @@ await act(
   { action: 'inviteRoom', id: inviteRoom.id, recipient: 'native-other' },
   403,
 );
+await act(inviteGuest, { action: 'leaveRoom', id: inviteRoom.id });
+candidates = await act(inviteHost, {
+  action: 'roomInviteCandidates',
+  id: inviteRoom.id,
+  query: '@native_guest',
+});
+assert.equal(candidates.profiles[0].inviteStatus, null);
+checks++;
+await act(
+  inviteGuest,
+  { action: 'respondRoomInvite', id: inviteNotice, response: 'accepted' },
+  403,
+);
+beforeBatch = () =>
+  db
+    .prepare('INSERT INTO user_blocks(user,target,created) VALUES (?,?,?)')
+    .run(inviteGuest, inviteHost, now);
+await act(
+  inviteHost,
+  { action: 'inviteRoom', id: inviteRoom.id, recipient: inviteGuest },
+  409,
+);
+assert.equal(
+  db.prepare('SELECT kind FROM notifications WHERE id=?').get(inviteNotice)
+    .kind,
+  'room_invite_joined',
+);
+checks++;
+db.prepare('DELETE FROM user_blocks WHERE user=? AND target=?').run(
+  inviteGuest,
+  inviteHost,
+);
+const reissueSeats = ['reissue-seat-2', 'reissue-seat-3', 'reissue-seat-4'];
+beforeBatch = () => {
+  for (const user of reissueSeats)
+    db.prepare('INSERT INTO members(room,user,seen) VALUES (?,?,?)').run(
+      inviteRoom.id,
+      user,
+      now,
+    );
+};
+await act(
+  inviteHost,
+  { action: 'inviteRoom', id: inviteRoom.id, recipient: inviteGuest },
+  409,
+);
+assert.equal(
+  db.prepare('SELECT kind FROM notifications WHERE id=?').get(inviteNotice)
+    .kind,
+  'room_invite_joined',
+);
+checks++;
+for (const user of reissueSeats)
+  db.prepare('DELETE FROM members WHERE room=? AND user=?').run(
+    inviteRoom.id,
+    user,
+  );
+await act(inviteHost, {
+  action: 'inviteRoom',
+  id: inviteRoom.id,
+  recipient: inviteGuest,
+});
+await act(inviteHost, {
+  action: 'inviteRoom',
+  id: inviteRoom.id,
+  recipient: inviteGuest,
+});
+invitations = (await socialGet(inviteGuest, 'view=activity')).items.filter(
+  (n) => n.resourceType === 'room_invite',
+);
+assert.equal(invitations.length, 1);
+checks++;
+assert.equal(invitations[0].id, inviteNotice);
+checks++;
+assert.equal(invitations[0].inviteStatus, 'pending');
+checks++;
+assert.equal(
+  invitations[0].readAt,
+  null,
+  're-inviting a former member makes the alert unread',
+);
+checks++;
+joinedRoom = await act(inviteGuest, {
+  action: 'respondRoomInvite',
+  id: inviteNotice,
+  response: 'accepted',
+});
+assert.equal(joinedRoom.id, inviteRoom.id);
+checks++;
+assert.equal(
+  db.prepare('SELECT COUNT(*) n FROM members WHERE room=?').get(inviteRoom.id)
+    .n,
+  2,
+);
+checks++;
 await act(inviteHost, {
   action: 'inviteRoom',
   id: inviteRoom.id,
@@ -1392,6 +1487,11 @@ assert.equal(
   'declined',
 );
 checks++;
+await act(
+  inviteHost,
+  { action: 'inviteRoom', id: inviteRoom.id, recipient: 'native-other' },
+  409,
+);
 await act(inviteHost, { action: 'rotateInvite', id: inviteRoom.id });
 await act(inviteHost, {
   action: 'inviteRoom',

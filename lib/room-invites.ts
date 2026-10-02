@@ -62,18 +62,22 @@ export async function roomInviteAction(
       return { id: notice.resourceId, status: 'joined' };
     const [_, joined] = await database().batch([
       database()
-        .prepare(`INSERT OR IGNORE INTO members (room,user,seen)
+        .prepare(
+          `INSERT OR IGNORE INTO members (room,user,seen)
         SELECT r.id,n.user,? FROM rooms r JOIN notifications n ON n.resourceId=r.id
         WHERE n.id=? AND n.user=? AND n.kind='room_invite' AND ${validInvite}
-          AND (SELECT COUNT(*) FROM members m WHERE m.room=r.id)<4`)
+          AND (SELECT COUNT(*) FROM members m WHERE m.room=r.id)<4`,
+        )
         .bind(now, id, uid, now),
       database()
-        .prepare(`UPDATE notifications SET kind='room_invite_joined',readAt=COALESCE(readAt,?)
+        .prepare(
+          `UPDATE notifications SET kind='room_invite_joined',readAt=COALESCE(readAt,?)
         WHERE id=? AND user=? AND kind='room_invite'
           AND EXISTS (SELECT 1 FROM rooms r JOIN members m ON m.room=r.id
             WHERE r.id=notifications.resourceId AND m.user=notifications.user
               AND r.owner=notifications.actor AND notifications.uniqueKey=('room-invite:' || r.id || ':' || r.invite || ':' || notifications.user)
-              AND r.expires>?)`)
+              AND r.expires>?)`,
+        )
         .bind(now, id, uid, now),
     ]);
     if (!joined.meta.changes) {
@@ -152,7 +156,26 @@ export async function roomInviteAction(
       'Invitations expired. Refresh invitations before sending another.',
       409,
     );
-  const [sent] = await database().batch([
+  const uniqueKey = keyPrefix(room) + recipient;
+  const message = `invited you to join “${room.title}”`;
+  const sendGuard = `EXISTS (SELECT 1 FROM rooms r WHERE r.id=? AND r.owner=? AND r.invite=? AND r.expires>?
+    AND (SELECT COUNT(*) FROM members m WHERE m.room=r.id)<4
+    AND NOT EXISTS (SELECT 1 FROM members m WHERE m.room=r.id AND m.user=?)
+    AND EXISTS (SELECT 1 FROM profiles p WHERE p.id=? AND p.visibility='public')
+    AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.user=? AND b.target=?) OR (b.user=? AND b.target=?)))`;
+  const sendValues = [
+    room.id,
+    uid,
+    room.invite,
+    now,
+    recipient,
+    recipient,
+    uid,
+    recipient,
+    recipient,
+    uid,
+  ];
+  const [sent, reissued] = await database().batch([
     prepareNotification(
       {
         user: recipient,
@@ -160,28 +183,32 @@ export async function roomInviteAction(
         kind: 'room_invite',
         resourceType: 'room_invite',
         resourceId: room.id,
-        body: `invited you to join “${room.title}”`,
-        uniqueKey: keyPrefix(room) + recipient,
+        body: message,
+        uniqueKey,
         created: now,
       },
-      `EXISTS (SELECT 1 FROM rooms r WHERE r.id=? AND r.owner=? AND r.invite=? AND r.expires>?
-      AND (SELECT COUNT(*) FROM members m WHERE m.room=r.id)<4
-      AND NOT EXISTS (SELECT 1 FROM members m WHERE m.room=r.id AND m.user=?)
-      AND EXISTS (SELECT 1 FROM profiles p WHERE p.id=? AND p.visibility='public')
-      AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.user=? AND b.target=?) OR (b.user=? AND b.target=?)))`,
-      room.id,
-      uid,
-      room.invite,
-      now,
-      recipient,
-      recipient,
-      uid,
-      recipient,
-      recipient,
-      uid,
+      sendGuard,
+      ...sendValues,
     ),
+    // A guest who voluntarily left can receive the same invitation again.
+    // Declined invitations stay declined, and every send guard still applies.
+    database()
+      .prepare(
+        `UPDATE notifications SET kind='room_invite',body=?,created=?,readAt=NULL
+        WHERE uniqueKey=? AND user=? AND actor=? AND resourceType='room_invite'
+          AND resourceId=? AND kind='room_invite_joined' AND ${sendGuard}`,
+      )
+      .bind(
+        message.slice(0, 240),
+        now,
+        uniqueKey,
+        recipient,
+        uid,
+        room.id,
+        ...sendValues,
+      ),
   ]);
-  if (!sent.meta.changes) {
+  if (!sent.meta.changes && !reissued.meta.changes) {
     const pending = await one(
       `SELECT n.id FROM notifications n JOIN rooms r ON r.id=n.resourceId
       WHERE n.user=? AND r.id=? AND r.owner=? AND n.kind='room_invite' AND ${validInvite}
