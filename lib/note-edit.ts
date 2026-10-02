@@ -13,6 +13,17 @@ export type NoteEdit =
   | { kind: 'velocity'; value: number }
   | { kind: 'delete' };
 
+export function noteTimingLocked(track: MixerTrack) {
+  return (
+    !!track.splitFrom ||
+    playlistClips(track).some(
+      (clip) =>
+        !!clip.trimStart ||
+        (!!clip.trimEnd && !(track.noteLoopBeats && clip.trimEnd === 0.5)),
+    )
+  );
+}
+
 export function applyNotePatch(
   data: Arrangement,
   originalBpm: number,
@@ -23,6 +34,7 @@ export function applyNotePatch(
   const signature = (t: MixerTrack) =>
     JSON.stringify([
       t.notes,
+      t.noteLoopBeats,
       t.sound,
       t.sample,
       t.offset,
@@ -112,8 +124,7 @@ export function checkNotes(
   }
   validateArrangement({ bpm, tracks: [{ ...track, notes }] }, true);
   if (
-    (playlistClips(track).some((clip) => clip.trimStart || clip.trimEnd) ||
-      track.splitFrom) &&
+    noteTimingLocked(track) &&
     (notes.length !== track.notes.length ||
       notes.some(
         (n, i) =>
@@ -126,7 +137,11 @@ export function checkNotes(
       'Use an untrimmed, unsplit instrument to change note timing or count. Pitch and velocity can still be edited here.',
     );
   const duration =
-    (Math.max(8, ...notes.map((n) => n.start + n.length)) * 60) / bpm + 0.5;
+    ((track.noteLoopBeats ??
+      Math.max(8, ...notes.map((n) => n.start + n.length))) *
+      60) /
+      bpm +
+    0.5;
   if (
     duration > 300 ||
     playlistClips(track).some(

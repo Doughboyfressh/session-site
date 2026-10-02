@@ -45,6 +45,9 @@ import {
 } from '@/components/ui/dialog';
 import { demos, genres, type Track } from '@/lib/catalog';
 import { context, trackFrom, bufferFor, playMix } from '@/lib/audio';
+import { originalArrangement } from '@/lib/originals';
+import { validateArrangement } from '@/lib/arrangement-validation';
+import { playlistTrackEnd } from '@/lib/playlist-clips';
 import {
   Pick,
   Avatar,
@@ -157,6 +160,7 @@ export default function SessionApp({
     roomDrafts = useRef(new Map<string, any>()),
     roomWorkspaceBusy = useRef(false),
     previewSeq = useRef(0),
+    previewAbort = useRef<AbortController | null>(null),
     noticeTimer = useRef<any>(null),
     draft = useRef<any>({
       title: 'Untitled session',
@@ -200,13 +204,17 @@ export default function SessionApp({
     deepLinkHandled = useRef(false),
     lastUnread = useRef(0);
   useEffect(() => {
-    if (deepLinkHandled.current || loading || !state.tracks.length) return;
-    const trackId = new URLSearchParams(window.location.search).get('track');
+    if (deepLinkHandled.current || loading) return;
+    const params = new URLSearchParams(window.location.search);
+    const trackId = params.get('track');
     deepLinkHandled.current = true;
     if (!trackId) return;
-    const track = state.tracks.find((t: Track) => t.id === trackId);
+    const track = [...state.tracks, ...demos].find(
+      (t: Track) => t.id === trackId,
+    );
     if (track) {
-      setDetail(track);
+      if (params.get('view') === 'Studio') useTrack(track);
+      else setDetail(track);
       window.history.replaceState(null, '', '/');
     }
   }, [loading, state.tracks]);
@@ -257,9 +265,11 @@ export default function SessionApp({
   }, [query]);
   function stopPreview() {
     previewSeq.current++;
+    previewAbort.current?.abort();
     playback.current?.stop();
     playback.current = null;
     setIsPlaying(false);
+    setPreviewBusy(false);
     setElapsed(0);
   }
   useEffect(() => {
@@ -456,6 +466,8 @@ export default function SessionApp({
     });
     return () => {
       workspaceRequest.current++;
+      previewSeq.current++;
+      previewAbort.current?.abort();
       playback.current?.stop();
       clearTimeout(noticeTimer.current);
     };
@@ -485,29 +497,36 @@ export default function SessionApp({
     }
     stopPreview();
     const seq = previewSeq.current;
+    const controller = new AbortController();
+    previewAbort.current = controller;
     setPlaying(t);
     setPreviewBusy(true);
     try {
       await context().resume();
-      const mt = trackFrom(t);
-      const b = await bufferFor(mt, t.bpm);
+      const score = originalArrangement(t.id, { preview: true });
+      const mt = score ? null : trackFrom(t);
+      if (mt) await bufferFor(mt, t.bpm, { signal: controller.signal });
       if (seq !== previewSeq.current) return;
-      setDuration(b.duration);
-      mt.trimStart = Math.min(seek, b.duration - 0.1);
-      const p = await playMix({ bpm: t.bpm, tracks: [mt] }, () => {
-        setIsPlaying(false);
-        setElapsed(0);
-      });
+      const p = await playMix(
+        score || { bpm: t.bpm, tracks: [mt!] },
+        () => {
+          setIsPlaying(false);
+          setElapsed(0);
+        },
+        { from: seek, signal: controller.signal },
+      );
       if (seq !== previewSeq.current) {
         p.stop();
         return;
       }
-      playback.current = { ...p, seek: mt.trimStart };
+      setDuration(p.duration);
+      playback.current = { ...p, seek: Math.min(seek, p.duration - 0.01) };
       setIsPlaying(true);
     } catch (e: any) {
-      notify(e.message);
+      if (seq === previewSeq.current && e.name !== 'AbortError')
+        notify(e.message);
     } finally {
-      setPreviewBusy(false);
+      if (seq === previewSeq.current) setPreviewBusy(false);
     }
   }
   function signIn() {
@@ -537,16 +556,34 @@ export default function SessionApp({
   function useTrack(t: Track) {
     if (t.permission !== 'collaborate' && t.owner !== user?.id)
       return notify('This track is available for listening only.');
-    const mt = trackFrom(t);
+    const score = originalArrangement(t.id, {
+      bpm: appendMode.current ? draft.current.data.bpm : t.bpm,
+    });
+    const added = score?.tracks || [trackFrom(t)];
     if (appendMode.current) {
-      if (draft.current.data.tracks.length >= 48)
+      if (draft.current.data.tracks.length + added.length > 48)
         return notify('This session has reached the track limit.');
+      try {
+        validateArrangement(
+          {
+            ...draft.current.data,
+            tracks: [...draft.current.data.tracks, ...added],
+          },
+          true,
+        );
+        if (added.some((t) => playlistTrackEnd(t) > 300))
+          throw new Error(
+            'This arrangement exceeds the five-minute limit at this tempo.',
+          );
+      } catch (e: any) {
+        return notify(e.message);
+      }
       draft.current = {
         ...draft.current,
         dirty: true,
         data: {
           ...draft.current.data,
-          tracks: [...draft.current.data.tracks, mt],
+          tracks: [...draft.current.data.tracks, ...added],
         },
       };
       appendMode.current = false;
@@ -554,7 +591,7 @@ export default function SessionApp({
       draft.current = {
         title: t.title + ' — working session',
         dirty: true,
-        data: { bpm: t.bpm, tracks: [mt] },
+        data: score || { bpm: t.bpm, tracks: added },
       };
     setStudioKey((k) => k + 1);
     setDetail(null);
@@ -1303,7 +1340,10 @@ export default function SessionApp({
         href="/signin-with-chatgpt?return_to=/"
         target="_top"
       >
-        {process.env.NEXT_PUBLIC_DEPLOYMENT_TARGET === 'vercel' ? 'Sign in to SESSION' : 'Sign in with ChatGPT'} <ArrowUpRight size={16} />
+        {process.env.NEXT_PUBLIC_DEPLOYMENT_TARGET === 'vercel'
+          ? 'Sign in to SESSION'
+          : 'Sign in with ChatGPT'}{' '}
+        <ArrowUpRight size={16} />
       </a>
     </div>
   );
@@ -1865,8 +1905,10 @@ export default function SessionApp({
                 />
               )}
               <p className="small-note">
-                SESSION Originals are synthesized starter loops you can use
-                freely. Community uploads follow their creator’s permissions.
+                48 new SESSION Originals across 24 genres: hear a preview, then
+                open the full arrangement as editable Studio layers. The ten
+                starter loops are still here. Community uploads follow their
+                creator’s permissions.
               </p>
             </>
           ) : view === 'Activity' ? (

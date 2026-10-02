@@ -30,6 +30,9 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import type { Track } from '@/lib/catalog';
+import { changeArrangementTempo } from '@/lib/arrangement-tempo';
+import { originalArrangement } from '@/lib/originals';
+import { validateArrangement } from '@/lib/arrangement-validation';
 import {
   context,
   trackFrom,
@@ -50,7 +53,7 @@ import ImportMidi from './import-midi';
 import { appendMidi } from '@/lib/midi-import';
 import { applyNotePatch } from '@/lib/note-edit';
 import { checkSampleBuffer, defaultSample } from '@/lib/sample-instrument';
-import { keepMidi, midiPlan } from '@/lib/midi-notes';
+import { keepMidi, midiPlan, defaultMidiRange } from '@/lib/midi-notes';
 import type { RestoredBank } from '@/lib/take-bank';
 import type { RecordedTake } from '@/lib/recording';
 import {
@@ -1121,15 +1124,29 @@ export default function Studio({
                   const epoch = editEpoch.current;
                   setBusy('Loading beat');
                   try {
-                    const added = await enrich(trackFrom(track));
+                    const score = originalArrangement(track.id, {
+                      bpm: tracksRef.current.bpm,
+                    });
+                    const added = score?.tracks || [
+                      await enrich(trackFrom(track)),
+                    ];
                     if (
                       !alive.current ||
                       !editAllowed.current ||
                       epoch !== editEpoch.current
                     )
                       return;
-                    mutate((d) => ({ ...d, tracks: [...d.tracks, added] }));
-                    setSelected(added.id);
+                    const next = {
+                      ...tracksRef.current,
+                      tracks: [...tracksRef.current.tracks, ...added],
+                    };
+                    validateArrangement(next, true);
+                    if (next.tracks.some((t) => playlistTrackEnd(t) > 300))
+                      throw new Error(
+                        'This arrangement exceeds the five-minute limit at this tempo.',
+                      );
+                    mutate(() => next);
+                    setSelected(added[0].id);
                     setLibrary(false);
                   } catch (e: any) {
                     notify(e.message);
@@ -1357,20 +1374,21 @@ export default function Studio({
                 min="40"
                 max="240"
                 value={data.bpm}
-                onChange={(e) =>
-                  mutate((d) => ({
-                    ...d,
-                    bpm: Math.max(
-                      40,
-                      Math.min(240, Number(e.target.value) || 92),
-                    ),
-                    tracks: d.tracks.map((t) =>
-                      t.demo || t.sequence || t.notes
-                        ? { ...t, peaks: undefined, duration: undefined }
-                        : t,
-                    ),
-                  }))
-                }
+                onChange={(e) => {
+                  try {
+                    mutate((d) =>
+                      changeArrangementTempo(
+                        d,
+                        Math.max(
+                          40,
+                          Math.min(240, Number(e.target.value) || 92),
+                        ),
+                      ),
+                    );
+                  } catch (e: any) {
+                    notify(e.message);
+                  }
+                }}
               />{' '}
               BPM
             </label>
@@ -2041,21 +2059,13 @@ export default function Studio({
               onRecord={() => {
                 if (!editAllowed.current || structuralLocked || !focus?.notes)
                   return;
-                const start = Math.max(
-                  0,
-                  ((position - focus.offset) * data.bpm) / 60,
+                const { start, beats } = defaultMidiRange(
+                  focus,
+                  data.bpm,
+                  position,
                 );
                 try {
-                  midiPlan(
-                    focus,
-                    data.bpm,
-                    start,
-                    Math.min(
-                      8,
-                      256 - start,
-                      ((300 - focus.offset) * data.bpm) / 60 - start,
-                    ),
-                  );
+                  midiPlan(focus, data.bpm, start, beats);
                   setMidiSnapshot(
                     structuredClone({ data, target: focus, start }),
                   );

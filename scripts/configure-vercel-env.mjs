@@ -12,9 +12,15 @@ envs.push({key:'APP_URL',value:'https://session-site-eosin.vercel.app',target:['
 const input = path.resolve('outputs/deployment-secret-env.json');
 fs.mkdirSync('outputs',{recursive:true});
 try {
-  fs.writeFileSync(input,JSON.stringify(envs));
-  execFileSync(process.execPath,[process.argv[2],'api',`/v10/projects/${project.projectId}/env?upsert=true&teamId=${project.orgId}`,
-    '-X','POST','--input',input],{encoding:'utf8',stdio:['ignore','pipe','pipe']});
+  // The CLI serializes object bodies reliably; submit each variable separately.
+  for (const env of envs) {
+    fs.writeFileSync(input,JSON.stringify(env));
+    const output = execFileSync(process.execPath,[process.argv[2],'api',`/v10/projects/${project.projectId}/env?upsert=true&teamId=${project.orgId}`,
+      '-X','POST','--header','Content-Type: application/json','--input',input,'--raw'],
+      {encoding:'utf8',stdio:['ignore','pipe','pipe']});
+    const result = JSON.parse(output);
+    if (result.failed?.length) throw new Error('Vercel did not save ' + env.key);
+  }
   console.log('Configured encrypted production variables: ' + envs.map(v=>v.key).join(', '));
 } catch (error) {
   console.error('Environment setup failed: ' + (error.stderr?.toString() || error.message));

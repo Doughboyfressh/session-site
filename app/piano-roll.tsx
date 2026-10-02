@@ -5,6 +5,7 @@ import SampleControls from './sample-controls';
 import { useNoteGesture } from './use-note-gesture';
 import {
   checkNotes,
+  noteTimingLocked,
   editNotes,
   repeatSpan,
   type NoteEdit,
@@ -12,6 +13,7 @@ import {
 import { Plus, Download, Trash2, Music2, Play } from 'lucide-react';
 import { Pick, Range } from './helpers';
 import { midiFile, download, type MixerTrack, type Note } from '@/lib/audio';
+import { SOUNDS, SOUND_LABELS, type Sound } from '@/lib/instruments';
 const names = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
 export function noteName(p: number) {
   return names[p % 12] + (Math.floor(p / 12) - 1);
@@ -60,11 +62,14 @@ export default function PianoRoll({
       selected.length === 1
         ? notes.find((n) => n.id === selected[0])
         : undefined,
-    beats = Math.max(
-      8,
-      Math.ceil(Math.max(0, ...notes.map((n) => n.start + n.length)) / 4) * 4 +
-        4,
-    ),
+    beats =
+      track?.noteLoopBeats ??
+      Math.max(
+        8,
+        Math.ceil(Math.max(0, ...notes.map((n) => n.start + n.length)) / 4) *
+          4 +
+          4,
+      ),
     bottom = Number(keyboardRange),
     top = bottom + 24,
     rows = Array.from({ length: 25 }, (_, i) => top - i);
@@ -264,15 +269,7 @@ export default function PianoRoll({
             onChange={(v) => {
               if (
                 disabled ||
-                ![
-                  'keys',
-                  'bass',
-                  'pad',
-                  'lead',
-                  'pluck',
-                  'organ',
-                  'bell',
-                ].includes(v) ||
+                !SOUNDS.includes(v as Sound) ||
                 (!track.sample && v === (track.sound || 'keys'))
               )
                 return;
@@ -293,13 +290,7 @@ export default function PianoRoll({
               ...(track.sample
                 ? [{ value: 'sample', label: 'Your sample' }]
                 : []),
-              { value: 'keys', label: 'Soft keys' },
-              { value: 'bass', label: 'Analog bass' },
-              { value: 'pad', label: 'Warm pad' },
-              { value: 'lead', label: 'Bright lead' },
-              { value: 'pluck', label: 'Plucked synth' },
-              { value: 'organ', label: 'Electric organ' },
-              { value: 'bell', label: 'Glass bell' },
+              ...SOUNDS.map((value) => ({ value, label: SOUND_LABELS[value] })),
             ]}
           />
           <Pick
@@ -427,10 +418,16 @@ export default function PianoRoll({
               instrument length; volume automation stays at its project times.
             </p>
           </details>
-          {(track.trimStart || track.trimEnd || track.splitFrom) && (
+          {noteTimingLocked(track) && (
             <p>
               This clip is trimmed or split. Pitch and velocity edits are
               available; use an untrimmed, unsplit instrument for timing edits.
+            </p>
+          )}
+          {track.noteLoopBeats && (
+            <p className="small-note">
+              {track.noteLoopBeats / 4}-bar loop · Note edits repeat across this
+              instrument’s clips.
             </p>
           )}
           {selected.length > 0 && (

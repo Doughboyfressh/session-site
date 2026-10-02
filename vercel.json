@@ -1,6 +1,7 @@
 {
   "framework": "nextjs",
   "buildCommand": "npm run build:vercel",
+  "outputDirectory": ".vercel-next",
   "installCommand": "npm ci",
   "regions": ["iad1"]
 }

@@ -115,14 +115,7 @@ export function validateArrangement(d: any, draft = false) {
     if (t.fileId && t.notes && !t.sample)
       fail('Choose a sample instrument before combining audio and notes.');
     if (t.drumPattern !== undefined) {
-      if (
-        t.fileId ||
-        t.sample ||
-        t.notes ||
-        t.demo ||
-        t.sequence ||
-        t.sound
-      )
+      if (t.fileId || t.sample || t.notes || t.demo || t.sequence || t.sound)
         fail('Choose one source for this drum channel.');
       try {
         validateDrumPattern(t.drumPattern);
@@ -191,6 +184,14 @@ export function validateArrangement(d: any, draft = false) {
         }
       }
     }
+    if (
+      t.noteLoopBeats !== undefined &&
+      (!t.notes ||
+        !Number.isInteger(t.noteLoopBeats) ||
+        t.noteLoopBeats < 8 ||
+        t.noteLoopBeats > 256)
+    )
+      fail('Instrument loop length must be 8–256 beats.');
     if (t.notes) {
       if (!Array.isArray(t.notes) || t.notes.length > 256)
         fail('Use up to 256 notes per instrument.');
@@ -207,6 +208,8 @@ export function validateArrangement(d: any, draft = false) {
           n.length < 0.01 ||
           n.length > 32 ||
           !Number.isFinite(n.velocity) ||
+          (t.noteLoopBeats !== undefined &&
+            n.start + n.length > t.noteLoopBeats + 1e-8) ||
           n.velocity < 0 ||
           n.velocity > 1
         )

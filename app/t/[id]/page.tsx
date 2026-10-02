@@ -1,5 +1,6 @@
 import { one, all } from '@/lib/server';
 import TrackPermalink from '@/app/track-permalink';
+import { demos } from '@/lib/catalog';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,13 @@ async function resolveParams(params: PageParams['params']) {
 }
 
 async function load(id: string) {
+  const original = demos.find((t) => t.id === id);
+  if (original)
+    return {
+      track: original,
+      creator: { name: 'SESSION Originals' },
+      comments: [],
+    };
   const track = await one(
     `SELECT t.*,COALESCE(p.name,'Independent creator') AS creator,
             (SELECT COUNT(*) FROM saved s WHERE s.track=t.id) AS likes,

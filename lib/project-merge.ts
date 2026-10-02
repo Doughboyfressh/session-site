@@ -145,7 +145,15 @@ export function mergeProject(
         .filter((k) => (t as any)[k] !== undefined)
         .map((k) => [k, (t as any)[k]]),
     );
-  const sourceKeys = ['fileId', 'sample', 'notes', 'sound', 'demo', 'sequence'];
+  const sourceKeys = [
+    'fileId',
+    'sample',
+    'notes',
+    'noteLoopBeats',
+    'sound',
+    'demo',
+    'sequence',
+  ];
   const source = (t: MixerTrack) =>
     Object.fromEntries(
       sourceKeys
@@ -167,8 +175,7 @@ export function mergeProject(
         const [baseClip, localClip, remoteClip] = maps.map((map) =>
             map.get(id),
           ),
-          clipLabel =
-            (localClip || remoteClip || baseClip)?.name || 'clip';
+          clipLabel = (localClip || remoteClip || baseClip)?.name || 'clip';
         if (baseClip && localClip && remoteClip) {
           const merged = { id } as ClipPlacement;
           for (const key of [
