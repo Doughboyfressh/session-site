@@ -150,6 +150,7 @@ export default function SessionApp({
       title: string;
     } | null>(null),
     [socialVersion, setSocialVersion] = useState(0),
+    [collaborationTarget, setCollaborationTarget] = useState(''),
     [deleteProject, setDeleteProject] = useState(''),
     [studioKey, setStudioKey] = useState(0);
   const recovery = useDraftRecovery(user?.id);
@@ -278,7 +279,7 @@ export default function SessionApp({
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, []);
-  function go(next: string) {
+  function go(next: string, collaborationId = '') {
     if (
       (view === 'Room' && roomWorkspaceBusy.current) ||
       (view === 'Studio' && studioWorkspaceBusy.current)
@@ -289,6 +290,7 @@ export default function SessionApp({
       return false;
     }
     if (next === 'Studio' || next === 'Room') stopPreview();
+    if (next === 'Collaborations') setCollaborationTarget(collaborationId);
     workspaceRequest.current++;
     setView(next);
     const url = new URL(window.location.href);
@@ -1916,7 +1918,7 @@ export default function SessionApp({
                 onUnreadChange={updateUnreadNotifications}
                 onOpen={(item) => {
                   if (item.resourceType === 'collaboration')
-                    go('Collaborations');
+                    go('Collaborations', item.resourceId);
                   else if (item.resourceType === 'room') {
                     setRoomId(item.resourceId);
                     go('Room');
@@ -1949,6 +1951,7 @@ export default function SessionApp({
               <CollaborationInbox
                 key={socialVersion}
                 userId={user.id}
+                requestedCollaborationId={collaborationTarget}
                 notify={notify}
                 onChanged={() => void refresh()}
               />

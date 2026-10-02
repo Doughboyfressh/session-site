@@ -22,6 +22,8 @@ SESSION is a browser music studio with private projects, community features, and
 
 ## Lessons
 
+- 2026-10-02 — Tie editor drafts to committed scores, release gesture activity on interruption, and keep asynchronous search/conversation reads owned by the current query, user, and selection.
+
 - 2026-10-02 — Cancel asynchronous scene initialization during effect cleanup even before the renderer exists; verify one canvas under StrictMode, reduced-motion resizing, fallback, and readable hero text.
 
 - 2026-10-01 — Preserve current mute/camera intent before publishing replacement tracks; test toggles, overlapping switches, disconnects, and replacement failures with synthetic media.
