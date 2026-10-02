@@ -1,5 +1,5 @@
 'use client';
-import { workspaceSignInHref } from '@/lib/workspace-entry';
+import { WorkspaceSignInLink } from './workspace-sign-in-link';
 import { useEffect, useRef, useState } from 'react';
 import {
   Upload,
@@ -911,16 +911,9 @@ export function TrackDetail({
                   </button>
                 </form>
               ) : (
-                <a
-                  href={workspaceSignInHref()}
-                  onClick={(event) => {
-                    event.currentTarget.href = workspaceSignInHref(window.location);
-                  }}
-                  target="_top"
-                  className="button secondary"
-                >
+                <WorkspaceSignInLink className="button secondary">
                   Sign in to join the conversation
-                </a>
+                </WorkspaceSignInLink>
               )}
               {comments.map((c) => (
                 <div className="comment" key={c.id}>

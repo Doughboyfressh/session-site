@@ -22,6 +22,8 @@ SESSION is a browser music studio with private projects, community features, and
 
 ## Lessons
 
+- 2026-10-01 — Verify direct workspace links under React StrictMode; avoid one-shot initialization refs when effect cleanup invalidates the first request.
+
 - 2026-10-01 — Test invitation actions after voluntary departure as well as removal; every enabled Invite action must restore a usable unread alert under the same permission guards.
 
 - 2026-10-01 — Select exported notification fields explicitly so internal invitation keys never disclose a room's bearer token.

@@ -29,6 +29,7 @@ const checks = [
     'lib/workspace-entry.ts',
     'app/landing-page.tsx',
     'app/workspace-page.tsx',
+    'app/workspace-sign-in-link.tsx',
     'app/page.tsx',
     'app/app/page.tsx',
     'app/room-invitations.tsx',

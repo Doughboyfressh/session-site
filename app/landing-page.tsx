@@ -13,7 +13,7 @@ import {
 import { demos, genres } from '@/lib/catalog';
 import './landing.css';
 
-const featured = ['BRICKLIGHT', 'AFTER HOURS', 'LOGWOOD'].flatMap((title) => {
+const featured = ['BRICKLIGHT', 'VELVET WINDOW', 'LOGWOOD'].flatMap((title) => {
   const track = demos.find((candidate) => candidate.title === title);
   return track ? [track] : [];
 });
@@ -437,9 +437,10 @@ export default function LandingPage() {
                 Can I edit the original beats?<span aria-hidden="true">+</span>
               </summary>
               <p>
-                Yes. Open a SESSION Original in Studio to work with its
+                The 48 new SESSION Originals open in Studio with separate
                 instrument, drum, and clip layers. Change the tempo, reshape the
-                arrangement, and add your own recordings.
+                arrangement, and add your own recordings. The ten starter beats
+                open as audio clips.
               </p>
             </details>
             <details>
