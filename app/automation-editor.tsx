@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { ClipboardPaste, Copy, Plus, Trash2 } from 'lucide-react';
 import { Pick } from './helpers';
@@ -28,6 +28,11 @@ type DragState = {
   sourceIndex: number;
   source: AutomationPoint[];
   points: AutomationPoint[];
+};
+type PendingDrag = DragState & {
+  sourceKey: string;
+  element: SVGSVGElement;
+  onActivity?: (active: boolean) => void;
 };
 
 export default function AutomationEditor({
@@ -60,6 +65,78 @@ export default function AutomationEditor({
   } | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const graph = useRef<SVGSVGElement>(null);
+  const pendingDrag = useRef<PendingDrag | null>(null);
+  const savedPoints = track
+    ? sortedAutomation(automationLane(track, target))
+    : [];
+  const sourceKey = JSON.stringify([
+    track?.id,
+    target,
+    savedPoints,
+    length,
+    bpm,
+    snap,
+  ]);
+  const currentDefault = clampAutomationValue(
+    target,
+    target === 'volume' ? 1 : Number(track?.[target] || 0),
+  );
+  const releaseDrag = useCallback((updateState = true) => {
+    const pending = pendingDrag.current;
+    if (!pending) return null;
+    // Clear ownership before releasing capture, which can emit another finish.
+    pendingDrag.current = null;
+    if (updateState) setDrag(null);
+    try {
+      if (pending.element.hasPointerCapture(pending.pointerId))
+        pending.element.releasePointerCapture(pending.pointerId);
+    } catch {
+      // A detached graph may already have lost its pointer capture.
+    }
+    pending.onActivity?.(false);
+    return pending;
+  }, []);
+  const cancelDrag = useCallback(
+    (updateState = true, replacementValue?: number) => {
+      const pending = releaseDrag(updateState);
+      if (!pending || !updateState) return pending;
+      const point =
+        replacementValue === undefined
+          ? pending.source[pending.sourceIndex]
+          : undefined;
+      setSelectedTime(point?.time ?? null);
+      setTime(point?.time ?? 0);
+      setValue(point?.value ?? replacementValue ?? 1);
+      setCurve(point?.curve || 'linear');
+      setMessage('Automation gesture canceled.');
+      return pending;
+    },
+    [releaseDrag],
+  );
+  useEffect(() => {
+    if (disabled || pendingDrag.current?.sourceKey !== sourceKey)
+      cancelDrag(
+        true,
+        pendingDrag.current?.sourceKey !== sourceKey
+          ? currentDefault
+          : undefined,
+      );
+  }, [disabled, sourceKey, currentDefault, cancelDrag]);
+  useEffect(() => {
+    const cancel = () => cancelDrag();
+    const hidden = () => {
+      if (document.hidden) cancel();
+    };
+    window.addEventListener('blur', cancel);
+    window.addEventListener('resize', cancel);
+    document.addEventListener('visibilitychange', hidden);
+    return () => {
+      window.removeEventListener('blur', cancel);
+      window.removeEventListener('resize', cancel);
+      document.removeEventListener('visibilitychange', hidden);
+      cancelDrag(false);
+    };
+  }, [cancelDrag]);
 
   if (!track)
     return (
@@ -70,7 +147,6 @@ export default function AutomationEditor({
 
   const currentTrack = track;
   const spec = AUTOMATION_SPECS[target];
-  const savedPoints = sortedAutomation(automationLane(currentTrack, target));
   const points =
     drag?.trackId === currentTrack.id && drag.target === target
       ? drag.points
@@ -210,39 +286,64 @@ export default function AutomationEditor({
   ) {
     event.preventDefault();
     event.stopPropagation();
-    if (disabled) return;
-    graph.current?.setPointerCapture(event.pointerId);
-    selectPoint(point);
-    setDrag({
+    if (
+      disabled ||
+      pendingDrag.current ||
+      event.button !== 0 ||
+      !event.isPrimary
+    )
+      return;
+    const element = graph.current;
+    if (!element) return;
+    try {
+      element.setPointerCapture(event.pointerId);
+    } catch {
+      return;
+    }
+    const pending: PendingDrag = {
       trackId: currentTrack.id,
       target,
       pointerId: event.pointerId,
       sourceIndex: index,
       source: savedPoints,
       points: savedPoints,
-    });
+      sourceKey,
+      element,
+      onActivity: onGestureActivity,
+    };
+    pendingDrag.current = pending;
+    selectPoint(point);
+    setDrag(pending);
     onGestureActivity?.(true);
   }
 
   function moveDrag(event: ReactPointerEvent<SVGSVGElement>) {
+    const pending = pendingDrag.current;
+    if (!pending || event.pointerId !== pending.pointerId) return;
     if (
-      !drag ||
-      event.pointerId !== drag.pointerId ||
-      drag.trackId !== currentTrack.id ||
-      drag.target !== target
-    )
+      disabled ||
+      pending.sourceKey !== sourceKey ||
+      !pending.element.hasPointerCapture(pending.pointerId)
+    ) {
+      cancelDrag(
+        true,
+        pending.sourceKey !== sourceKey ? currentDefault : undefined,
+      );
       return;
+    }
     event.preventDefault();
     const nextPoint = {
-      ...drag.source[drag.sourceIndex],
+      ...pending.source[pending.sourceIndex],
       ...graphPoint(event.clientX, event.clientY),
     };
-    const next = drag.source.filter(
+    const next = pending.source.filter(
       (point, index) =>
-        index !== drag.sourceIndex && point.time !== nextPoint.time,
+        index !== pending.sourceIndex && point.time !== nextPoint.time,
     );
     next.push(nextPoint);
-    setDrag({ ...drag, points: sortedAutomation(next) });
+    const updated = { ...pending, points: sortedAutomation(next) };
+    pendingDrag.current = updated;
+    setDrag(updated);
     setSelectedTime(nextPoint.time);
     setTime(nextPoint.time);
     setValue(nextPoint.value);
@@ -253,36 +354,30 @@ export default function AutomationEditor({
     event: ReactPointerEvent<SVGSVGElement>,
     commit: boolean,
   ) {
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    if (graph.current?.hasPointerCapture(event.pointerId))
-      graph.current.releasePointerCapture(event.pointerId);
-    const pending = drag;
-    setDrag(null);
-    onGestureActivity?.(false);
-    if (!commit) {
-      if (
-        pending.trackId === currentTrack.id &&
-        pending.target === target &&
-        pending.source[pending.sourceIndex]
-      ) {
-        selectPoint(pending.source[pending.sourceIndex]);
-        setMessage('Automation gesture canceled.');
-      }
+    const current = pendingDrag.current;
+    if (!current || event.pointerId !== current.pointerId) return;
+    const captured = current.element.hasPointerCapture(current.pointerId);
+    if (!commit || !captured || disabled || current.sourceKey !== sourceKey) {
+      cancelDrag(
+        true,
+        current.sourceKey !== sourceKey ? currentDefault : undefined,
+      );
       return;
     }
-    if (
-      pending.trackId === currentTrack.id &&
-      pending.target === target
-    ) {
+    const pending = releaseDrag();
+    if (!pending) return;
+    if (pending.trackId === currentTrack.id && pending.target === target) {
       if (patchLane(pending.points))
         setMessage('Automation gesture saved as one edit.');
     }
   }
 
   function changeTarget(next: string) {
+    const canceled = cancelDrag();
     const lane = next as AutomationTarget;
     setTarget(lane);
     setSelectedTime(null);
+    if (canceled) setTime(0);
     setValue(targetDefault(lane));
     setCurve('linear');
     setMessage('');
@@ -426,6 +521,7 @@ export default function AutomationEditor({
           onPointerMove={moveDrag}
           onPointerUp={(event) => finishDrag(event, true)}
           onPointerCancel={(event) => finishDrag(event, false)}
+          onLostPointerCapture={(event) => finishDrag(event, false)}
         >
           <rect
             x={plot.left}
