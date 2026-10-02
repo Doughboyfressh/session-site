@@ -123,11 +123,15 @@ async function socialFetch<T = Record<string, unknown>>(
   return payload as T;
 }
 
-async function socialAction(body: Record<string, unknown>) {
+async function socialAction(
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+) {
   return socialFetch('/api/social', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal,
   });
 }
 
@@ -372,10 +376,24 @@ export function ActivityView({
 
 export function CollaborationInbox({
   userId,
+  ...props
+}: {
+  userId: string;
+  requestedCollaborationId?: string;
+  notify: (message: string) => void;
+  onChanged: () => void;
+}) {
+  return <CollaborationInboxContent key={userId} userId={userId} {...props} />;
+}
+
+function CollaborationInboxContent({
+  userId,
+  requestedCollaborationId,
   notify,
   onChanged,
 }: {
   userId: string;
+  requestedCollaborationId?: string;
   notify: (message: string) => void;
   onChanged: () => void;
 }) {
@@ -390,6 +408,20 @@ export function CollaborationInbox({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const session = useRef<AbortController | null>(null);
+  const inboxController = useRef<AbortController | null>(null);
+  const threadController = useRef<AbortController | null>(null);
+  const inboxVersion = useRef(0);
+  const threadVersion = useRef(0);
+  const busyRef = useRef(false);
+  const selection = useRef({
+    id: '',
+    folder: 'incoming' as 'incoming' | 'sent',
+    initialized: false,
+  });
+  const target = useRef(requestedCollaborationId);
+  const pendingTarget = useRef(requestedCollaborationId);
+  const targetError = useRef('');
 
   const visible = useMemo(
     () =>
@@ -404,93 +436,228 @@ export function CollaborationInbox({
   const messages = threads[selectedId] || [];
   const draft = drafts[selectedId] || { message: '', clientId: '' };
 
-  async function loadInbox(signal?: AbortSignal) {
+  const cancelThread = useCallback(() => {
+    threadVersion.current++;
+    threadController.current?.abort();
+    threadController.current = null;
+  }, []);
+
+  const cancelReads = useCallback(() => {
+    inboxVersion.current++;
+    inboxController.current?.abort();
+    inboxController.current = null;
+    cancelThread();
+  }, [cancelThread]);
+
+  const loadInbox = useCallback(async () => {
+    const scope = session.current;
+    if (!scope || scope.signal.aborted) return;
+    const version = ++inboxVersion.current;
+    inboxController.current?.abort();
+    const controller = new AbortController();
+    inboxController.current = controller;
+    const current = () =>
+      session.current === scope &&
+      !scope.signal.aborted &&
+      !controller.signal.aborted &&
+      version === inboxVersion.current;
     try {
       const data = await socialFetch<InboxResponse>('/api/social?view=inbox', {
-        signal,
+        signal: controller.signal,
       });
-      setRequests(data.requests);
-      setBlocks(data.blocks || []);
-      setSelectedId((current) =>
-        data.requests.some((request: Collaboration) => request.id === current)
-          ? current
-          : data.requests.find(
-              (request: Collaboration) => request.recipient === userId,
-            )?.id ||
-            data.requests[0]?.id ||
-            '',
+      if (!current()) return;
+      const authorized = data.requests.filter(
+        (request) => request.sender === userId || request.recipient === userId,
       );
-      setError('');
+      const previous = selection.current;
+      let next = previous;
+      if (pendingTarget.current) {
+        const requested = authorized.find(
+          (request) => request.id === pendingTarget.current,
+        );
+        next = {
+          id: requested?.id || '',
+          folder: requested?.sender === userId ? 'sent' : 'incoming',
+          initialized: true,
+        };
+        targetError.current = requested
+          ? ''
+          : 'This collaboration is no longer available.';
+        pendingTarget.current = undefined;
+      } else if (!previous.initialized) {
+        const first =
+          authorized.find((request) => request.recipient === userId) ||
+          authorized[0];
+        next = {
+          id: first?.id || '',
+          folder: first?.sender === userId ? 'sent' : 'incoming',
+          initialized: true,
+        };
+      } else if (
+        previous.id &&
+        !authorized.some((request) => request.id === previous.id)
+      ) {
+        next = {
+          ...previous,
+          id:
+            authorized.find((request) =>
+              previous.folder === 'incoming'
+                ? request.recipient === userId
+                : request.sender === userId,
+            )?.id || '',
+        };
+      }
+      selection.current = next;
+      if (next.id !== previous.id) cancelThread();
+      setRequests(authorized);
+      setBlocks(data.blocks || []);
+      setSelectedId(next.id);
+      setFolder(next.folder);
+      setError(targetError.current);
     } catch (cause: unknown) {
-      if (!isAbortError(cause)) setError(errorMessage(cause));
+      if (current() && !isAbortError(cause)) setError(errorMessage(cause));
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
+      if (inboxController.current === controller)
+        inboxController.current = null;
     }
-  }
+  }, [cancelThread, userId]);
 
-  async function loadThread(id: string, signal?: AbortSignal) {
+  const loadThread = useCallback(async (id: string) => {
+    const scope = session.current;
+    if (!id || !scope || scope.signal.aborted) return;
+    const version = ++threadVersion.current;
+    threadController.current?.abort();
+    const controller = new AbortController();
+    threadController.current = controller;
+    const current = () =>
+      session.current === scope &&
+      !scope.signal.aborted &&
+      !controller.signal.aborted &&
+      version === threadVersion.current &&
+      selection.current.id === id;
     try {
       const data = await socialFetch<ThreadResponse>(
         '/api/social?view=thread&id=' + encodeURIComponent(id),
-        { signal },
+        { signal: controller.signal },
       );
+      if (!current()) return;
       setThreads((current) => ({ ...current, [id]: data.messages }));
     } catch (cause: unknown) {
-      if (!isAbortError(cause)) setError(errorMessage(cause));
+      if (current() && !isAbortError(cause)) setError(errorMessage(cause));
+    } finally {
+      if (threadController.current === controller)
+        threadController.current = null;
     }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    session.current = controller;
+    const refresh = () => {
+      if (document.visibilityState === 'hidden' || busyRef.current) return;
+      // A slow read can finish before the next tick; never queue duplicate polls.
+      if (!inboxController.current) void loadInbox();
+      if (!threadController.current && selection.current.id)
+        void loadThread(selection.current.id);
+    };
+    void Promise.resolve().then(() => {
+      if (!controller.signal.aborted) void loadInbox();
+    });
+    const timer = setInterval(refresh, 10000);
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      controller.abort();
+      cancelReads();
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [cancelReads, loadInbox, loadThread]);
+
+  useEffect(() => {
+    if (target.current === requestedCollaborationId) return;
+    target.current = requestedCollaborationId;
+    pendingTarget.current = requestedCollaborationId;
+    targetError.current = '';
+    const scope = session.current;
+    void Promise.resolve().then(() => {
+      if (
+        requestedCollaborationId &&
+        target.current === requestedCollaborationId &&
+        scope &&
+        session.current === scope &&
+        !scope.signal.aborted
+      )
+        void loadInbox();
+    });
+  }, [loadInbox, requestedCollaborationId]);
+
+  useEffect(() => {
+    const scope = session.current;
+    void Promise.resolve().then(() => {
+      if (
+        selectedId &&
+        selection.current.id === selectedId &&
+        scope &&
+        session.current === scope &&
+        !scope.signal.aborted
+      )
+        void loadThread(selectedId);
+    });
+    return cancelThread;
+  }, [cancelThread, loadThread, selectedId]);
+
+  function selectRequest(id: string, nextFolder = selection.current.folder) {
+    selection.current = { id, folder: nextFolder, initialized: true };
+    pendingTarget.current = undefined;
+    targetError.current = '';
+    setError('');
+    setFolder(nextFolder);
+    setSelectedId(id);
   }
 
-  useEffect(() => {
-    const controller = new AbortController();
-    void socialFetch<InboxResponse>('/api/social?view=inbox', {
-      signal: controller.signal,
-    })
-      .then((data) => {
-        setRequests(data.requests);
-        setBlocks(data.blocks || []);
-        setSelectedId(
-          data.requests.find((request) => request.recipient === userId)?.id ||
-            data.requests[0]?.id ||
-            '',
-        );
-        setError('');
-      })
-      .catch((cause: unknown) => {
-        if (!isAbortError(cause)) setError(errorMessage(cause));
-      })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [userId]);
+  function beginAction() {
+    const scope = session.current;
+    if (busyRef.current || !scope || scope.signal.aborted) return null;
+    busyRef.current = true;
+    cancelReads();
+    setBusy(true);
+    return scope;
+  }
 
-  useEffect(() => {
-    if (!selectedId) return;
-    const controller = new AbortController();
-    void socialFetch<ThreadResponse>(
-      '/api/social?view=thread&id=' + encodeURIComponent(selectedId),
-      { signal: controller.signal },
-    )
-      .then((data) =>
-        setThreads((current) => ({
-          ...current,
-          [selectedId]: data.messages,
-        })),
-      )
-      .catch((cause: unknown) => {
-        if (!isAbortError(cause)) setError(errorMessage(cause));
-      });
-    return () => controller.abort();
-  }, [selectedId]);
+  function actionCurrent(scope: AbortController) {
+    return session.current === scope && !scope.signal.aborted;
+  }
+
+  async function refreshAfterAction(scope: AbortController) {
+    if (!actionCurrent(scope)) return;
+    await loadInbox();
+    if (actionCurrent(scope)) await loadThread(selection.current.id);
+  }
+
+  function finishAction(scope: AbortController) {
+    if (!actionCurrent(scope)) return;
+    busyRef.current = false;
+    setBusy(false);
+  }
 
   async function changeStatus(status: 'accepted' | 'declined' | 'closed') {
     if (!selected || busy) return;
-    setBusy(true);
+    const scope = beginAction();
+    if (!scope) return;
     try {
-      await socialAction({
-        action: 'collaborationStatus',
-        id: selected.id,
-        status,
-      });
-      await loadInbox();
+      await socialAction(
+        {
+          action: 'collaborationStatus',
+          id: selected.id,
+          status,
+        },
+        scope.signal,
+      );
+      await refreshAfterAction(scope);
+      if (!actionCurrent(scope)) return;
       onChanged();
       notify(
         status === 'accepted'
@@ -500,9 +667,9 @@ export function CollaborationInbox({
             : 'Conversation closed.',
       );
     } catch (cause: unknown) {
-      setError(errorMessage(cause));
+      if (actionCurrent(scope)) setError(errorMessage(cause));
     } finally {
-      setBusy(false);
+      finishAction(scope);
     }
   }
 
@@ -511,26 +678,32 @@ export function CollaborationInbox({
     if (!selected || !draft.message.trim() || !draft.clientId || busy) return;
     const requestId = selected.id;
     const outgoing = draft;
-    setBusy(true);
+    const scope = beginAction();
+    if (!scope) return;
     try {
-      await socialAction({
-        action: 'message',
-        id: requestId,
-        message: outgoing.message,
-        clientId: outgoing.clientId,
-      });
+      await socialAction(
+        {
+          action: 'message',
+          id: requestId,
+          message: outgoing.message,
+          clientId: outgoing.clientId,
+        },
+        scope.signal,
+      );
+      if (!actionCurrent(scope)) return;
       setDrafts((current) => {
         if (current[requestId]?.clientId !== outgoing.clientId) return current;
         const next = { ...current };
         delete next[requestId];
         return next;
       });
-      await Promise.all([loadThread(requestId), loadInbox()]);
+      await refreshAfterAction(scope);
+      if (!actionCurrent(scope)) return;
       onChanged();
     } catch (cause: unknown) {
-      setError(errorMessage(cause));
+      if (actionCurrent(scope)) setError(errorMessage(cause));
     } finally {
-      setBusy(false);
+      finishAction(scope);
     }
   }
 
@@ -540,30 +713,40 @@ export function CollaborationInbox({
       selected.sender === userId ? selected.recipient : selected.sender;
     if (!window.confirm('Block this member and close active conversations?'))
       return;
-    setBusy(true);
+    const scope = beginAction();
+    if (!scope) return;
     try {
-      await socialAction({ action: 'block', target, value: true });
-      await loadInbox();
+      await socialAction(
+        { action: 'block', target, value: true },
+        scope.signal,
+      );
+      await refreshAfterAction(scope);
+      if (!actionCurrent(scope)) return;
       onChanged();
       notify('Member blocked. They cannot send you new requests or messages.');
     } catch (cause: unknown) {
-      setError(errorMessage(cause));
+      if (actionCurrent(scope)) setError(errorMessage(cause));
     } finally {
-      setBusy(false);
+      finishAction(scope);
     }
   }
 
   async function unblockMember(target: string) {
     if (busy) return;
-    setBusy(true);
+    const scope = beginAction();
+    if (!scope) return;
     try {
-      await socialAction({ action: 'block', target, value: false });
-      await loadInbox();
+      await socialAction(
+        { action: 'block', target, value: false },
+        scope.signal,
+      );
+      await refreshAfterAction(scope);
+      if (!actionCurrent(scope)) return;
       notify('Member unblocked. New requests are available again.');
     } catch (cause: unknown) {
-      setError(errorMessage(cause));
+      if (actionCurrent(scope)) setError(errorMessage(cause));
     } finally {
-      setBusy(false);
+      finishAction(scope);
     }
   }
 
@@ -579,10 +762,10 @@ export function CollaborationInbox({
           <button
             className={folder === 'incoming' ? 'active' : ''}
             onClick={() => {
-              setFolder('incoming');
-              setSelectedId(
+              selectRequest(
                 requests.find((request) => request.recipient === userId)?.id ||
                   '',
+                'incoming',
               );
             }}
           >
@@ -591,9 +774,9 @@ export function CollaborationInbox({
           <button
             className={folder === 'sent' ? 'active' : ''}
             onClick={() => {
-              setFolder('sent');
-              setSelectedId(
+              selectRequest(
                 requests.find((request) => request.sender === userId)?.id || '',
+                'sent',
               );
             }}
           >
@@ -603,7 +786,16 @@ export function CollaborationInbox({
       </div>
       {error && (
         <div className="error-banner" role="alert">
-          {error} <button onClick={() => loadInbox()}>Try again</button>
+          {error}{' '}
+          <button
+            onClick={() => {
+              if (targetError.current) pendingTarget.current = target.current;
+              void loadInbox();
+              void loadThread(selection.current.id);
+            }}
+          >
+            Try again
+          </button>
         </div>
       )}
       {requests.length ? (
@@ -621,7 +813,7 @@ export function CollaborationInbox({
                     (request.id === selectedId ? ' selected' : '')
                   }
                   key={request.id}
-                  onClick={() => setSelectedId(request.id)}
+                  onClick={() => selectRequest(request.id)}
                 >
                   <span className={`request-status ${request.status}`}>
                     {request.status}
