@@ -68,6 +68,21 @@ export function UploadForm({
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const input = useRef<HTMLInputElement>(null);
+  function changeKind(next: string) {
+    setKind(next);
+    const acceptsFile =
+      !file ||
+      (next === 'photo'
+        ? file.type.startsWith('image/')
+        : next === 'video'
+          ? file.type.startsWith('video/')
+          : !file.type.startsWith('image/') && !file.type.startsWith('video/'));
+    if (!acceptsFile) {
+      setFile(null);
+      if (input.current) input.current.value = '';
+    }
+    setError('');
+  }
   function choose(f?: File) {
     if (!f) return;
     const isPhoto = f.type.startsWith('image/');
@@ -95,7 +110,14 @@ export function UploadForm({
       className="form-panel upload-form"
       onSubmit={async (e) => {
         e.preventDefault();
-        if (!file) return setError('Choose your audio file first.');
+        if (!file)
+          return setError(
+            kind === 'photo'
+              ? 'Choose a photo first.'
+              : kind === 'video'
+                ? 'Choose a video first.'
+                : 'Choose your audio file first.',
+          );
         setBusy(true);
         setError('');
         try {
@@ -162,7 +184,15 @@ export function UploadForm({
         }}
       >
         <Upload size={30} />
-        <strong>{file ? file.name : 'Drop your track here'}</strong>
+        <strong>
+          {file
+            ? file.name
+            : kind === 'photo'
+              ? 'Drop a photo here'
+              : kind === 'video'
+                ? 'Drop a video here'
+                : 'Drop your track here'}
+        </strong>
         <span>
           {file
             ? (file.size / 1024 / 1024).toFixed(1) + ' MB · Click to change'
@@ -189,16 +219,17 @@ export function UploadForm({
         }
         onChange={(e) => choose(e.target.files?.[0])}
       />
-      <label className="field">
-        <span>Track title</span>
-        <input
-          required
-          value={title}
-          maxLength={120}
-          placeholder="Give your sound a name"
-          onChange={(e) => setTitle(e.target.value)}
-        />
-      </label>
+      <Pick
+        label="I'm uploading"
+        value={kind}
+        onChange={changeKind}
+        options={[
+          { value: 'beat', label: 'A beat' },
+          { value: 'song', label: 'A song' },
+          { value: 'photo', label: 'A photo' },
+          { value: 'video', label: 'A video' },
+        ]}
+      />
       {kind === 'photo' || kind === 'video' ? (
         <>
           <label className="field">
@@ -229,17 +260,16 @@ export function UploadForm({
         </>
       ) : (
         <div className="form-grid">
-          <Pick
-            label="I'm uploading"
-            value={kind}
-            onChange={setKind}
-            options={[
-              { value: 'beat', label: 'A beat' },
-              { value: 'song', label: 'A song' },
-              { value: 'photo', label: 'A photo' },
-              { value: 'video', label: 'A video' },
-            ]}
-          />
+          <label className="field">
+            <span>Track title</span>
+            <input
+              required
+              value={title}
+              maxLength={120}
+              placeholder="Give your sound a name"
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </label>
           <Pick
             label="Genre"
             value={genre}
@@ -283,7 +313,9 @@ export function UploadForm({
           <div>
             <Globe size={19} />
             <span>
-              Make this track public
+              {kind === 'photo' || kind === 'video'
+                ? 'Make this post public'
+                : 'Make this track public'}
               <small>
                 {visibility === 'public'
                   ? 'Visible and playable by everyone with site access.'
@@ -292,54 +324,66 @@ export function UploadForm({
             </span>
           </div>
           <Switch
-            aria-label="Make this track public"
+            aria-label={
+              kind === 'photo' || kind === 'video'
+                ? 'Make this post public'
+                : 'Make this track public'
+            }
             checked={visibility === 'public'}
             onCheckedChange={(v) => setVisibility(v ? 'public' : 'private')}
           />
         </div>
-        <Pick
-          label="Creative permission"
-          value={permission}
-          onChange={setPermission}
-          options={[
-            { value: 'listen', label: 'Listen only — no reuse permission' },
-            {
-              value: 'collaborate',
-              label: 'Open collaboration — make a private working version',
-            },
-          ]}
-        />
-        <label className="field sell-field">
-          <span>Sell this {kind === 'beat' ? 'beat' : 'song'} (optional)</span>
-          <div className="input-prefix">
-            <CircleDollarSign size={16} />
-            <input
-              aria-label="Track price in US dollars"
-              type="number"
-              min={1}
-              max={10000}
-              placeholder="50"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
+        {kind !== 'photo' && kind !== 'video' && (
+          <>
+            <Pick
+              label="Creative permission"
+              value={permission}
+              onChange={setPermission}
+              options={[
+                { value: 'listen', label: 'Listen only — no reuse permission' },
+                {
+                  value: 'collaborate',
+                  label: 'Open collaboration — make a private working version',
+                },
+              ]}
             />
-          </div>
-          <small className="small-note">
-            US dollars, charged by card through Stripe. Buyers get a license
-            receipt and a message thread with you. Leave empty to share freely.
-          </small>
-        </label>
-        <p>
-          Open collaboration allows artists and engineers to create private
-          working versions. Sales and licenses are paid to you directly; you
-          keep creative ownership. Existing working versions are not recalled by
-          changing visibility.
-        </p>
+            <label className="field sell-field">
+              <span>
+                Sell this {kind === 'beat' ? 'beat' : 'song'} (optional)
+              </span>
+              <div className="input-prefix">
+                <CircleDollarSign size={16} />
+                <input
+                  aria-label="Track price in US dollars"
+                  type="number"
+                  min={1}
+                  max={10000}
+                  placeholder="50"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                />
+              </div>
+              <small className="small-note">
+                US dollars, charged by card through Stripe. Buyers get a license
+                receipt and a message thread with you. Leave empty to share
+                freely.
+              </small>
+            </label>
+            <p>
+              Open collaboration allows artists and engineers to create private
+              working versions. Sales and licenses are paid to you directly; you
+              keep creative ownership. Existing working versions are not
+              recalled by changing visibility.
+            </p>
+          </>
+        )}
       </div>
       <label className="check-label">
         <Checkbox checked={rights} onCheckedChange={(v) => setRights(!!v)} />
         <span>
-          I own this music or have permission to upload and share it with the
-          settings above.
+          I own this{' '}
+          {kind === 'photo' || kind === 'video' ? 'content' : 'music'} or have
+          permission to upload and share it with the settings above.
         </span>
       </label>
       {error && (

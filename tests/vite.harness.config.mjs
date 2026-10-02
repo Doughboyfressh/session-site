@@ -9,6 +9,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export default defineConfig({
   root,
   appType: 'mpa',
+  define: {
+    'process.env.NEXT_PUBLIC_DEPLOYMENT_TARGET': JSON.stringify('vercel'),
+  },
   css: { postcss: { plugins: [tailwindcss()] } },
   plugins: [react()],
   resolve: { alias: { '@': root } },
