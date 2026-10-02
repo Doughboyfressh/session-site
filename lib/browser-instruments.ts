@@ -504,12 +504,10 @@ export function playBrowserNote(
       // Repeated note-offs and cancellation must never postpone an existing finish.
       if (end >= stopAt) return;
       const level = envelopeAt(start);
-      if (typeof envelope.gain.cancelAndHoldAtTime === 'function')
-        envelope.gain.cancelAndHoldAtTime(start);
-      else {
-        envelope.gain.cancelScheduledValues(start);
-        envelope.gain.linearRampToValueAtTime(level, start);
-      }
+      // Explicit endpoints also preserve future OfflineAudioContext note-offs:
+      // cancel-and-hold can retain the wrong ramp after removing the score's note-off.
+      envelope.gain.cancelScheduledValues(start);
+      envelope.gain.linearRampToValueAtTime(level, start);
       envelope.gain.linearRampToValueAtTime(0, end);
       releaseAt = start;
       releaseLevel = level;

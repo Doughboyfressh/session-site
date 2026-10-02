@@ -251,7 +251,8 @@ for (const id of ['session-wavetable', 'session-fm']) {
     noteOff = playBrowserNote(released.c, {}, 69, 1, 2, 0.8, state);
   released.c.currentTime = 1.2;
   noteOff.release();
-  near(released.nodes[0].gain.events.at(-2)[1], 1.2);
+  equal(released.nodes[0].gain.events.at(-2)[0], 'ramp');
+  near(released.nodes[0].gain.events.at(-2)[2], 1.2);
   near(released.nodes[0].gain.events.at(-1)[2], 1.2 + state.parameters.release);
   for (const source of released.sources)
     near(
