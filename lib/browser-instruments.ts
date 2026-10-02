@@ -36,6 +36,9 @@ export type FmInstrument = {
 };
 export type BrowserInstrument = WavetableInstrument | FmInstrument;
 export type BrowserVoice = {
+  /** MIDI note-off: fade over the instrument's configured release. */
+  release: (when?: number) => void;
+  /** Transport/preview cancellation: fade over 5 milliseconds. */
   stop: (when?: number) => void;
   disconnect: () => void;
 };
@@ -371,7 +374,8 @@ export function playBrowserNote(
     throw new Error(
       'Choose a MIDI note from 0–127, a duration up to 300 seconds and velocity from 0–1.',
     );
-  if (!velocity || !p.level) return { stop() {}, disconnect() {} };
+  if (!velocity || !p.level)
+    return { release() {}, stop() {}, disconnect() {} };
   const at = Math.max(time, c.currentTime),
     off = at + length;
   const frequency = 440 * 2 ** ((pitch - 69) / 12),
@@ -380,7 +384,15 @@ export function playBrowserNote(
     sources: OscillatorNode[] = [];
   let disconnected = false,
     remaining = 0,
-    stopAt = off + p.release;
+    stopAt = off + p.release,
+    releaseAt = off;
+  const noteLevel = (elapsed: number) =>
+    elapsed < p.attack
+      ? (peak * elapsed) / p.attack
+      : elapsed < p.attack + p.decay
+        ? peak * (1 - ((1 - p.sustain) * (elapsed - p.attack)) / p.decay)
+        : peak * p.sustain;
+  let releaseLevel = noteLevel(length);
   function remember<T extends AudioNode>(node: T): T {
     nodes.push(node);
     return node;
@@ -404,16 +416,10 @@ export function playBrowserNote(
   function envelopeAt(when: number) {
     const elapsed = when - at;
     if (elapsed <= 0) return 0;
-    if (when >= off + p.release) return 0;
-    const noteLevel = (elapsed: number) =>
-      elapsed < p.attack
-        ? (peak * elapsed) / p.attack
-        : elapsed < p.attack + p.decay
-          ? peak * (1 - ((1 - p.sustain) * (elapsed - p.attack)) / p.decay)
-          : peak * p.sustain;
-    return when <= off
+    if (when >= stopAt) return 0;
+    return when <= releaseAt
       ? noteLevel(elapsed)
-      : noteLevel(length) * (1 - (when - off) / p.release);
+      : releaseLevel * (1 - (when - releaseAt) / (stopAt - releaseAt));
   }
   try {
     const envelope = remember(c.createGain()),
@@ -489,30 +495,37 @@ export function playBrowserNote(
       source.start(at);
       source.stop(stopAt);
     }
+    function finish(when: number, duration: number) {
+      if (!Number.isFinite(when) || when < 0)
+        throw new Error('Invalid browser instrument release/stop time.');
+      if (disconnected) return;
+      const start = Math.max(c.currentTime, when),
+        end = start + duration;
+      // Repeated note-offs and cancellation must never postpone an existing finish.
+      if (end >= stopAt) return;
+      const level = envelopeAt(start);
+      if (typeof envelope.gain.cancelAndHoldAtTime === 'function')
+        envelope.gain.cancelAndHoldAtTime(start);
+      else {
+        envelope.gain.cancelScheduledValues(start);
+        envelope.gain.linearRampToValueAtTime(level, start);
+      }
+      envelope.gain.linearRampToValueAtTime(0, end);
+      releaseAt = start;
+      releaseLevel = level;
+      stopAt = end;
+      for (const source of sources) {
+        try {
+          source.stop(end);
+        } catch {}
+      }
+    }
     return {
+      release(when = c.currentTime) {
+        finish(when, p.release);
+      },
       stop(when = c.currentTime) {
-        if (!Number.isFinite(when) || when < 0)
-          throw new Error('Invalid browser instrument stop time.');
-        if (disconnected) return;
-        const end = Math.max(c.currentTime, when) + 0.005;
-        if (end >= stopAt) return;
-        const releaseAt = Math.max(c.currentTime, when);
-        if (typeof envelope.gain.cancelAndHoldAtTime === 'function')
-          envelope.gain.cancelAndHoldAtTime(releaseAt);
-        else {
-          envelope.gain.cancelScheduledValues(releaseAt);
-          envelope.gain.linearRampToValueAtTime(
-            envelopeAt(releaseAt),
-            releaseAt,
-          );
-        }
-        envelope.gain.linearRampToValueAtTime(0, end);
-        stopAt = end;
-        for (const source of sources) {
-          try {
-            source.stop(end);
-          } catch {}
-        }
+        finish(when, 0.005);
       },
       disconnect,
     };

@@ -74,6 +74,8 @@ async function verify(): Promise<Evidence> {
       velocity = 1,
       stop,
       laterStop,
+      noteOff,
+      laterNoteOff,
       disconnect = false,
     }: {
       pitch?: number;
@@ -82,6 +84,8 @@ async function verify(): Promise<Evidence> {
       velocity?: number;
       stop?: number;
       laterStop?: number;
+      noteOff?: number;
+      laterNoteOff?: number;
       disconnect?: boolean;
     } = {},
   ) => {
@@ -99,6 +103,8 @@ async function verify(): Promise<Evidence> {
       velocity,
       instrument,
     );
+    if (noteOff !== undefined) voice.release(noteOff);
+    if (laterNoteOff !== undefined) voice.release(laterNoteOff);
     if (stop !== undefined) voice.stop(stop);
     if (laterStop !== undefined) voice.stop(laterStop);
     if (disconnect) voice.disconnect();
@@ -166,6 +172,31 @@ async function verify(): Promise<Evidence> {
       const ratio = rms(loud) / rms(soft);
       metrics[`${id}/velocityRatio`] = ratio;
       check(Math.abs(ratio - 3) < 0.01, `${id}: velocity scales output`);
+      const releaseSound = simple(id);
+      releaseSound.parameters.release = 0.3;
+      const scoreRelease = await render(releaseSound, { length: 0.2 }),
+        midiRelease = await render(releaseSound, {
+          length: 0.8,
+          noteOff: 0.3,
+          laterNoteOff: 0.5,
+        });
+      metrics[`${id}/midiReleaseDifference`] = difference(
+        scoreRelease,
+        midiRelease,
+      );
+      check(
+        metrics[`${id}/midiReleaseDifference`] < 1e-8,
+        `${id}: MIDI note-off reproduces the score's configured release`,
+      );
+      metrics[`${id}/midiReleaseMidpointRms`] = rms(midiRelease, 0.43, 0.47);
+      check(
+        metrics[`${id}/midiReleaseMidpointRms`] > 0.005,
+        `${id}: MIDI release remains audible halfway through its tail`,
+      );
+      check(
+        peak(midiRelease, 0.61) === 0,
+        `${id}: MIDI release stops every source after its configured tail`,
+      );
       for (const pitch of [36, 60, 69, 81, 96, 127]) {
         const buffer = await render(sine, { pitch }),
           data = buffer.getChannelData(0);

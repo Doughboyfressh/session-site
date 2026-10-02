@@ -246,6 +246,51 @@ for (const id of ['session-wavetable', 'session-fm']) {
     'Disconnect must clean every graph node exactly once',
   );
   ok(f.sources.every((source) => source.onended === null));
+
+  const released = fakeContext(),
+    noteOff = playBrowserNote(released.c, {}, 69, 1, 2, 0.8, state);
+  released.c.currentTime = 1.2;
+  noteOff.release();
+  near(released.nodes[0].gain.events.at(-2)[1], 1.2);
+  near(released.nodes[0].gain.events.at(-1)[2], 1.2 + state.parameters.release);
+  for (const source of released.sources)
+    near(
+      source.events.at(-1)[1],
+      1.2 + state.parameters.release,
+      'MIDI note-off must release every operator/LFO for the configured duration',
+    );
+  const releasing = released.sources.map((source) => source.events.length);
+  noteOff.release(1.4);
+  equal(
+    released.sources.map((source) => source.events.length),
+    releasing,
+    'Repeated MIDI note-offs cannot postpone a release',
+  );
+  ok(
+    released.nodes.every((node) => node.disconnected === 0),
+    'The graph remains connected during its audible release',
+  );
+  released.c.currentTime = 1.2 + state.parameters.release;
+  for (const source of released.sources) source.onended();
+  ok(
+    released.nodes.every((node) => node.disconnected === 1),
+    'MIDI release completion disconnects every graph node',
+  );
+
+  const canceledRelease = fakeContext(),
+    interrupted = playBrowserNote(canceledRelease.c, {}, 69, 0, 2, 1, state);
+  interrupted.release(0.2);
+  interrupted.stop(0.22);
+  for (const source of canceledRelease.sources)
+    near(
+      source.events.at(-1)[1],
+      0.225,
+      'Cancellation can shorten an in-progress MIDI release to 5ms',
+    );
+  interrupted.release(0.3);
+  for (const source of canceledRelease.sources)
+    near(source.events.at(-1)[1], 0.225);
+  interrupted.disconnect();
 }
 {
   const f = fakeContext(),
@@ -291,6 +336,28 @@ for (const id of ['session-wavetable', 'session-fm']) {
   near(f.nodes[0].gain.events.at(-2)[1], 0.00072);
 }
 {
+  const f = fakeContext({ fallback: true }),
+    state = defaultBrowserInstrument('session-fm');
+  state.parameters.attack = 1;
+  state.parameters.release = 0.2;
+  const voice = playBrowserNote(f.c, {}, 69, 0, 2, 1, state);
+  voice.release(0.1);
+  near(
+    f.nodes[0].gain.events.at(-2)[1],
+    0.0144,
+    'MIDI note-off preserves the partial attack amplitude',
+  );
+  near(f.nodes[0].gain.events.at(-1)[2], 0.3);
+  voice.stop(0.2);
+  near(
+    f.nodes[0].gain.events.at(-2)[1],
+    0.0072,
+    'Fallback cancellation holds the current MIDI release amplitude',
+  );
+  near(f.nodes[0].gain.events.at(-1)[2], 0.205);
+  voice.disconnect();
+}
+{
   const f = fakeContext();
   f.c.currentTime = 2;
   const voice = playBrowserNote(
@@ -305,6 +372,8 @@ for (const id of ['session-wavetable', 'session-fm']) {
   equal(f.sources[0].events[0], ['start', 2]);
   equal(f.sources[0].frequency.events[0], ['set', 880, 2]);
   reject(() => voice.stop(NaN));
+  reject(() => voice.release(NaN));
+  reject(() => voice.release(-1));
   voice.disconnect();
 }
 {
@@ -358,6 +427,7 @@ for (const patch of [{ velocity: 0 }, { level: 0 }]) {
   if (patch.level === 0) state.parameters.level = 0;
   const voice = playBrowserNote(f.c, {}, 69, 0, 1, patch.velocity ?? 1, state);
   voice.stop();
+  voice.release();
   voice.disconnect();
   equal(f.nodes.length, 0, 'Silent notes need no graph');
 }
@@ -446,6 +516,7 @@ const result = {
     'preset isolation',
     'bounded graph and MIDI tuning',
     'scheduled release',
+    'configured MIDI note-off release and fast cancellation',
     'cancellation and cleanup',
     'setup failure cleanup',
     'accessible controlled UI',
