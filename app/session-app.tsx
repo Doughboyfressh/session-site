@@ -44,6 +44,8 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { demos, genres, type Track } from '@/lib/catalog';
+import { mergeSearchTracks, trackPermalink } from '@/lib/community-search';
+import { useCommunitySearch } from './use-community-search';
 import { context, trackFrom, bufferFor, playMix } from '@/lib/audio';
 import { originalArrangement } from '@/lib/originals';
 import { validateArrangement } from '@/lib/arrangement-validation';
@@ -134,8 +136,6 @@ export default function SessionApp({
     [roomModal, setRoomModal] = useState(false),
     [moreOpen, setMoreOpen] = useState(false),
     [tourOpen, setTourOpen] = useState(false),
-    [results, setResults] = useState<any>(null),
-    [searching, setSearching] = useState(false),
     [roomDiscoverable, setRoomDiscoverable] = useState('invite'),
     [roomTitle, setRoomTitle] = useState(''),
     [roomProject, setRoomProject] = useState('none'),
@@ -155,6 +155,17 @@ export default function SessionApp({
   const recovery = useDraftRecovery(user?.id);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [takesOpen, setTakesOpen] = useState(false);
+  const {
+    results,
+    searching,
+    error: searchError,
+    retry: retrySearch,
+  } = useCommunitySearch(query);
+  const searchActive = query.trim().length >= 2;
+  const searchTracks = useMemo(
+    () => mergeSearchTracks(query, results?.tracks || [], demos),
+    [query, results],
+  );
   const studioWorkspaceBusy = useRef(false);
   const workspaceRequest = useRef(0);
   const remixPending = useRef(false);
@@ -243,27 +254,6 @@ export default function SessionApp({
     }, 90000);
     return () => clearInterval(timer);
   }, [view, user]);
-  useEffect(() => {
-    const q = query.trim();
-    if (q.length < 2) {
-      setResults(null);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    const timer = setTimeout(async () => {
-      try {
-        const r = await fetch('/api/search?q=' + encodeURIComponent(q));
-        const j = (await r.json()) as any;
-        if (r.ok) setResults(j);
-      } catch {
-        setResults(null);
-      } finally {
-        setSearching(false);
-      }
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [query]);
   function stopPreview() {
     previewSeq.current++;
     previewAbort.current?.abort();
@@ -1631,31 +1621,33 @@ export default function SessionApp({
                     <Flame size={15} /> Trending worldwide
                   </div>
                   <div className="trend-scroll">
-                    {state.trending.map((tr: any) => (
-                      <button
-                        className="trend-tile"
-                        key={tr.id}
-                        onClick={() => {
-                          const full = state.tracks.find(
-                            (x: Track) => x.id === tr.id,
-                          );
-                          if (full) setDetail(full);
-                        }}
-                      >
-                        <CoverArt
-                          seed={tr.id + tr.title}
-                          label={tr.title}
-                          size={62}
-                          spinning={playing?.id === tr.id && isPlaying}
-                        />
-                        <span>
-                          <strong>{tr.title}</strong>
-                          <small>
-                            {tr.creator} · ▶ {fmtNum(tr.plays)}
-                          </small>
-                        </span>
-                      </button>
-                    ))}
+                    {state.trending.map((tr: any) => {
+                      const full = allTracks.find(
+                        (track) => track.id === tr.id,
+                      );
+                      const Target = full ? 'button' : 'a';
+                      return (
+                        <Target
+                          className="trend-tile"
+                          key={tr.id}
+                          href={full ? undefined : trackPermalink(tr.id)}
+                          onClick={full ? () => setDetail(full) : undefined}
+                        >
+                          <CoverArt
+                            seed={tr.id + tr.title}
+                            label={tr.title}
+                            size={62}
+                            spinning={playing?.id === tr.id && isPlaying}
+                          />
+                          <span>
+                            <strong>{tr.title}</strong>
+                            <small>
+                              {tr.creator} · ▶ {fmtNum(tr.plays)}
+                            </small>
+                          </span>
+                        </Target>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1696,30 +1688,32 @@ export default function SessionApp({
               )}
               {discoveryTabs()}
               {genreTabs()}
-              {results && query.trim().length >= 2 ? (
+              {searchActive ? (
                 <div className="search-results">
                   <div className="section-title">
                     <h2>
                       Results for “{query.trim()}”
-                      <span className="tiny-label">
-                        {searching ? 'SEARCHING…' : 'SERVER-SIDE'}
+                      <span className="tiny-label" aria-live="polite">
+                        {searching ? 'SEARCHING…' : 'MUSIC & CREATORS'}
                       </span>
                     </h2>
                   </div>
-                  {results.tracks?.length ? (
-                    results.tracks.map((tr: any) => {
-                      const full = state.tracks.find(
-                        (x: Track) => x.id === tr.id,
-                      );
+                  {searchError && (
+                    <div className="error-banner" role="alert">
+                      {searchError}{' '}
+                      <button onClick={retrySearch}>Try again</button>
+                    </div>
+                  )}
+                  {searchTracks.length ? (
+                    searchTracks.map((tr) => {
+                      const full = allTracks.find((x: Track) => x.id === tr.id);
+                      const Target = full ? 'button' : 'a';
                       return (
-                        <button
+                        <Target
                           className="search-row"
                           key={tr.id}
-                          onClick={() =>
-                            full
-                              ? setDetail(full)
-                              : notify('Open the app to hear this one.')
-                          }
+                          href={full ? undefined : trackPermalink(tr.id)}
+                          onClick={full ? () => setDetail(full) : undefined}
                         >
                           <CoverArt
                             seed={tr.id + tr.title}
@@ -1733,15 +1727,19 @@ export default function SessionApp({
                               {tr.plays ? ` · ▶ ${fmtNum(tr.plays)}` : ''}
                             </small>
                           </span>
-                        </button>
+                        </Target>
                       );
                     })
                   ) : (
-                    <p className="small-note">
-                      No tracks matched. Try a genre, title, or creator name.
-                    </p>
+                    <output className="small-note" style={{ display: 'block' }}>
+                      {searching
+                        ? 'Searching music and creators…'
+                        : searchError
+                          ? 'No matching SESSION Originals. Retry to search the community.'
+                          : 'No tracks matched. Try a genre, title, or creator name.'}
+                    </output>
                   )}
-                  {results.profiles?.length > 0 && (
+                  {!!results?.profiles.length && (
                     <>
                       <h3 className="payments-sub">Creators</h3>
                       {results.profiles.map((pr: any) => (
@@ -1763,7 +1761,7 @@ export default function SessionApp({
                   )}
                 </div>
               ) : null}
-              {!results || query.trim().length < 2 ? (
+              {!searchActive ? (
                 <div className="feed-posts">
                   {filtered.length || state.posts.length ? (
                     (() => {
