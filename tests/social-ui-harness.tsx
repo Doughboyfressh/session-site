@@ -59,6 +59,20 @@ const requests: FixtureRequest[] = [
     updated: now - 20000,
   },
   {
+    id: 'fixture-older-outside-page',
+    sender: 'fixture-outside-peer',
+    recipient: member,
+    senderName: 'Older outside page',
+    recipientName: 'Fixture member',
+    senderUsername: 'outside_peer',
+    recipientUsername: 'fixture_member',
+    role: 'Engineer',
+    message: 'A valid alert target beyond the newest inbox page.',
+    status: 'accepted',
+    created: now - 120000,
+    updated: now - 60000,
+  },
+  {
     id: 'fixture-sent',
     sender: member,
     recipient: 'fixture-sent-peer',
@@ -74,6 +88,15 @@ const requests: FixtureRequest[] = [
   },
 ];
 const threads: Record<string, FixtureMessage[]> = {
+  'fixture-older-outside-page': [
+    {
+      id: 'fixture-outside-history',
+      sender: 'fixture-outside-peer',
+      senderName: 'Older outside page',
+      body: 'History for the older conversation outside the inbox page.',
+      created: now - 60000,
+    },
+  ],
   'fixture-older': [
     {
       id: 'fixture-initial',
@@ -85,6 +108,16 @@ const threads: Record<string, FixtureMessage[]> = {
   ],
 };
 const notifications = [
+  {
+    id: 'alert-older-outside-page',
+    kind: 'message',
+    actorName: 'Older outside page',
+    body: 'replied beyond the newest inbox page.',
+    resourceType: 'collaboration',
+    resourceId: 'fixture-older-outside-page',
+    created: now - 3000,
+    readAt: null as number | null,
+  },
   {
     id: 'alert-older',
     kind: 'message',
@@ -153,8 +186,7 @@ window.fetch = async (input, init) => {
         request.lastMessage = body.message;
         request.lastMessageAt = Date.now();
       } else if (body.action === 'collaborationStatus' && request) {
-        request.status = body.status;
-        request.updated = Date.now();
+        peerStatus(request.id, body.status);
       } else {
         return Response.json(
           { error: 'This fixture action is unavailable.' },
@@ -165,10 +197,12 @@ window.fetch = async (input, init) => {
     }
     if (url.searchParams.get('view') === 'inbox')
       return Response.json({
-        requests: [...requests].sort(
-          (a, b) =>
-            (b.lastMessageAt || b.updated) - (a.lastMessageAt || a.updated),
-        ),
+        requests: requests
+          .filter((item) => item.id !== 'fixture-older-outside-page')
+          .sort(
+            (a, b) =>
+              (b.lastMessageAt || b.updated) - (a.lastMessageAt || a.updated),
+          ),
         blocks: [],
       });
     if (url.searchParams.get('view') === 'activity')
@@ -178,12 +212,13 @@ window.fetch = async (input, init) => {
       });
     if (url.searchParams.get('view') === 'thread') {
       const id = url.searchParams.get('id') || '';
-      if (!requests.some((item) => item.id === id))
+      const request = requests.find((item) => item.id === id);
+      if (!request)
         return Response.json(
           { error: 'This collaboration is unavailable.' },
           { status: 404 },
         );
-      return Response.json({ messages: threads[id] || [] });
+      return Response.json({ request, messages: threads[id] || [] });
     }
     return Response.json({ error: 'Unknown synthetic view.' }, { status: 400 });
   }
@@ -205,6 +240,11 @@ function peerReply(id: string) {
   request.lastMessageAt = Date.now();
   return body;
 }
+function peerStatus(id: string, status: FixtureRequest['status']) {
+  const request = requests.find((item) => item.id === id)!;
+  request.status = status;
+  request.updated = Math.max(Date.now(), request.updated + 1);
+}
 Object.assign(window, {
   sessionSocialFixture: { reads, requests, threads, peerReply },
 });
@@ -212,7 +252,7 @@ Object.assign(window, {
 function Fixture() {
   const [target, setTarget] = useState<string>();
   const [notice, setNotice] = useState('');
-  const [unread, setUnread] = useState(2);
+  const [unread, setUnread] = useState(notifications.length);
   return (
     <main style={{ maxWidth: 1152, margin: 'auto', padding: 16 }}>
       <div style={{ display: 'grid', gap: 12, marginBottom: 20 }}>
@@ -228,6 +268,32 @@ function Fixture() {
         >
           <button
             className="button secondary"
+            onClick={() => setNotice(peerReply('fixture-older-outside-page'))}
+          >
+            Peer reply outside page
+          </button>
+          <button
+            className="button secondary"
+            onClick={() => {
+              peerStatus('fixture-older-outside-page', 'closed');
+              setNotice('Peer closed the conversation outside the inbox page.');
+            }}
+          >
+            Peer closes outside page
+          </button>
+          <button
+            className="button secondary"
+            onClick={() => {
+              peerStatus('fixture-older-outside-page', 'accepted');
+              setNotice(
+                'The conversation outside the inbox page is accepted again.',
+              );
+            }}
+          >
+            Peer reopens outside page
+          </button>
+          <button
+            className="button secondary"
             onClick={() => setNotice(peerReply('fixture-older'))}
           >
             Peer reply to Older
@@ -241,8 +307,7 @@ function Fixture() {
           <button
             className="button secondary"
             onClick={() => {
-              requests.find((item) => item.id === 'fixture-older')!.status =
-                'closed';
+              peerStatus('fixture-older', 'closed');
               setNotice('Peer closed the older conversation.');
             }}
           >
@@ -251,8 +316,7 @@ function Fixture() {
           <button
             className="button secondary"
             onClick={() => {
-              requests.find((item) => item.id === 'fixture-older')!.status =
-                'accepted';
+              peerStatus('fixture-older', 'accepted');
               setNotice('Older conversation is accepted again.');
             }}
           >

@@ -83,7 +83,7 @@ type InboxResponse = {
   requests: Collaboration[];
   blocks: BlockedMember[];
 };
-type ThreadResponse = { messages: DirectMessage[] };
+type ThreadResponse = { request: Collaboration; messages: DirectMessage[] };
 
 type BlockedMember = {
   target: string;
@@ -152,6 +152,40 @@ function errorMessage(cause: unknown) {
 
 function isAbortError(cause: unknown) {
   return cause instanceof Error && cause.name === 'AbortError';
+}
+
+function authorizedThread(data: ThreadResponse, id: string, userId: string) {
+  const request = data.request;
+  if (
+    request?.id !== id ||
+    (request.sender !== userId && request.recipient !== userId)
+  )
+    throw Object.assign(
+      new Error('This collaboration is no longer available.'),
+      { status: 404 },
+    );
+  const last = data.messages.at(-1);
+  return last
+    ? { ...request, lastMessage: last.body, lastMessageAt: last.created }
+    : request;
+}
+
+function mergeCollaboration(
+  previous: Collaboration | null,
+  next: Collaboration,
+) {
+  if (previous?.id !== next.id) return next;
+  const metadata =
+    Number(previous.updated) > Number(next.updated) ? previous : next;
+  const preview =
+    Number(previous.lastMessageAt || 0) > Number(next.lastMessageAt || 0)
+      ? previous
+      : next;
+  return {
+    ...metadata,
+    lastMessage: preview.lastMessage,
+    lastMessageAt: preview.lastMessageAt,
+  };
 }
 
 function activityIcon(kind: string) {
@@ -398,6 +432,9 @@ function CollaborationInboxContent({
   onChanged: () => void;
 }) {
   const [requests, setRequests] = useState<Collaboration[]>([]);
+  const [hydratedRequest, setHydratedRequest] = useState<Collaboration | null>(
+    null,
+  );
   const [blocks, setBlocks] = useState<BlockedMember[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [threads, setThreads] = useState<Record<string, DirectMessage[]>>({});
@@ -422,17 +459,31 @@ function CollaborationInboxContent({
   const target = useRef(requestedCollaborationId);
   const pendingTarget = useRef(requestedCollaborationId);
   const targetError = useRef('');
+  const retryTarget = useRef<string | undefined>(undefined);
+  const retainedRequest = useRef<Collaboration | null>(null);
+  const loadedTargetThread = useRef('');
+
+  const availableRequests = useMemo(
+    () =>
+      hydratedRequest?.id === selectedId &&
+      !requests.some((request) => request.id === selectedId)
+        ? [...requests, hydratedRequest]
+        : requests,
+    [hydratedRequest, requests, selectedId],
+  );
 
   const visible = useMemo(
     () =>
-      requests.filter((request) =>
+      availableRequests.filter((request) =>
         folder === 'incoming'
           ? request.recipient === userId
           : request.sender === userId,
       ),
-    [folder, requests, userId],
+    [availableRequests, folder, userId],
   );
-  const selected = requests.find((request) => request.id === selectedId);
+  const selected = availableRequests.find(
+    (request) => request.id === selectedId,
+  );
   const messages = threads[selectedId] || [];
   const draft = drafts[selectedId] || { message: '', clientId: '' };
 
@@ -469,12 +520,25 @@ function CollaborationInboxContent({
       const authorized = data.requests.filter(
         (request) => request.sender === userId || request.recipient === userId,
       );
+      const requestedId = pendingTarget.current;
+      let requested = authorized.find((request) => request.id === requestedId);
+      let targetThread: ThreadResponse | undefined;
+      let lookupError = '';
+      if (requestedId && !requested) {
+        try {
+          targetThread = await socialFetch<ThreadResponse>(
+            '/api/social?view=thread&id=' + encodeURIComponent(requestedId),
+            { signal: controller.signal },
+          );
+          requested = authorizedThread(targetThread, requestedId, userId);
+        } catch (cause: unknown) {
+          lookupError = errorMessage(cause);
+        }
+        if (!current()) return;
+      }
       const previous = selection.current;
       let next = previous;
-      if (pendingTarget.current) {
-        const requested = authorized.find(
-          (request) => request.id === pendingTarget.current,
-        );
+      if (requestedId && pendingTarget.current === requestedId) {
         next = {
           id: requested?.id || '',
           folder: requested?.sender === userId ? 'sent' : 'incoming',
@@ -482,8 +546,18 @@ function CollaborationInboxContent({
         };
         targetError.current = requested
           ? ''
-          : 'This collaboration is no longer available.';
+          : lookupError || 'This collaboration is no longer available.';
+        retryTarget.current = requested ? undefined : requestedId;
         pendingTarget.current = undefined;
+        if (requested && targetThread) {
+          const requestId = requested.id;
+          const targetMessages = targetThread.messages;
+          setThreads((current) => ({
+            ...current,
+            [requestId]: targetMessages,
+          }));
+          if (next.id !== previous.id) loadedTargetThread.current = next.id;
+        }
       } else if (!previous.initialized) {
         const first =
           authorized.find((request) => request.recipient === userId) ||
@@ -495,7 +569,8 @@ function CollaborationInboxContent({
         };
       } else if (
         previous.id &&
-        !authorized.some((request) => request.id === previous.id)
+        !authorized.some((request) => request.id === previous.id) &&
+        retainedRequest.current?.id !== previous.id
       ) {
         next = {
           ...previous,
@@ -507,9 +582,24 @@ function CollaborationInboxContent({
             )?.id || '',
         };
       }
+      const nextRecord =
+        authorized.find((request) => request.id === next.id) ||
+        (requested?.id === next.id ? requested : null) ||
+        (retainedRequest.current?.id === next.id
+          ? retainedRequest.current
+          : null);
+      const nextRequest = nextRecord
+        ? mergeCollaboration(retainedRequest.current, nextRecord)
+        : null;
+      retainedRequest.current = nextRequest;
       selection.current = next;
       if (next.id !== previous.id) cancelThread();
-      setRequests(authorized);
+      setRequests(
+        authorized.map((request) =>
+          request.id === nextRequest?.id ? nextRequest : request,
+        ),
+      );
+      setHydratedRequest(nextRequest);
       setBlocks(data.blocks || []);
       setSelectedId(next.id);
       setFolder(next.folder);
@@ -523,33 +613,59 @@ function CollaborationInboxContent({
     }
   }, [cancelThread, userId]);
 
-  const loadThread = useCallback(async (id: string) => {
-    const scope = session.current;
-    if (!id || !scope || scope.signal.aborted) return;
-    const version = ++threadVersion.current;
-    threadController.current?.abort();
-    const controller = new AbortController();
-    threadController.current = controller;
-    const current = () =>
-      session.current === scope &&
-      !scope.signal.aborted &&
-      !controller.signal.aborted &&
-      version === threadVersion.current &&
-      selection.current.id === id;
-    try {
-      const data = await socialFetch<ThreadResponse>(
-        '/api/social?view=thread&id=' + encodeURIComponent(id),
-        { signal: controller.signal },
-      );
-      if (!current()) return;
-      setThreads((current) => ({ ...current, [id]: data.messages }));
-    } catch (cause: unknown) {
-      if (current() && !isAbortError(cause)) setError(errorMessage(cause));
-    } finally {
-      if (threadController.current === controller)
-        threadController.current = null;
-    }
-  }, []);
+  const loadThread = useCallback(
+    async (id: string) => {
+      const scope = session.current;
+      if (!id || !scope || scope.signal.aborted) return;
+      const version = ++threadVersion.current;
+      threadController.current?.abort();
+      const controller = new AbortController();
+      threadController.current = controller;
+      const current = () =>
+        session.current === scope &&
+        !scope.signal.aborted &&
+        !controller.signal.aborted &&
+        version === threadVersion.current &&
+        selection.current.id === id;
+      try {
+        const data = await socialFetch<ThreadResponse>(
+          '/api/social?view=thread&id=' + encodeURIComponent(id),
+          { signal: controller.signal },
+        );
+        if (!current()) return;
+        const request = mergeCollaboration(
+          retainedRequest.current,
+          authorizedThread(data, id, userId),
+        );
+        retainedRequest.current = request;
+        setHydratedRequest(request);
+        setRequests((current) =>
+          current.map((item) =>
+            item.id === id ? mergeCollaboration(item, request) : item,
+          ),
+        );
+        setThreads((current) => ({ ...current, [id]: data.messages }));
+      } catch (cause: unknown) {
+        if (current() && !isAbortError(cause)) {
+          const status = (cause as { status?: number })?.status;
+          if (status === 403 || status === 404) {
+            retainedRequest.current = null;
+            selection.current = { ...selection.current, id: '' };
+            setHydratedRequest(null);
+            setRequests((current) => current.filter((item) => item.id !== id));
+            setSelectedId('');
+            targetError.current = errorMessage(cause);
+            retryTarget.current = id;
+          }
+          setError(errorMessage(cause));
+        }
+      } finally {
+        if (threadController.current === controller)
+          threadController.current = null;
+      }
+    },
+    [userId],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -558,7 +674,11 @@ function CollaborationInboxContent({
       if (document.visibilityState === 'hidden' || busyRef.current) return;
       // A slow read can finish before the next tick; never queue duplicate polls.
       if (!inboxController.current) void loadInbox();
-      if (!threadController.current && selection.current.id)
+      if (
+        !pendingTarget.current &&
+        !threadController.current &&
+        selection.current.id
+      )
         void loadThread(selection.current.id);
     };
     void Promise.resolve().then(() => {
@@ -581,6 +701,9 @@ function CollaborationInboxContent({
     target.current = requestedCollaborationId;
     pendingTarget.current = requestedCollaborationId;
     targetError.current = '';
+    retryTarget.current = undefined;
+    loadedTargetThread.current = '';
+    cancelReads();
     const scope = session.current;
     void Promise.resolve().then(() => {
       if (
@@ -592,9 +715,13 @@ function CollaborationInboxContent({
       )
         void loadInbox();
     });
-  }, [loadInbox, requestedCollaborationId]);
+  }, [cancelReads, loadInbox, requestedCollaborationId]);
 
   useEffect(() => {
+    if (loadedTargetThread.current === selectedId) {
+      loadedTargetThread.current = '';
+      return cancelThread;
+    }
     const scope = session.current;
     void Promise.resolve().then(() => {
       if (
@@ -610,9 +737,19 @@ function CollaborationInboxContent({
   }, [cancelThread, loadThread, selectedId]);
 
   function selectRequest(id: string, nextFolder = selection.current.folder) {
+    if (pendingTarget.current) {
+      inboxVersion.current++;
+      inboxController.current?.abort();
+      inboxController.current = null;
+    }
+    retainedRequest.current =
+      availableRequests.find((request) => request.id === id) || null;
+    setHydratedRequest(retainedRequest.current);
     selection.current = { id, folder: nextFolder, initialized: true };
     pendingTarget.current = undefined;
     targetError.current = '';
+    retryTarget.current = undefined;
+    loadedTargetThread.current = '';
     setError('');
     setFolder(nextFolder);
     setSelectedId(id);
@@ -763,8 +900,9 @@ function CollaborationInboxContent({
             className={folder === 'incoming' ? 'active' : ''}
             onClick={() => {
               selectRequest(
-                requests.find((request) => request.recipient === userId)?.id ||
-                  '',
+                availableRequests.find(
+                  (request) => request.recipient === userId,
+                )?.id || '',
                 'incoming',
               );
             }}
@@ -775,7 +913,8 @@ function CollaborationInboxContent({
             className={folder === 'sent' ? 'active' : ''}
             onClick={() => {
               selectRequest(
-                requests.find((request) => request.sender === userId)?.id || '',
+                availableRequests.find((request) => request.sender === userId)
+                  ?.id || '',
                 'sent',
               );
             }}
@@ -789,7 +928,8 @@ function CollaborationInboxContent({
           {error}{' '}
           <button
             onClick={() => {
-              if (targetError.current) pendingTarget.current = target.current;
+              if (targetError.current)
+                pendingTarget.current = retryTarget.current;
               void loadInbox();
               void loadThread(selection.current.id);
             }}
@@ -798,7 +938,7 @@ function CollaborationInboxContent({
           </button>
         </div>
       )}
-      {requests.length ? (
+      {availableRequests.length ? (
         <div className="collaboration-layout">
           <div className="request-list" aria-label={`${folder} requests`}>
             {visible.map((request) => {

@@ -65,6 +65,9 @@ function fixture(props = {}) {
     calls = [],
     timers = new Map(),
     callbacks = [];
+  const records = new Map(
+    [incoming, older, sent].map((item) => [item.id, item]),
+  );
   let cursor = 0,
     dirty = false,
     mounted = false,
@@ -242,7 +245,17 @@ function fixture(props = {}) {
         'response belongs to a pending synthetic request',
       );
       call.done = true;
-      const snapshot = clone(data);
+      if (call.kind === 'inbox' && status < 400)
+        for (const item of data.requests) records.set(item.id, clone(item));
+      const id = new URL(call.url, 'http://fixture').searchParams.get('id');
+      const snapshot = clone(
+        call.kind === 'thread' && status < 400 && !('request' in data)
+          ? {
+              request: records.get(id),
+              ...data,
+            }
+          : data,
+      );
       call.resolve({ ok: status < 400, status, json: async () => snapshot });
     },
     node(predicate) {
@@ -281,7 +294,15 @@ function fixture(props = {}) {
       await f.drain();
       const thread = f.pending('thread')[0];
       if (thread) {
-        f.respond(thread, { messages: [] });
+        const id = new URL(thread.url, 'http://fixture').searchParams.get('id');
+        const request = [incoming, older, sent].find((item) => item.id === id);
+        f.respond(
+          thread,
+          request
+            ? { request, messages: [] }
+            : { error: 'This collaboration is no longer available.' },
+          request ? 200 : 404,
+        );
         await f.drain();
       }
     },
@@ -323,7 +344,12 @@ for (const [id, name, folder] of [
   equal(
     f.pending('thread').length,
     0,
-    'unauthorized alert never loads a thread',
+    'unauthorized alert never keeps a thread read active',
+  );
+  equal(
+    f.calls.filter((call) => call.kind === 'thread').length,
+    1,
+    'page-missing target is resolved through the authorized thread endpoint',
   );
   check(
     text(f.tree).includes('no longer available'),
@@ -347,6 +373,417 @@ for (const [id, name, folder] of [
   equal(f.selected(), 'Newest', 'reader can recover with a manual selection');
   f.unmount();
 }
+
+// Alerts older than the newest inbox page resolve their authorized request and
+// messages together. Polls retain only the active extra record and its draft.
+{
+  const f = fixture({ requestedCollaborationId: 'incoming-old' });
+  f.mount();
+  await f.drain();
+  f.respond(f.pending('inbox')[0], { requests: [incoming, sent], blocks: [] });
+  await f.drain();
+  const lookup = f.pending('thread')[0];
+  equal(
+    new URL(lookup.url, 'http://fixture').searchParams.get('id'),
+    older.id,
+    'older alert resolves the exact out-of-page request',
+  );
+  f.respond(lookup, {
+    request: older,
+    messages: [message('older-history', 'History outside the inbox page')],
+  });
+  await f.drain();
+  equal(
+    f.selected(),
+    'Older',
+    'out-of-page alert selects its hydrated request',
+  );
+  equal(
+    f.button('Incoming').props.className,
+    'active',
+    'hydrated target selects its folder',
+  );
+  check(
+    text(f.tree).includes('History outside the inbox page'),
+    'target hydration displays its messages',
+  );
+  equal(
+    f.pending('thread').length,
+    0,
+    'target hydration does not duplicate its initial thread read',
+  );
+  f.type('Draft outside the newest page');
+  await f.drain();
+  f.tick();
+  f.respond(f.pending('inbox')[0], { requests: [incoming, sent], blocks: [] });
+  f.respond(f.pending('thread')[0], {
+    request: { ...older, status: 'closed', updated: 30 },
+    messages: [message('older-update', 'Updated older history')],
+  });
+  await f.drain();
+  equal(f.selected(), 'Older', 'inbox polling retains out-of-page selection');
+  check(
+    text(f.tree).includes('This conversation is closed'),
+    'thread polling refreshes out-of-page status',
+  );
+  check(
+    text(f.tree).includes('Updated older history'),
+    'thread polling refreshes out-of-page messages',
+  );
+  f.tick();
+  f.respond(f.pending('inbox')[0], { requests: [incoming, sent], blocks: [] });
+  f.respond(f.pending('thread')[0], {
+    request: { ...older, updated: 40 },
+    messages: [],
+  });
+  await f.drain();
+  equal(
+    f.draft(),
+    'Draft outside the newest page',
+    'out-of-page status refresh preserves its draft',
+  );
+  f.card('Newest').props.onClick();
+  await f.drain();
+  check(!f.card('Older'), 'leaving older conversation prunes the extra record');
+  f.respond(f.pending('thread')[0], { messages: [] });
+  await f.drain();
+  f.update({ requestedCollaborationId: 'sent' });
+  await f.drain();
+  f.respond(f.pending('inbox')[0], { requests: [incoming], blocks: [] });
+  await f.drain();
+  f.respond(f.pending('thread')[0], { request: sent, messages: [] });
+  await f.drain();
+  equal(
+    f.selected(),
+    'Sent peer',
+    'out-of-page sent alert resolves its request',
+  );
+  equal(
+    f.button('Sent').props.className,
+    'active',
+    'out-of-page sent target chooses sent folder',
+  );
+  f.update({ requestedCollaborationId: older.id });
+  await f.drain();
+  f.respond(f.pending('inbox')[0], { requests: [incoming], blocks: [] });
+  await f.drain();
+  f.respond(f.pending('thread')[0], { request: older, messages: [] });
+  await f.drain();
+  equal(
+    f.draft(),
+    'Draft outside the newest page',
+    'rehydrated older target recovers its own draft',
+  );
+  check(
+    !f.card('Sent peer'),
+    'hydrated records stay bounded to the current selection',
+  );
+  f.unmount();
+}
+
+// An existing selection can leave the newest page without a new alert. Thread
+// permission loss then clears unavailable details without exposing its draft.
+{
+  const f = fixture({ requestedCollaborationId: older.id });
+  await f.ready();
+  f.type('Retain locally after permission loss');
+  await f.drain();
+  f.tick();
+  f.respond(f.pending('inbox')[0], { requests: [incoming, sent], blocks: [] });
+  f.respond(f.pending('thread')[0], { request: older, messages: [] });
+  await f.drain();
+  equal(
+    f.selected(),
+    'Older',
+    'page eviction keeps the current authorized selection',
+  );
+  equal(
+    f.draft(),
+    'Retain locally after permission loss',
+    'page eviction keeps the current draft',
+  );
+  f.tick();
+  f.respond(f.pending('inbox')[0], { requests: [incoming, sent], blocks: [] });
+  f.respond(
+    f.pending('thread')[0],
+    { error: 'Conversation access is unavailable.' },
+    403,
+  );
+  await f.drain();
+  equal(
+    f.selected(),
+    'Select a request.',
+    'permission loss clears selected conversation details',
+  );
+  check(
+    !f.card('Older') && !f.draft(),
+    'permission loss removes the extra record and hides its draft',
+  );
+  check(
+    text(f.tree).includes('Conversation access is unavailable.'),
+    'permission loss shows the API error',
+  );
+  f.unmount();
+}
+
+// Inbox and thread polls run together. Their completion order cannot roll back
+// newer request metadata, and the newest message preview advances independently.
+for (const newer of ['inbox', 'thread']) {
+  for (const first of ['inbox', 'thread']) {
+    const f = fixture({ requestedCollaborationId: older.id });
+    await f.ready();
+    f.type('Draft during concurrent metadata refresh');
+    await f.drain();
+    f.tick();
+    const inbox = f.pending('inbox')[0];
+    const thread = f.pending('thread')[0];
+    const inboxRequest = {
+      ...older,
+      status: newer === 'inbox' ? 'closed' : 'accepted',
+      updated: newer === 'inbox' ? '30' : '20',
+      lastMessage: 'Newest inbox preview',
+      lastMessageAt: '200',
+    };
+    const threadRequest = {
+      ...older,
+      status: newer === 'thread' ? 'closed' : 'accepted',
+      updated: newer === 'thread' ? '30' : '20',
+    };
+    const respond = (kind) =>
+      kind === 'inbox'
+        ? f.respond(inbox, {
+            requests: [incoming, inboxRequest, sent],
+            blocks: [],
+          })
+        : f.respond(thread, {
+            request: threadRequest,
+            messages: [message('prior-preview', 'Earlier thread preview')],
+          });
+    respond(first);
+    await f.drain();
+    respond(first === 'inbox' ? 'thread' : 'inbox');
+    await f.drain();
+    check(
+      text(f.tree).includes('This conversation is closed'),
+      `${newer} metadata survives ${first}-first completion`,
+    );
+    check(
+      text(f.card('Older')).includes('Newest inbox preview'),
+      'newest message preview survives an older thread history response',
+    );
+    f.tick();
+    f.respond(f.pending('inbox')[0], {
+      requests: [incoming, sent],
+      blocks: [],
+    });
+    f.respond(f.pending('thread')[0], {
+      request: { ...older, status: 'accepted', updated: '40' },
+      messages: [],
+    });
+    await f.drain();
+    equal(
+      f.draft(),
+      'Draft during concurrent metadata refresh',
+      'monotonic metadata merge preserves selected draft through page eviction',
+    );
+    f.unmount();
+  }
+}
+
+// Retry belongs to the failed manual selection even when an older alert target
+// remains in props. Its original draft stays attached to the failed request.
+{
+  const f = fixture({ requestedCollaborationId: older.id });
+  await f.ready();
+  f.card('Newest').props.onClick();
+  await f.drain();
+  f.respond(f.pending('thread')[0], { messages: [] });
+  await f.drain();
+  f.type('Draft for the manually selected request');
+  await f.drain();
+  f.tick();
+  f.respond(f.pending('inbox')[0], { requests: [older, sent], blocks: [] });
+  f.respond(
+    f.pending('thread')[0],
+    { error: 'The selected request is unavailable.' },
+    404,
+  );
+  await f.drain();
+  equal(
+    f.selected(),
+    'Select a request.',
+    'failed manual selection hides unavailable details',
+  );
+  f.button('Try again').props.onClick();
+  await f.drain();
+  f.respond(f.pending('inbox')[0], { requests: [older, sent], blocks: [] });
+  await f.drain();
+  const retry = f.pending('thread')[0];
+  equal(
+    new URL(retry.url, 'http://fixture').searchParams.get('id'),
+    incoming.id,
+    'retry resolves the failed manual request rather than the handled alert',
+  );
+  f.respond(retry, { request: incoming, messages: [] });
+  await f.drain();
+  equal(f.selected(), 'Newest', 'retry restores the actual failed selection');
+  equal(
+    f.draft(),
+    'Draft for the manually selected request',
+    'retry restores the failed selection draft',
+  );
+  f.unmount();
+}
+
+// Unauthorized, missing, and malformed target responses do not display an
+// unrelated request or its messages. Transient lookup failures remain retryable.
+for (const [payload, status, expected] of [
+  [{ error: 'You cannot open this conversation.' }, 403, 'You cannot open'],
+  [{ error: 'Collaboration request unavailable.' }, 404, 'request unavailable'],
+  [
+    {
+      request: outsider,
+      messages: [message('private', 'Private outsider history')],
+    },
+    200,
+    'no longer available',
+  ],
+  [
+    { request: sent, messages: [message('wrong-id', 'Wrong target history')] },
+    200,
+    'no longer available',
+  ],
+  [{ error: 'Please retry this connection.' }, 503, 'Please retry'],
+]) {
+  const f = fixture({ requestedCollaborationId: 'outside-page' });
+  f.mount();
+  await f.drain();
+  f.respond(f.pending('inbox')[0], { requests: [incoming], blocks: [] });
+  await f.drain();
+  f.respond(f.pending('thread')[0], payload, status);
+  await f.drain();
+  equal(
+    f.selected(),
+    'Select a request.',
+    'failed target does not select an unrelated conversation',
+  );
+  check(
+    text(f.tree).includes(expected),
+    'failed target shows an honest readable error',
+  );
+  check(
+    !text(f.tree).includes('Private outsider history') &&
+      !text(f.tree).includes('Wrong target history'),
+    'unauthorized or mismatched lookup messages are never published',
+  );
+  f.button('Try again').props.onClick();
+  await f.drain();
+  f.respond(f.pending('inbox')[0], { requests: [incoming], blocks: [] });
+  await f.drain();
+  const restored = { ...older, id: 'outside-page' };
+  f.respond(f.pending('thread')[0], { request: restored, messages: [] });
+  await f.drain();
+  equal(f.selected(), 'Older', 'failed target can recover with a retry');
+  f.unmount();
+}
+
+// Late target lookups cannot replace a newer target, a manual choice, or a new
+// authenticated instance, even when the synthetic transport ignores abort.
+for (const [replacement, completion] of [
+  'target',
+  'manual',
+  'unmount',
+  'user',
+].flatMap((replacement) =>
+  ['success', 'failure'].map((completion) => [replacement, completion]),
+)) {
+  const f = fixture({ requestedCollaborationId: older.id });
+  if (replacement === 'manual') await f.ready();
+  else f.mount();
+  await f.drain();
+  if (replacement === 'manual') {
+    f.update({ requestedCollaborationId: 'outside-page' });
+    await f.drain();
+  }
+  f.respond(f.pending('inbox')[0], { requests: [incoming, sent], blocks: [] });
+  await f.drain();
+  const obsolete = f.pending('thread')[0];
+  if (replacement === 'target') {
+    f.update({ requestedCollaborationId: sent.id });
+    await f.drain();
+    f.respond(f.pending('inbox')[0], {
+      requests: [incoming, sent],
+      blocks: [],
+    });
+    await f.drain();
+    f.respond(f.pending('thread').at(-1), { request: sent, messages: [] });
+    await f.drain();
+  } else if (replacement === 'manual') {
+    f.card('Newest').props.onClick();
+    await f.drain();
+    f.respond(f.pending('thread').at(-1), { messages: [] });
+    await f.drain();
+  } else {
+    f.unmount();
+    if (replacement === 'user') {
+      const next = fixture({
+        userId: 'new-member',
+        requestedCollaborationId: older.id,
+      });
+      next.mount();
+      await next.drain();
+      next.respond(next.pending('inbox')[0], { requests: [], blocks: [] });
+      await next.drain();
+      next.respond(
+        next.pending('thread')[0],
+        { error: 'Collaboration request unavailable.' },
+        404,
+      );
+      await next.drain();
+      check(
+        !text(next.tree).includes('Older') && !next.draft(),
+        'new user cannot inherit old target details or drafts',
+      );
+      next.unmount();
+    }
+  }
+  check(
+    obsolete.init.signal.aborted,
+    'replacement aborts its obsolete target lookup',
+  );
+  f.respond(
+    obsolete,
+    completion === 'success'
+      ? {
+          request: {
+            ...older,
+            id: replacement === 'manual' ? 'outside-page' : older.id,
+          },
+          messages: [message('stale-target', 'Obsolete target history')],
+        }
+      : { error: 'Obsolete target failure' },
+    completion === 'success' ? 200 : 403,
+  );
+  await f.drain();
+  if (replacement === 'target' || replacement === 'manual') {
+    equal(
+      f.selected(),
+      replacement === 'target' ? 'Sent peer' : 'Newest',
+      'late lookup cannot override current choice',
+    );
+    check(
+      !text(f.tree).includes('Obsolete target history') &&
+        !text(f.tree).includes('Obsolete target failure'),
+      'late lookup data and errors are ignored',
+    );
+    f.unmount();
+  }
+  equal(
+    f.lateWrites,
+    0,
+    'obsolete target cannot publish state after unmount or identity change',
+  );
+}
 {
   const f = fixture();
   await f.ready([sent]);
@@ -369,7 +806,7 @@ for (const [id, name, folder] of [
   f.tick();
   f.respond(f.pending('inbox')[0], {
     requests: [
-      { ...sent, status: 'closed' },
+      { ...sent, status: 'closed', updated: 30 },
       incoming,
       { ...older, lastMessage: 'Peer replied' },
     ],
@@ -411,7 +848,7 @@ for (const [id, name, folder] of [
   await f.drain();
   f.tick();
   f.respond(f.pending('inbox')[0], {
-    requests: [incoming, { ...older, status: 'closed' }, sent],
+    requests: [incoming, { ...older, status: 'closed', updated: 30 }, sent],
     blocks: [],
   });
   f.respond(f.pending('thread')[0], { messages: [] });
@@ -422,7 +859,7 @@ for (const [id, name, folder] of [
   );
   f.tick();
   f.respond(f.pending('inbox')[0], {
-    requests: [incoming, older, sent],
+    requests: [incoming, { ...older, updated: 40 }, sent],
     blocks: [],
   });
   f.respond(f.pending('thread')[0], { messages: [] });
