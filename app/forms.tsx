@@ -778,6 +778,14 @@ export function TrackDetail({
     [privacy, setPrivacy] = useState(false),
     [permission, setPermission] = useState('listen'),
     [visibility, setVisibility] = useState('private');
+  const isOwner =
+    !!track &&
+    !track.demo &&
+    typeof user?.id === 'string' &&
+    user.id.trim().length > 0 &&
+    typeof track.owner === 'string' &&
+    track.owner.trim().length > 0 &&
+    track.owner === user.id;
   useEffect(() => {
     setComments([]);
     setError('');
@@ -834,25 +842,23 @@ export function TrackDetail({
                   <Heart size={17} fill={saved ? 'currentColor' : 'none'} />
                   {saved ? 'Saved' : 'Save'}
                 </button>
-                {!!track.price &&
-                  track.owner !== user?.id &&
-                  payments?.configured && (
-                    <button
-                      className={
-                        'button ' + (sellerChargeable ? 'primary' : 'secondary')
-                      }
-                      disabled={!sellerChargeable || !onBuy}
-                      title={
-                        sellerChargeable
-                          ? 'Buy a license — card payment via Stripe'
-                          : 'Card payments pending on this creator'
-                      }
-                      onClick={() => onBuy?.(track)}
-                    >
-                      <CircleDollarSign size={17} />
-                      Buy · {formatPrice(track.price)}
-                    </button>
-                  )}
+                {!!track.price && !isOwner && payments?.configured && (
+                  <button
+                    className={
+                      'button ' + (sellerChargeable ? 'primary' : 'secondary')
+                    }
+                    disabled={!sellerChargeable || !onBuy}
+                    title={
+                      sellerChargeable
+                        ? 'Buy a license — card payment via Stripe'
+                        : 'Card payments pending on this creator'
+                    }
+                    onClick={() => onBuy?.(track)}
+                  >
+                    <CircleDollarSign size={17} />
+                    Buy · {formatPrice(track.price)}
+                  </button>
+                )}
               </div>
               <div className="permission-note">
                 <ShieldCheck size={20} />
@@ -871,8 +877,7 @@ export function TrackDetail({
                   </p>
                 </div>
               </div>
-              {(track.permission === 'collaborate' ||
-                track.owner === user?.id) && (
+              {(track.permission === 'collaborate' || isOwner) && (
                 <button className="button primary" onClick={() => onUse(track)}>
                   {' '}
                   {track.kind === 'song'
@@ -883,7 +888,7 @@ export function TrackDetail({
               )}
               {!track.demo &&
                 track.permission === 'collaborate' &&
-                track.owner !== user?.id && (
+                !isOwner && (
                   <button
                     className="button secondary"
                     onClick={() => onRequest(track)}
@@ -894,7 +899,7 @@ export function TrackDetail({
               {!track.demo &&
                 track.kind === 'beat' &&
                 track.permission === 'collaborate' &&
-                track.owner !== user?.id && (
+                !isOwner && (
                   <button
                     className="button secondary"
                     onClick={() => onRemix(track)}
@@ -902,7 +907,7 @@ export function TrackDetail({
                     Start a tracked remix
                   </button>
                 )}
-              {track.owner === user?.id && (
+              {isOwner && (
                 <div className="actions">
                   <button
                     className="button secondary"
@@ -1021,70 +1026,79 @@ export function TrackDetail({
           </form>
         </DialogContent>
       </Dialog>
-      <Dialog open={privacy} onOpenChange={setPrivacy}>
-        <DialogContent className="form-dialog">
-          <DialogTitle>Who can hear this track?</DialogTitle>
-          <DialogDescription>
-            Changing this does not recall existing working versions, downloads,
-            or recordings.
-          </DialogDescription>
-          <Pick
-            label="Visibility"
-            value={visibility}
-            onChange={setVisibility}
-            options={[
-              { value: 'private', label: 'Private — only you' },
-              { value: 'public', label: 'Public — everyone with site access' },
-            ]}
-          />
-          <Pick
-            label="Creative permission"
-            value={permission}
-            onChange={setPermission}
-            options={[
-              { value: 'listen', label: 'Listen only' },
-              { value: 'collaborate', label: 'Open collaboration' },
-            ]}
-          />
-          <button
-            className="button primary"
-            onClick={async () => {
-              try {
-                await action({
-                  action: 'visibility',
-                  id: track?.id,
-                  visibility,
-                  permission,
-                });
-                setPrivacy(false);
-                onClose();
-                onRefresh();
-                notify('Sharing settings updated.');
-              } catch (e: any) {
-                notify(e.message);
-              }
-            }}
-          >
-            Save settings
-          </button>
-        </DialogContent>
-      </Dialog>
-      <Confirm
-        open={deleting}
-        onClose={() => setDeleting(false)}
-        onConfirm={async () => {
-          try {
-            await action({ action: 'deleteTrack', id: track?.id });
-            onClose();
-            onRefresh();
-            notify('Track removed from the library.');
-          } catch (e: any) {
-            notify(e.message);
-          }
-        }}
-        title="Remove this track from your library?"
-        description="The listing disappears. Audio used in existing projects remains available to those collaborators."
-      />
+      {isOwner && (
+        <Dialog open={privacy} onOpenChange={setPrivacy}>
+          <DialogContent className="form-dialog">
+            <DialogTitle>Who can hear this track?</DialogTitle>
+            <DialogDescription>
+              Changing this does not recall existing working versions,
+              downloads, or recordings.
+            </DialogDescription>
+            <Pick
+              label="Visibility"
+              value={visibility}
+              onChange={setVisibility}
+              options={[
+                { value: 'private', label: 'Private — only you' },
+                {
+                  value: 'public',
+                  label: 'Public — everyone with site access',
+                },
+              ]}
+            />
+            <Pick
+              label="Creative permission"
+              value={permission}
+              onChange={setPermission}
+              options={[
+                { value: 'listen', label: 'Listen only' },
+                { value: 'collaborate', label: 'Open collaboration' },
+              ]}
+            />
+            <button
+              className="button primary"
+              onClick={async () => {
+                if (!isOwner || !track) return;
+                try {
+                  await action({
+                    action: 'visibility',
+                    id: track.id,
+                    visibility,
+                    permission,
+                  });
+                  setPrivacy(false);
+                  onClose();
+                  onRefresh();
+                  notify('Sharing settings updated.');
+                } catch (e: any) {
+                  notify(e.message);
+                }
+              }}
+            >
+              Save settings
+            </button>
+          </DialogContent>
+        </Dialog>
+      )}
+      {isOwner && (
+        <Confirm
+          open={deleting}
+          onClose={() => setDeleting(false)}
+          onConfirm={async () => {
+            if (!isOwner || !track) return;
+            try {
+              await action({ action: 'deleteTrack', id: track.id });
+              onClose();
+              onRefresh();
+              notify('Track removed from the library.');
+            } catch (e: any) {
+              notify(e.message);
+            }
+          }}
+          title="Remove this track from your library?"
+          description="The listing disappears. Audio used in existing projects remains available to those collaborators."
+        />
+      )}
     </>
   );
 }
