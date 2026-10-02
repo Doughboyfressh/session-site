@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import pg from 'pg';
+import {S3Client,DeleteObjectCommand,GetObjectCommand} from '@aws-sdk/client-s3';
 import {loadTS} from './load-ts.mjs';
 const {originalArrangement}=loadTS('lib/originals.ts');
 const {editNotes,applyNotePatch}=loadTS('lib/note-edit.ts');
@@ -11,6 +12,7 @@ const base = process.env.SESSION_VERIFY_BASE || 'http://localhost:3101';
 const tag = crypto.randomBytes(4).toString('hex');
 const actors = [];
 const createdFiles = [];
+const createdUploads = [];
 let checks = 0;
 function check(value, message) { assert.ok(value,message); checks++; }
 async function request(actor, pathname, options = {}, expected = 200) {
@@ -60,6 +62,8 @@ try {
   view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,44100,true);view.setUint32(28,88200,true);
   view.setUint16(32,2,true);view.setUint16(34,16,true);word(36,'data');view.setUint32(40,length-44,true);
   const upload=await json(alice,'/api/upload-session',{operation:'start',name:'synthetic.wav',purpose:'audio',size:length});
+  createdUploads.push({...upload,owner:alice.id});
+  fs.writeFileSync('outputs/deployment-test-uploads.json',JSON.stringify(createdUploads));
   await request(bob,`/api/upload-session?id=${upload.id}&part=0`,{method:'PUT',body:wav.slice(0,upload.chunkSize)},404);
   for (let part=0;part<upload.parts;part++) await request(alice,`/api/upload-session?id=${upload.id}&part=${part}`,
     {method:'PUT',body:wav.slice(part*upload.chunkSize,(part+1)*upload.chunkSize)});
@@ -93,27 +97,87 @@ try {
   await action(alice,{action:'roomProject',id:room.id,mode:'detach',expectedProject:project.id});
   const roomResponse=await request(alice,'/api/room/'+room.id);
   check(roomResponse.ok,'room seen timestamp uses PostgreSQL GREATEST');
+  // Leave one partial upload so cleanup must claim a pending session and erase staging.
+  const partial=await json(alice,'/api/upload-session',{operation:'start',name:'synthetic.wav',purpose:'audio',size:length});
+  createdUploads.push({...partial,owner:alice.id});
+  fs.writeFileSync('outputs/deployment-test-uploads.json',JSON.stringify(createdUploads));
+  await request(alice,`/api/upload-session?id=${partial.id}&part=0`,{method:'PUT',body:wav.slice(0,partial.chunkSize)});
   console.log(`${checks} actual Neon Auth/PostgreSQL/private-storage HTTP checks passed.`);
 } finally {
   // Cleanup is restricted to the synthetic accounts and objects created above.
-  for (const file of createdFiles) await action(file.actor,{action:'eraseFile',id:file.id}).catch(()=>{});
+  const cleanupErrors=[];
   const pool=new pg.Pool({connectionString:process.env.DATABASE_URL});
+  const storage=new S3Client({endpoint:process.env.AWS_ENDPOINT_URL_S3,region:process.env.AWS_REGION,forcePathStyle:true});
+  const bucket=process.env.SESSION_FILES_BUCKET || 'session-files';
+  async function absent(key) {
+    try {
+      const result=await storage.send(new GetObjectCommand({Bucket:bucket,Key:key,Range:'bytes=0-0'}));
+      result.Body?.destroy();
+      throw new Error('Synthetic object still exists: '+key);
+    } catch(error) {assert.equal(error.$metadata?.httpStatusCode,404,'Storage erasure must be confirmed');}
+  }
   const ids=actors.map(a=>a.id);
   if (ids.length) {
+    try {
+      // Reconcile database-owned files even when an upload response was lost.
+      const {rows:files}=await pool.query('SELECT id,owner,name,size,purpose FROM files WHERE owner=ANY($1::text[])',[ids]);
+      const filesById=new Map(createdFiles.map(file=>[file.id,{...file,owner:file.actor.id}]));
+      for(const file of files) {
+        assert.equal(file.name,'synthetic.wav');assert.equal(Number(file.size),6*1024*1024);assert.equal(file.purpose,'audio');
+        filesById.set(file.id,{...file,actor:actors.find(a=>a.id===file.owner)});
+      }
+      for(const file of filesById.values()) {
+        assert.ok(file.actor);
+        await action(file.actor,{action:'eraseFile',id:file.id,confirm:'ERASE'});
+        await absent(file.id);
+      }
+      // Keep session snapshots so removed metadata cannot hide leftover chunks.
+      const {rows:sessions}=await pool.query('SELECT id,owner,parts,status FROM upload_sessions WHERE owner=ANY($1::text[])',[ids]);
+      const uploadsById=new Map(createdUploads.map(upload=>[upload.id,upload]));
+      for(const upload of sessions) uploadsById.set(upload.id,upload);
+      fs.writeFileSync('outputs/deployment-test-uploads.json',JSON.stringify([...uploadsById.values()]));
+      for(const upload of uploadsById.values()) {
+        assert.ok(ids.includes(upload.owner));assert.match(upload.id,/^[0-9a-f-]{36}$/);
+        if(sessions.some(session=>session.id===upload.id)) {
+          assert.ok(['pending','cleaning'].includes(upload.status),'Retain active upload for recovery: '+upload.id);
+          // This claim races the API's pending-to-uploading/finalizing claims.
+          const {rows:locked}=await pool.query("UPDATE upload_sessions SET status='cleaning' WHERE id=$1 AND owner=$2 AND status IN ('pending','cleaning') RETURNING id",[upload.id,upload.owner]);
+          assert.equal(locked.length,1,'Upload became active; retain its actor and metadata');
+        }
+        const parts=Number(upload.parts);assert.ok(Number.isSafeInteger(parts)&&parts>0&&parts<=32);
+        for(let part=0;part<parts;part++) {
+          const key=`staging/${upload.id}/${part}`;
+          await storage.send(new DeleteObjectCommand({Bucket:bucket,Key:key}));
+          await absent(key);
+        }
+        await pool.query('DELETE FROM upload_sessions WHERE id=$1 AND owner=$2',[upload.id,upload.owner]);
+      }
+      for(const table of ['files','upload_sessions']) {
+        const {rows}=await pool.query(`SELECT count(*)::int AS count FROM ${table} WHERE owner=ANY($1::text[])`,[ids]);
+        assert.equal(rows[0].count,0,'Residual synthetic data: '+table);
+      }
+      console.log('Synthetic files and upload staging cleanup verified.');
+    } catch(error) {cleanupErrors.push(error);console.error('Synthetic storage cleanup failed: '+error.message);}
     const client=await pool.connect();
     try {
       await client.query('BEGIN');
-      for (const table of ['project_versions','project_creations','projects','rooms','profiles','upload_sessions'])
+      for (const table of ['project_versions','project_creations','projects','rooms','profiles'])
         await client.query(`DELETE FROM ${table} WHERE ${table==='profiles'?'id':'owner'} = ANY($1::text[])`,[ids]);
       await client.query('DELETE FROM members WHERE "user" = ANY($1::text[])',[ids]);
       await client.query('DELETE FROM rate_limits WHERE split_part(id,\':\',1) = ANY($1::text[])',[ids]);
       await client.query('COMMIT');
-    } catch(error) {await client.query('ROLLBACK'); console.error('Synthetic fixture cleanup failed',error.message);}
+    } catch(error) {await client.query('ROLLBACK'); cleanupErrors.push(error); console.error('Synthetic fixture cleanup failed',error.message);}
     finally {client.release();}
   }
+  storage.destroy();
   await pool.end();
-  for (const actor of actors) {
-    const result=await json(actor,'/api/auth/delete-user',{password:actor.password},undefined).catch(()=>null);
-    if (!result?.success) console.log('Synthetic auth account cleanup requires provider admin: '+actor.id);
+  if (cleanupErrors.length) {
+    process.exitCode=1;
+    console.error('Retained synthetic auth accounts until file/database cleanup can be completed.');
+  } else {
+    for (const actor of actors) {
+      const result=await json(actor,'/api/auth/delete-user',{password:actor.password},undefined).catch(()=>null);
+      if (!result?.success) console.log('Synthetic auth account cleanup requires provider admin: '+actor.id);
+    }
   }
 }
