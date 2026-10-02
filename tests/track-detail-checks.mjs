@@ -117,10 +117,11 @@ function fixture(track, user) {
     },
   });
   let tree;
-  function render(nextProps = {}) {
+  function render(nextProps = {}, { effects = true } = {}) {
     props = { ...props, ...nextProps };
     cursor = 0;
     tree = exports.TrackDetail(props);
+    if (!effects) return tree;
     let ran = false;
     for (const entry of hooks)
       if (entry.pending) {
@@ -163,7 +164,18 @@ function fixture(track, user) {
         node.props['aria-label'] === label || text(node).trim() === label,
     );
   render();
-  return { render, nodes, button, actions, callbacks };
+  return {
+    render,
+    nodes,
+    button,
+    actions,
+    callbacks,
+    seedDeletionDialog() {
+      // Seed only the component's local deleting hook. Do not invoke either
+      // deletion event handler or the confirmation callback.
+      hooks[5].value = true;
+    },
+  };
 }
 
 function permissions(
@@ -349,6 +361,72 @@ equal(
   0,
   'switching to an Original removes deletion action',
 );
+
+const secondOwnedTrack = { ...community, id: 'fixture-second-owned' };
+for (const modal of ['sharing', 'deletion']) {
+  function open(view) {
+    if (modal === 'sharing') view.button('Sharing settings').props.onClick();
+    else view.seedDeletionDialog();
+    view.render();
+  }
+  const isOpen = (view) =>
+    modal === 'sharing'
+      ? !!view.button('Save settings')
+      : view.nodes('Confirm').length === 1;
+  const direct = fixture(community, { id: 'owner-id' });
+  open(direct);
+  equal(isOpen(direct), true, modal + ': current owner can open the dialog');
+  direct.render({ track: secondOwnedTrack }, { effects: false });
+  equal(
+    isOpen(direct),
+    false,
+    modal + ': direct owned-track switch hides stale dialog before effects',
+  );
+  direct.render();
+  equal(
+    isOpen(direct),
+    false,
+    modal + ': direct owned-track switch clears stale dialog',
+  );
+  open(direct);
+  equal(
+    isOpen(direct),
+    true,
+    modal + ': new owned track can open a fresh dialog',
+  );
+
+  for (const nextTrack of [community, secondOwnedTrack]) {
+    const regained = fixture(community, { id: 'owner-id' });
+    open(regained);
+    regained.render({ user: null }, { effects: false });
+    equal(
+      isOpen(regained),
+      false,
+      modal + ': ownership loss hides dialog before effects',
+    );
+    regained.render(
+      { user: { id: 'owner-id' }, track: nextTrack },
+      { effects: false },
+    );
+    equal(
+      isOpen(regained),
+      false,
+      modal + ': ownership regain cannot reopen stale dialog',
+    );
+    regained.render();
+    equal(
+      isOpen(regained),
+      false,
+      modal + ': ownership regain keeps dialog closed after effects',
+    );
+    open(regained);
+    equal(
+      isOpen(regained),
+      true,
+      modal + ': regained owner can open a fresh dialog',
+    );
+  }
+}
 
 console.log(
   `PASS: ${assertions} actual TrackDetail ownership and collaboration assertions; all actions synthetic and no deletion clicks.`,

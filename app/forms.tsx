@@ -786,6 +786,16 @@ export function TrackDetail({
     typeof track.owner === 'string' &&
     track.owner.trim().length > 0 &&
     track.owner === user.id;
+  const ownerContext = isOwner ? JSON.stringify([track.id, user.id]) : null;
+  const [dialogContext, setDialogContext] = useState(ownerContext);
+  const dialogsCurrent = dialogContext === ownerContext;
+  // Reset before effects so track switches and regained ownership cannot
+  // inherit an open management dialog from the previous context.
+  if (!dialogsCurrent) {
+    setDialogContext(ownerContext);
+    setPrivacy(false);
+    setDeleting(false);
+  }
   useEffect(() => {
     setComments([]);
     setError('');
@@ -1027,7 +1037,7 @@ export function TrackDetail({
         </DialogContent>
       </Dialog>
       {isOwner && (
-        <Dialog open={privacy} onOpenChange={setPrivacy}>
+        <Dialog open={dialogsCurrent && privacy} onOpenChange={setPrivacy}>
           <DialogContent className="form-dialog">
             <DialogTitle>Who can hear this track?</DialogTitle>
             <DialogDescription>
@@ -1082,7 +1092,7 @@ export function TrackDetail({
       )}
       {isOwner && (
         <Confirm
-          open={deleting}
+          open={dialogsCurrent && deleting}
           onClose={() => setDeleting(false)}
           onConfirm={async () => {
             if (!isOwner || !track) return;
