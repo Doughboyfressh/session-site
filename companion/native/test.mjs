@@ -70,6 +70,9 @@ const silence = await audio({ ...base, notes: [] }); assert.equal(silence.peak, 
 checks.push({ name: 'empty score silence', frames: silence.frames });
 const rate = await audio({ ...base, sampleRate: 44100 }); assert.equal(rate.frames, 110250); assert.ok(rate.first >= 22050 && rate.first < 22562);
 checks.push({ name: '44100Hz render', frames: rate.frames, onsetFrame: rate.first });
+const fractional = await audio({ ...base, bpm: 137.2, beats: 2.25, sampleRate: 44100 });
+assert.equal(fractional.frames, Math.ceil((2.25 * 60 / 137.2 + 0.5) * 44100));
+checks.push({ name: 'fractional tempo and score use ceiling frame count', frames: fractional.frames });
 const invalid = [
   { ...base, bpm: 20 }, { ...base, bpm: 241 }, { ...base, beats: 513 }, { ...base, beats: 512, bpm: 40 },
   { ...base, sampleRate: 47999 }, { ...base, classId: 'z'.repeat(32) }, { ...base, classId: '0'.repeat(32) },

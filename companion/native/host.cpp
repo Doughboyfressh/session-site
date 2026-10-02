@@ -354,7 +354,7 @@ Json render(const Json& request, const fs::path& response) {
   }
   std::sort(notes.begin(), notes.end(), [](const auto& a, const auto& b) { return a.sample < b.sample || (a.sample == b.sample && a.on < b.on); });
   Plugin plugin(path, stringField(request, "classId"), stateInput(request)); plugin.start(static_cast<int>(sampleRate), bpm, kOffline);
-  const auto total = static_cast<uint32_t>(std::llround(duration * sampleRate));
+  const auto total = static_cast<uint32_t>(std::ceil(duration * sampleRate));
   Wav wav(audio, static_cast<int>(sampleRate), total); size_t next = 0; std::vector<float> samples;
   for (int64 offset = 0; offset < total; offset += blockSize) {
     auto frames = static_cast<int>(std::min<int64>(blockSize, total - offset));
