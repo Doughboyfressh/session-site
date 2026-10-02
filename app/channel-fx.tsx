@@ -44,11 +44,13 @@ export default function ChannelFx({
     <>
       <div className="mixer-divider">SATURATION</div>
       <Range
+        disabled={disabled}
         label={'Drive · ' + pct(track.drive)}
         value={track.drive || 0}
         onChange={(v) => patch({ drive: v })}
       />
       <Pick
+        disabled={disabled}
         label="Character"
         value={track.driveType || 'soft'}
         onChange={(v) => patch({ driveType: v as DriveType })}
@@ -57,17 +59,20 @@ export default function ChannelFx({
 
       <div className="mixer-divider">MODULATION</div>
       <Pick
+        disabled={disabled}
         label="Type"
         value={track.modType || 'chorus'}
         onChange={(v) => patch({ modType: v as ModType })}
         options={MOD_TYPES.map((t) => ({ value: t, label: cap(t) }))}
       />
       <Range
+        disabled={disabled}
         label={'Depth · ' + pct(track.mod)}
         value={track.mod || 0}
         onChange={(v) => patch({ mod: v })}
       />
       <Range
+        disabled={disabled}
         label={'Rate · ' + pct(track.modRate)}
         value={track.modRate || 0}
         onChange={(v) => patch({ modRate: v })}
@@ -75,11 +80,13 @@ export default function ChannelFx({
 
       <div className="mixer-divider">DYNAMICS</div>
       <Range
+        disabled={disabled}
         label={'Limiter · ' + pct(track.limiter)}
         value={track.limiter || 0}
         onChange={(v) => patch({ limiter: v })}
       />
       <Range
+        disabled={disabled}
         label={'Sidechain pump · ' + pct(track.pump)}
         value={track.pump || 0}
         onChange={(v) => patch({ pump: v })}
@@ -89,6 +96,7 @@ export default function ChannelFx({
         <>
           <div className="mixer-divider">VOCAL</div>
           <Range
+            disabled={disabled}
             label={'Denoise · ' + pct(track.denoise)}
             value={track.denoise || 0}
             onChange={(v) => patch({ denoise: v })}
@@ -108,6 +116,7 @@ export default function ChannelFx({
           )}{' '}
           <div className="mixer-divider">TIME &amp; PITCH</div>
           <Range
+            disabled={disabled}
             label={'Pitch shift · ' + (track.pitchShift || 0) + ' st'}
             value={track.pitchShift || 0}
             min={-12}
@@ -116,6 +125,7 @@ export default function ChannelFx({
             onChange={(v) => patch({ pitchShift: v })}
           />
           <Range
+            disabled={disabled}
             label={'Stretch · ' + Math.round((track.stretch || 1) * 100) + '%'}
             value={track.stretch || 1}
             min={0.5}
@@ -127,9 +137,11 @@ export default function ChannelFx({
       )}
       <div className="mixer-divider">FX PRESETS</div>
       <Pick
+        disabled={disabled}
         label="Apply a preset"
         value={choice}
         onChange={(v) => {
+          if (disabled) return;
           setChoice(v);
           const p = v.startsWith('user:')
             ? user.find((x) => x.name === v.slice(5))
