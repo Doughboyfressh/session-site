@@ -1,5 +1,6 @@
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { prepareNotification } from '@/lib/social-server';
+import { roomInviteActivityFields } from '@/lib/room-invites';
 import {
   all,
   choice,
@@ -85,8 +86,10 @@ export async function GET(req: Request) {
     if (view === 'activity') {
       const items = await all(
         `SELECT n.id,n.kind,n.resourceType,n.resourceId,n.body,n.created,n.readAt,
-          COALESCE(p.name,'SESSION member') AS actorName,p.avatar AS actorAvatar
+          COALESCE(p.name,'SESSION member') AS actorName,p.avatar AS actorAvatar,
+          ${roomInviteActivityFields}
          FROM notifications n
+         LEFT JOIN rooms r ON n.resourceType='room_invite' AND r.id=n.resourceId
          LEFT JOIN profiles p ON p.id=n.actor AND p.visibility='public'
           AND NOT EXISTS (
             SELECT 1 FROM user_blocks b
@@ -96,6 +99,7 @@ export async function GET(req: Request) {
          WHERE n.user=?
          ORDER BY n.created DESC
          LIMIT 100`,
+        Date.now(),
         uid,
       );
       const unread = await one(

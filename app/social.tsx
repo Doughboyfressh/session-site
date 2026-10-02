@@ -1,6 +1,14 @@
 'use client';
+import './room-invitations.css';
 
-import { useEffect, useMemo, useState, type SyntheticEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type SyntheticEvent,
+} from 'react';
 import {
   Bell,
   Check,
@@ -19,7 +27,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Avatar, Pick } from './helpers';
+import { action, Avatar, Pick } from './helpers';
 
 type ActivityItem = {
   id: string;
@@ -31,6 +39,14 @@ type ActivityItem = {
   resourceId: string;
   created: number;
   readAt?: number | null;
+  inviteStatus?:
+    | 'pending'
+    | 'joined'
+    | 'declined'
+    | 'expired'
+    | 'unavailable'
+    | 'full';
+  inviteExpires?: number | null;
 };
 
 type Collaboration = {
@@ -150,39 +166,43 @@ export function ActivityView({
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [joiningInvite, setJoiningInvite] = useState('');
+  const inviteBusy = useRef(false);
+  const activityRequest = useRef(0);
+  const activityController = useRef<AbortController | null>(null);
 
-  async function load(signal?: AbortSignal) {
-    try {
-      const data = await socialFetch<ActivityResponse>(
-        '/api/social?view=activity',
-        { signal },
-      );
-      setItems(data.items);
-      setError('');
-      onUnreadChange(data.unread);
-    } catch (cause: unknown) {
-      if (!isAbortError(cause)) setError(errorMessage(cause));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void socialFetch<ActivityResponse>('/api/social?view=activity', {
-      signal: controller.signal,
-    })
-      .then((data) => {
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      const request = ++activityRequest.current;
+      try {
+        const data = await socialFetch<ActivityResponse>(
+          '/api/social?view=activity',
+          { signal },
+        );
+        if (signal?.aborted || request !== activityRequest.current) return;
         setItems(data.items);
         setError('');
         onUnreadChange(data.unread);
-      })
-      .catch((cause: unknown) => {
-        if (!isAbortError(cause)) setError(errorMessage(cause));
-      })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [onUnreadChange]);
+      } catch (cause: unknown) {
+        if (!isAbortError(cause) && request === activityRequest.current)
+          setError(errorMessage(cause));
+      } finally {
+        if (request === activityRequest.current) setLoading(false);
+      }
+    },
+    [onUnreadChange],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    activityController.current = controller;
+    void Promise.resolve().then(() => load(controller.signal));
+    const timer = setInterval(() => void load(controller.signal), 15000);
+    return () => {
+      clearInterval(timer);
+      controller.abort();
+    };
+  }, [load]);
 
   async function markRead(id?: string) {
     try {
@@ -198,6 +218,31 @@ export function ActivityView({
       onUnreadChange(remaining);
     } catch (cause: unknown) {
       setError(errorMessage(cause));
+    }
+  }
+
+  async function respondInvite(
+    item: ActivityItem,
+    response: 'accepted' | 'declined',
+  ) {
+    if (inviteBusy.current) return;
+    inviteBusy.current = true;
+    setJoiningInvite(item.id);
+    setError('');
+    try {
+      const signal = activityController.current?.signal;
+      const result = await action(
+        { action: 'respondRoomInvite', id: item.id, response },
+        { signal },
+      );
+      await load(signal);
+      if (!signal?.aborted && response === 'accepted')
+        onOpen({ ...item, resourceType: 'room', resourceId: result.id });
+    } catch (cause) {
+      if (!isAbortError(cause)) setError(errorMessage(cause));
+    } finally {
+      inviteBusy.current = false;
+      setJoiningInvite('');
     }
   }
 
@@ -236,16 +281,71 @@ export function ActivityView({
                   profile={{ name: item.actorName, avatar: item.actorAvatar }}
                   size={42}
                 />
-                <button
-                  className="activity-copy"
-                  onClick={() => {
-                    if (!item.readAt) void markRead(item.id);
-                    onOpen(item);
-                  }}
-                >
-                  <strong>{item.actorName}</strong> {item.body}
-                  <small>{when(item.created)}</small>
-                </button>
+                {item.resourceType === 'room_invite' ? (
+                  <div className="activity-copy">
+                    <strong>{item.actorName}</strong> {item.body}
+                    <small>{when(item.created)}</small>
+                    <div className="actions room-invite-actions">
+                      {item.inviteStatus === 'joined' ? (
+                        <button
+                          className="button secondary"
+                          onClick={() => {
+                            void markRead(item.id);
+                            onOpen({ ...item, resourceType: 'room' });
+                          }}
+                        >
+                          Open session
+                        </button>
+                      ) : item.inviteStatus === 'pending' ||
+                        item.inviteStatus === 'full' ? (
+                        <>
+                          <button
+                            className="button primary"
+                            disabled={
+                              !!joiningInvite || item.inviteStatus === 'full'
+                            }
+                            onClick={() => void respondInvite(item, 'accepted')}
+                          >
+                            {joiningInvite === item.id
+                              ? 'Working…'
+                              : item.inviteStatus === 'full'
+                                ? 'Session full'
+                                : 'Join session'}
+                          </button>
+                          <button
+                            className="button secondary"
+                            disabled={!!joiningInvite}
+                            onClick={() => void respondInvite(item, 'declined')}
+                          >
+                            Decline
+                          </button>
+                          {item.inviteExpires && (
+                            <small>Expires {when(item.inviteExpires)}</small>
+                          )}
+                        </>
+                      ) : (
+                        <small>
+                          {item.inviteStatus === 'declined'
+                            ? 'Invitation declined'
+                            : item.inviteStatus === 'expired'
+                              ? 'Invitation expired or replaced'
+                              : 'Session unavailable'}
+                        </small>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    className="activity-copy"
+                    onClick={() => {
+                      if (!item.readAt) void markRead(item.id);
+                      onOpen(item);
+                    }}
+                  >
+                    <strong>{item.actorName}</strong> {item.body}
+                    <small>{when(item.created)}</small>
+                  </button>
+                )}
                 {!item.readAt && (
                   <button
                     className="activity-read"

@@ -22,6 +22,8 @@ SESSION is a browser music studio with private projects, community features, and
 
 ## Lessons
 
+- 2026-10-01 — Select exported notification fields explicitly so internal invitation keys never disclose a room's bearer token.
+
 - 2026-10-01 — Send explicit ERASE confirmation for disposable-file cleanup, fail verification when cleanup fails, and check storage and database records before deleting test auth accounts.
 
 - 2026-10-01 — Give repeated generated instruments an explicit loop length; test all-note timing edits and derive tempo limits from their scores before audio enrichment completes.

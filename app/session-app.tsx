@@ -1918,7 +1918,16 @@ export default function SessionApp({
                 onOpen={(item) => {
                   if (item.resourceType === 'collaboration')
                     go('Collaborations');
-                  else if (item.resourceType === 'track') {
+                  else if (item.resourceType === 'room') {
+                    setRoomId(item.resourceId);
+                    go('Room');
+                    window.history.replaceState(
+                      null,
+                      '',
+                      '?room=' + encodeURIComponent(item.resourceId),
+                    );
+                    void refresh();
+                  } else if (item.resourceType === 'track') {
                     const track = allTracks.find(
                       (candidate) => candidate.id === item.resourceId,
                     );

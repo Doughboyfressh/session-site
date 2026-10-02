@@ -17,6 +17,7 @@ import {
   UserMinus,
   Activity,
   Settings2,
+  UserPlus,
 } from 'lucide-react';
 import { action, Avatar, Confirm, Pick } from './helpers';
 import {
@@ -28,6 +29,7 @@ import {
 import { PeerLink } from '@/lib/peer';
 import Diagnostics from './diagnostics';
 import RoomStudio from './room-studio';
+import RoomInvitations from './room-invitations';
 import Studio from './studio';
 import { StudioBroadcast, RoomMicrophones } from '@/lib/room-audio';
 import type { Track } from '@/lib/catalog';
@@ -108,6 +110,7 @@ export default function Room({
   const [opened, setOpened] = useState<any>(null);
   const [opening, setOpening] = useState(false);
   const [showChat, setShowChat] = useState(true);
+  const [invitePeople, setInvitePeople] = useState(false);
   const [available, setAvailable] = useState(true);
   const [music, setMusic] = useState<MediaStream | null>(null);
   const [musicBusy, setMusicBusy] = useState(false);
@@ -770,12 +773,29 @@ export default function Room({
             Back to rooms
           </button>
           {available && state?.room.owner === user.id && (
-            <button className="button primary" onClick={copy}>
-              <Copy size={16} /> Copy invite
-            </button>
+            <>
+              <button
+                className="button primary"
+                onClick={() => setInvitePeople(true)}
+              >
+                <UserPlus size={16} /> Invite people
+              </button>
+              <button className="button secondary" onClick={copy}>
+                <Copy size={16} /> Copy invite
+              </button>
+            </>
           )}
         </div>
       </div>
+      {invitePeople && available && state?.room.owner === user.id && (
+        <RoomInvitations
+          key={id}
+          roomId={id}
+          memberCount={state.members?.length || 1}
+          onClose={() => setInvitePeople(false)}
+          notify={notify}
+        />
+      )}
       {error && (
         <div role="alert" className="error-banner">
           {error}

@@ -1224,4 +1224,306 @@ assert.deepEqual(
 );
 checks++;
 
-console.log('Social collaboration backend checks passed:', checks);
+// Native session invitations execute the real API and persist through Alerts.
+const inviteHost = 'native-host',
+  inviteGuest = 'native-guest';
+for (const [id, username, visibility] of [
+  [inviteHost, 'native_host', 'public'],
+  [inviteGuest, 'native_guest', 'public'],
+  ['native-private', 'native_private', 'private'],
+  ['native-blocked', 'native_blocked', 'public'],
+  ['native-other', 'native_other', 'public'],
+])
+  await act(id, {
+    action: 'profile',
+    username,
+    name: username,
+    roles: ['Producer'],
+    visibility,
+  });
+const inviteRoom = await act(inviteHost, {
+  action: 'room',
+  title: 'Native invitation session',
+  visibility: 'invite',
+});
+db.prepare('INSERT INTO user_blocks(user,target,created) VALUES (?,?,?)').run(
+  'native-blocked',
+  inviteHost,
+  now,
+);
+let candidates = await act(inviteHost, {
+  action: 'roomInviteCandidates',
+  id: inviteRoom.id,
+  query: '@native_',
+});
+assert.deepEqual(
+  candidates.profiles.map((p) => p.id),
+  [inviteGuest, 'native-other'],
+);
+checks++;
+assert.equal(candidates.memberCount, 1);
+checks++;
+await act(
+  inviteGuest,
+  { action: 'inviteRoom', id: inviteRoom.id, recipient: 'native-other' },
+  403,
+);
+await act(
+  inviteHost,
+  { action: 'inviteRoom', id: inviteRoom.id, recipient: inviteHost },
+  400,
+);
+await act(
+  inviteHost,
+  { action: 'inviteRoom', id: inviteRoom.id, recipient: 'native-private' },
+  409,
+);
+await act(
+  inviteHost,
+  { action: 'inviteRoom', id: inviteRoom.id, recipient: 'native-blocked' },
+  409,
+);
+await act(
+  null,
+  { action: 'inviteRoom', id: inviteRoom.id, recipient: inviteGuest },
+  401,
+);
+await act(inviteHost, {
+  action: 'inviteRoom',
+  id: inviteRoom.id,
+  recipient: inviteGuest,
+});
+await act(inviteHost, {
+  action: 'inviteRoom',
+  id: inviteRoom.id,
+  recipient: inviteGuest,
+});
+let invitations = (await socialGet(inviteGuest, 'view=activity')).items.filter(
+  (n) => n.resourceType === 'room_invite',
+);
+assert.equal(invitations.length, 1);
+checks++;
+assert.equal(invitations[0].inviteStatus, 'pending');
+checks++;
+assert.ok(
+  !JSON.stringify(invitations).includes(
+    db.prepare('SELECT invite FROM rooms WHERE id=?').get(inviteRoom.id).invite,
+  ),
+  'bearer secret stays server-side',
+);
+checks++;
+const inviteNotice = invitations[0].id;
+const invitedExport = await act(inviteGuest, { action: 'exportData' });
+assert.ok(
+  !JSON.stringify(invitedExport).includes(
+    db.prepare('SELECT invite FROM rooms WHERE id=?').get(inviteRoom.id).invite,
+  ),
+  'account export also excludes bearer secrets',
+);
+checks++;
+assert.ok(invitedExport.activity.every((n) => !Object.hasOwn(n, 'uniqueKey')));
+checks++;
+await act(
+  inviteHost,
+  { action: 'respondRoomInvite', id: inviteNotice, response: 'accepted' },
+  404,
+);
+let joinedRoom = await act(inviteGuest, {
+  action: 'respondRoomInvite',
+  id: inviteNotice,
+  response: 'accepted',
+});
+assert.equal(joinedRoom.id, inviteRoom.id);
+checks++;
+await act(inviteGuest, {
+  action: 'respondRoomInvite',
+  id: inviteNotice,
+  response: 'accepted',
+});
+assert.equal(
+  db
+    .prepare('SELECT COUNT(*) n FROM members WHERE room=? AND user=?')
+    .get(inviteRoom.id, inviteGuest).n,
+  1,
+);
+checks++;
+assert.equal(
+  db
+    .prepare('SELECT COUNT(*) n FROM room_editors WHERE room=? AND user=?')
+    .get(inviteRoom.id, inviteGuest).n,
+  0,
+  'joining does not grant editing',
+);
+checks++;
+assert.equal(
+  (await socialGet(inviteGuest, 'view=activity')).items.find(
+    (n) => n.id === inviteNotice,
+  ).inviteStatus,
+  'joined',
+);
+checks++;
+await act(
+  inviteGuest,
+  { action: 'inviteRoom', id: inviteRoom.id, recipient: 'native-other' },
+  403,
+);
+await act(inviteHost, {
+  action: 'inviteRoom',
+  id: inviteRoom.id,
+  recipient: 'native-other',
+});
+let otherNotice = (await socialGet('native-other', 'view=activity')).items.find(
+  (n) => n.resourceType === 'room_invite',
+);
+await act('native-other', {
+  action: 'respondRoomInvite',
+  id: otherNotice.id,
+  response: 'declined',
+});
+await act(
+  'native-other',
+  { action: 'respondRoomInvite', id: otherNotice.id, response: 'accepted' },
+  403,
+);
+assert.equal(
+  (await socialGet('native-other', 'view=activity')).items.find(
+    (n) => n.id === otherNotice.id,
+  ).inviteStatus,
+  'declined',
+);
+checks++;
+await act(inviteHost, { action: 'rotateInvite', id: inviteRoom.id });
+await act(inviteHost, {
+  action: 'inviteRoom',
+  id: inviteRoom.id,
+  recipient: 'native-other',
+});
+otherNotice = (await socialGet('native-other', 'view=activity')).items.find(
+  (n) => n.kind === 'room_invite',
+);
+await act(inviteHost, { action: 'rotateInvite', id: inviteRoom.id });
+await act(
+  'native-other',
+  { action: 'respondRoomInvite', id: otherNotice.id, response: 'accepted' },
+  403,
+);
+assert.equal(
+  (await socialGet('native-other', 'view=activity')).items.find(
+    (n) => n.id === otherNotice.id,
+  ).inviteStatus,
+  'expired',
+);
+checks++;
+// Fill the final seat between authorization and the insertion, not a SQL mirror.
+await act(inviteHost, {
+  action: 'inviteRoom',
+  id: inviteRoom.id,
+  recipient: 'native-other',
+});
+otherNotice = (await socialGet('native-other', 'view=activity')).items.find(
+  (n) => n.inviteStatus === 'pending',
+);
+beforeBatch = () => {
+  for (const member of ['seat-3', 'seat-4'])
+    db.prepare('INSERT INTO members(room,user,seen) VALUES (?,?,?)').run(
+      inviteRoom.id,
+      member,
+      now,
+    );
+};
+await act(
+  'native-other',
+  { action: 'respondRoomInvite', id: otherNotice.id, response: 'accepted' },
+  409,
+);
+assert.equal(
+  db.prepare('SELECT COUNT(*) n FROM members WHERE room=?').get(inviteRoom.id)
+    .n,
+  4,
+);
+checks++;
+assert.equal(
+  (await socialGet('native-other', 'view=activity')).items.find(
+    (n) => n.id === otherNotice.id,
+  ).inviteStatus,
+  'full',
+);
+checks++;
+db.prepare('DELETE FROM members WHERE room=? AND user=?').run(
+  inviteRoom.id,
+  'seat-4',
+);
+await act('native-other', {
+  action: 'respondRoomInvite',
+  id: otherNotice.id,
+  response: 'accepted',
+});
+await act(inviteHost, {
+  action: 'removeMember',
+  id: inviteRoom.id,
+  user: 'native-other',
+});
+await act(
+  'native-other',
+  { action: 'respondRoomInvite', id: otherNotice.id, response: 'accepted' },
+  403,
+);
+await act(inviteHost, {
+  action: 'inviteRoom',
+  id: inviteRoom.id,
+  recipient: 'native-other',
+});
+otherNotice = (await socialGet('native-other', 'view=activity')).items.find(
+  (n) => n.inviteStatus === 'pending',
+);
+beforeBatch = () =>
+  db
+    .prepare('INSERT INTO user_blocks(user,target,created) VALUES (?,?,?)')
+    .run('native-other', inviteHost, now);
+await act(
+  'native-other',
+  { action: 'respondRoomInvite', id: otherNotice.id, response: 'accepted' },
+  403,
+);
+db.prepare('DELETE FROM user_blocks WHERE user=? AND target=?').run(
+  'native-other',
+  inviteHost,
+);
+db.prepare('UPDATE rooms SET expires=? WHERE id=?').run(now - 1, inviteRoom.id);
+await act(
+  'native-other',
+  { action: 'respondRoomInvite', id: otherNotice.id, response: 'accepted' },
+  403,
+);
+await act(
+  inviteHost,
+  { action: 'inviteRoom', id: inviteRoom.id, recipient: 'native-other' },
+  409,
+);
+await act(inviteHost, { action: 'rotateInvite', id: inviteRoom.id });
+await act(inviteHost, {
+  action: 'inviteRoom',
+  id: inviteRoom.id,
+  recipient: 'native-other',
+});
+otherNotice = (await socialGet('native-other', 'view=activity')).items.find(
+  (n) => n.inviteStatus === 'pending',
+);
+await act(inviteHost, { action: 'closeRoom', id: inviteRoom.id });
+await act(
+  'native-other',
+  { action: 'respondRoomInvite', id: otherNotice.id, response: 'accepted' },
+  403,
+);
+assert.equal(
+  (await socialGet('native-other', 'view=activity')).items.find(
+    (n) => n.id === otherNotice.id,
+  ).inviteStatus,
+  'unavailable',
+);
+checks++;
+
+console.log(
+  'Social collaboration and native session invitation backend checks passed:',
+  checks,
+);
