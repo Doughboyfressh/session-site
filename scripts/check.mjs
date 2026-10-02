@@ -33,6 +33,7 @@ const checks = [
     'app/scene-3d.tsx',
     'app/feed-hero.tsx',
     'tests/scene-harness.tsx',
+    'tests/scene-lifecycle-checks.mjs',
     'tests/ui-defects-harness.tsx',
     'app/landing-page.tsx',
     'app/workspace-page.tsx',
