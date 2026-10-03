@@ -117,7 +117,7 @@ const captions: Record<string, string> = {
 export default function SessionApp({
   user,
 }: {
-  user: { id: string; name: string } | null;
+  user: { id: string; name: string; developer?: boolean } | null;
 }) {
   useEffect(() => {
     disconnectCompanion();
@@ -2535,6 +2535,16 @@ export default function SessionApp({
                 )}
               </button>
             ))}
+            {user?.developer && (
+              <a className="workspace-destination" href="/developer">
+                <SlidersHorizontal size={20} />
+                <span>
+                  <strong>Developer dashboard</strong>
+                  <small>Private creator metrics and operations</small>
+                </span>
+                <ArrowUpRight size={16} />
+              </a>
+            )}
           </nav>
         </DialogContent>
       </Dialog>
