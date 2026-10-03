@@ -10,7 +10,7 @@ import {
 import BrowserInstrumentControls from './browser-instrument-controls';
 import { Pick, upload } from './helpers';
 
-const SETUP = 'https://github.com/Doughboyfressh/session-site/releases/tag/session-companion-v0.1.0';
+const SETUP = 'https://github.com/Doughboyfressh/session-site/releases/tag/session-companion-v0.1.1';
 export default function PluginInstruments({ track, bpm, projectId = '', disabled = false, onChange, onActivity }: {
   track: MixerTrack;
   bpm: number;

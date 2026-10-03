@@ -8,7 +8,7 @@ In Studio, open an instrument track's Piano roll and use **Instrument plugins â†
 
 ## Installed Windows VST3 instruments
 
-1. Download the Windows x64 companion from [SESSION's release page](https://github.com/Doughboyfressh/session-site/releases/tag/session-companion-v0.1.0).
+1. Download the Windows x64 companion from [SESSION's release page](https://github.com/Doughboyfressh/session-site/releases/tag/session-companion-v0.1.1).
 2. Extract the whole ZIP. Keep the bundled executable, Node runtime and notices together. Run `start-session-companion.cmd` and leave its console open.
 3. Open SESSION at `https://session-site-eosin.vercel.app`, expand **Connect installed VST3 instruments**, and paste the fresh pairing code. If your browser requests local network access, allow it to connect to your companion.
 4. Select an installed instrument. **Open VST3 editor** opens its real native window; close it to attach settings privately to the project. Save to retain those settings.
@@ -27,6 +27,7 @@ Serum 2 requires each musician's separately installed license, content and vendo
 - Native hosting supports Windows x64 float32 VST3 instruments with note input; VST2, AU and AAX are unsupported. Browser synths need no companion.
 - Piano-roll playback and exports render native scores first. Use the native editor for live audition. Record physical MIDI with a browser instrument, then switch the track to VST3.
 - The host supplies stereo, 4/4 transport and a 0.5-second tail. It has no MPE, native automation lanes or plugin latency compensation. Editor audio processes on the UI thread and can stutter under heavy interaction.
+- Full component reload callbacks are unsupported. Editors relying on host-forwarded keyboard/focus interface callbacks may have limited keyboard interaction.
 - Native scores allow 256 notes, 512 beats, 40â€“240 BPM and five minutes including the tail. Saved audio is limited to 25 MiB; long stereo scores may need shortening. State allows 8 MiB decoded. One native job runs at a time; scans have a 45-second total budget.
 - The portable companion is an unsigned early-access Windows build. SESSION does not install/activate vendor instruments or bypass system warnings.
 

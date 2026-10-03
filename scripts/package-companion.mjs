@@ -59,6 +59,7 @@ async function main() {
   // Tests execute with exactly the Node executable copied into the download.
   run(runtime.executable, [path.join(sourceRoot, 'tests', 'plugin-bridge-checks.mjs')]);
   run(runtime.executable, [path.join(root, 'companion', 'native', 'test.mjs')], { env: { ...process.env, SESSION_VST3_HOST: host, SESSION_VST3_TEST_PLUGIN: testPlugin } });
+  run(runtime.executable, [path.join(root, 'companion', 'native', 'compatibility-test.mjs')], { env: { ...process.env, SESSION_VST3_HOST: host } });
   const releases = path.join(root, 'outputs', 'companion-release');
   const buildId = randomUUID();
   const stage = path.join(releases, `build-${buildId}`, 'session-companion-windows-x64');
@@ -84,7 +85,7 @@ async function main() {
   JSON.parse(run(path.join(stage, 'node.exe'), [smokePath]));
   const files = {};
   for (const name of [...copies.map(([, name]) => name), 'START-HERE.txt']) files[name] = { bytes: (await stat(path.join(stage, name))).size, sha256: hash(await readFile(path.join(stage, name))) };
-  await writeFile(path.join(stage, 'manifest.json'), JSON.stringify({ version: 1, platform: 'win32-x64', node: { version: nodeVersion, archiveSha256: nodeArchiveHash }, files }, null, 2));
+  await writeFile(path.join(stage, 'manifest.json'), JSON.stringify({ version: 1, releaseVersion: '0.1.1', platform: 'win32-x64', node: { version: nodeVersion, archiveSha256: nodeArchiveHash }, files }, null, 2));
   const zip = path.join(releases, 'session-companion-windows-x64.zip');
   try { await unlink(zip); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   powershell(`$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::CreateFromDirectory(${quotePS(stage)},${quotePS(zip)},[IO.Compression.CompressionLevel]::Optimal,$true)`);

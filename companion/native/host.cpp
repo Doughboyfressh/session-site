@@ -157,7 +157,12 @@ public:
     pending[id] = value; return kResultOk;
   }
   tresult PLUGIN_API endEdit(ParamID) override { return kResultOk; }
-  tresult PLUGIN_API restartComponent(int32 flags) override { restart |= flags; return kResultOk; }
+  tresult PLUGIN_API restartComponent(int32 flags) override {
+    // Full processor/controller replacement is not supported by this disposable host.
+    // Report that before accepting the request so the plug-in can retain its current setup.
+    if (flags & kReloadComponent) return kNotImplemented;
+    restart |= flags; return kResultOk;
+  }
   tresult PLUGIN_API setDirty(TBool) override { return kResultOk; }
   tresult PLUGIN_API requestOpenEditor(FIDString) override { return kResultFalse; }
   tresult PLUGIN_API startGroupEdit() override { return kResultOk; }
@@ -249,19 +254,19 @@ public:
     outputs[0] = SpeakerArr::kStereo;
     // A mono instrument may reject stereo; retain its declared layout in that case.
     processor->setBusArrangements(inputs.data(), inputCount, outputs.data(), outputCount);
+    ProcessSetup setup{processMode, kSample32, blockSize, static_cast<double>(rate)};
+    check(processor->setupProcessing(setup), "Plug-in refused audio setup");
     for (const auto direction : {kInput, kOutput}) {
       for (int i = 0; i < component->getBusCount(kAudio, direction); ++i) {
         BusInfo info{}; check(component->getBusInfo(kAudio, direction, i, info), "Could not query audio bus");
         require(info.channelCount >= 0 && info.channelCount <= 64, "Unsupported audio channel count");
-        component->activateBus(kAudio, direction, i, direction == kOutput && i == 0);
+        check(component->activateBus(kAudio, direction, i, direction == kOutput && i == 0), "Plug-in refused audio bus activation");
       }
       const auto count = component->getBusCount(kEvent, direction);
       require(count >= 0 && count <= 32, "Unsupported event bus count");
-      for (int i = 0; i < count; ++i) component->activateBus(kEvent, direction, i, direction == kInput && i == 0);
+      for (int i = 0; i < count; ++i) check(component->activateBus(kEvent, direction, i, direction == kInput && i == 0), "Plug-in refused event bus activation");
     }
     require(component->getBusCount(kEvent, kInput) > 0, "Instrument has no note input");
-    ProcessSetup setup{processMode, kSample32, blockSize, static_cast<double>(rate)};
-    check(processor->setupProcessing(setup), "Plug-in refused audio setup");
     require(data.prepare(*component, blockSize, kSample32), "Could not allocate plug-in audio buffers");
     require(data.numOutputs > 0 && data.outputs[0].numChannels > 0, "Instrument has no audio output");
     data.processMode = processMode; data.processContext = &context; data.inputEvents = &events; data.outputEvents = &outputEvents;
@@ -284,7 +289,7 @@ public:
         const auto count = controller->getParameterCount(); require(count >= 0 && count <= 65536, "Unsupported parameter count");
         for (int i = 0; i < count; ++i) { ParameterInfo info{}; if (controller->getParameterInfo(i, info) == kResultOk && !(info.flags & ParameterInfo::kIsReadOnly)) handler->pending[info.id] = controller->getParamNormalized(info.id); }
       }
-      if (flags & (kIoChanged | kReloadComponent | kLatencyChanged)) start(sampleRate, bpm, mode);
+      if (flags & (kIoChanged | kLatencyChanged)) start(sampleRate, bpm, mode);
     }
     parameters.clearQueue(); outputParameters.clearQueue(); outputEvents.clear();
     for (const auto& [id, value] : handler->pending) { int32 queueIndex = 0, pointIndex = 0; if (auto queue = parameters.addParameterData(id, queueIndex)) queue->addPoint(0, value, pointIndex); }
@@ -392,17 +397,43 @@ public:
     }
   }
 };
+constexpr int editorFooterHeight = 40;
+bool validViewSize(const ViewRect& size) {
+  return size.getWidth() > 0 && size.getHeight() > 0 && size.getWidth() <= 8192 && size.getHeight() <= 8192;
+}
+struct EditorWindow {
+  IPlugView* view = nullptr; HWND auditionButton = nullptr;
+  ViewRect size; bool closing = false, audition = false, resizing = false;
+};
+struct ResizeScope {
+  bool& resizing;
+  explicit ResizeScope(bool& value) : resizing(value) { resizing = true; }
+  ~ResizeScope() { resizing = false; }
+};
+RECT windowBounds(HWND window, const ViewRect& size) {
+  RECT bounds{0, 0, size.getWidth(), size.getHeight() + editorFooterHeight};
+  AdjustWindowRectEx(&bounds, static_cast<DWORD>(GetWindowLongPtr(window, GWL_STYLE)), FALSE, static_cast<DWORD>(GetWindowLongPtr(window, GWL_EXSTYLE)));
+  return bounds;
+}
+ViewRect constrainedSize(EditorWindow& context, int width, int height) {
+  ViewRect requested(0, 0, std::clamp(width, 1, 8192), std::clamp(height, 1, 8192));
+  context.view->checkSizeConstraint(&requested);
+  return validViewSize(requested) ? requested : context.size;
+}
 class Frame final : public U::Implements<U::Directly<IPlugFrame>> {
 public:
-  HWND window = nullptr; IPlugView* view = nullptr;
+  HWND window = nullptr; IPlugView* view = nullptr; EditorWindow* context = nullptr;
   tresult PLUGIN_API resizeView(IPlugView* source, ViewRect* size) override {
-    if (!window || source != view || !size || size->getWidth() <= 0 || size->getHeight() <= 0 || size->getWidth() > 8192 || size->getHeight() > 8192) return kInvalidArgument;
-    RECT bounds{0, 0, size->getWidth(), size->getHeight() + 40}; AdjustWindowRect(&bounds, static_cast<DWORD>(GetWindowLongPtr(window, GWL_STYLE)), FALSE);
-    SetWindowPos(window, nullptr, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-    return view->onSize(size);
+    if (!window || !context || source != view || !size || !validViewSize(*size)) return kInvalidArgument;
+    if (context->resizing) return kResultFalse;
+    ResizeScope scope(context->resizing);
+    const auto bounds = windowBounds(window, *size);
+    if (!SetWindowPos(window, nullptr, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)) return kInternalError;
+    const auto result = view->onSize(size);
+    if (result == kResultOk) context->size = *size;
+    return result;
   }
 };
-struct EditorWindow { IPlugView* view = nullptr; HWND auditionButton = nullptr; bool closing = false, audition = false; };
 LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM w, LPARAM l) {
   auto context = reinterpret_cast<EditorWindow*>(GetWindowLongPtr(window, GWLP_USERDATA));
   if (message == WM_NCCREATE) { context = static_cast<EditorWindow*>(reinterpret_cast<CREATESTRUCT*>(l)->lpCreateParams); SetWindowLongPtr(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(context)); }
@@ -410,10 +441,33 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM w, LPARAM l) {
   if (context && message == WM_COMMAND && LOWORD(w) == 1 && HIWORD(w) == BN_CLICKED) {
     context->audition = !context->audition; SetWindowText(context->auditionButton, context->audition ? L"Stop A4 — keyboard: Z S X D C V G B H N J M" : L"Play A4 — keyboard: Z S X D C V G B H N J M"); return 0;
   }
+  if (context && context->view && message == WM_SIZING && !context->resizing) {
+    ResizeScope scope(context->resizing);
+    auto bounds = reinterpret_cast<RECT*>(l);
+    RECT nonClient{0, 0, 0, 0};
+    AdjustWindowRectEx(&nonClient, static_cast<DWORD>(GetWindowLongPtr(window, GWL_STYLE)), FALSE, static_cast<DWORD>(GetWindowLongPtr(window, GWL_EXSTYLE)));
+    const auto borderWidth = nonClient.right - nonClient.left, borderHeight = nonClient.bottom - nonClient.top;
+    const auto size = constrainedSize(*context, bounds->right - bounds->left - borderWidth, bounds->bottom - bounds->top - borderHeight - editorFooterHeight);
+    const auto width = size.getWidth() + borderWidth, height = size.getHeight() + editorFooterHeight + borderHeight;
+    if (w == WMSZ_LEFT || w == WMSZ_TOPLEFT || w == WMSZ_BOTTOMLEFT) bounds->left = bounds->right - width; else bounds->right = bounds->left + width;
+    if (w == WMSZ_TOP || w == WMSZ_TOPLEFT || w == WMSZ_TOPRIGHT) bounds->top = bounds->bottom - height; else bounds->bottom = bounds->top + height;
+    return TRUE;
+  }
   if (context && context->view && message == WM_SIZE) {
-    const auto height = std::max(1, static_cast<int>(HIWORD(l)) - 40);
-    ViewRect size(0, 0, LOWORD(l), height); context->view->onSize(&size);
-    if (context->auditionButton) MoveWindow(context->auditionButton, 8, height + 5, std::max(1, static_cast<int>(LOWORD(l)) - 16), 30, TRUE);
+    // Minimizing reports a zero client size; it must not resize the plug-in's view.
+    if (w == SIZE_MINIMIZED || LOWORD(l) == 0 || HIWORD(l) <= editorFooterHeight) return 0;
+    if (!context->resizing) {
+      ResizeScope scope(context->resizing);
+      auto size = constrainedSize(*context, LOWORD(l), static_cast<int>(HIWORD(l)) - editorFooterHeight);
+      if (size.getWidth() != LOWORD(l) || size.getHeight() != static_cast<int>(HIWORD(l)) - editorFooterHeight) {
+        const auto bounds = windowBounds(window, size);
+        if (!SetWindowPos(window, nullptr, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)) return 0;
+      }
+      if (context->view->onSize(&size) == kResultOk) context->size = size;
+    }
+    RECT client{}; GetClientRect(window, &client);
+    if (context->auditionButton) MoveWindow(context->auditionButton, 8, client.bottom - editorFooterHeight + 5, std::max(1, static_cast<int>(client.right) - 16), 30, TRUE);
+    return 0;
   }
   return DefWindowProc(window, message, w, l);
 }
@@ -425,17 +479,17 @@ Json editor(const Json& request, bool selfCheck = false) {
   auto view = owned(plugin.controller->createView(ViewType::kEditor)); require(view && view->isPlatformTypeSupported(kPlatformTypeHWND) == kResultOk, "Instrument has no Windows editor");
   ViewRect size; check(view->getSize(&size), "Could not query editor size"); require(size.getWidth() > 0 && size.getHeight() > 0 && size.getWidth() <= 8192 && size.getHeight() <= 8192, "Invalid editor size");
   WNDCLASS cls{}; cls.lpfnWndProc = windowProc; cls.hInstance = GetModuleHandle(nullptr); cls.lpszClassName = L"SessionCompanionEditor"; cls.hCursor = LoadCursor(nullptr, IDC_ARROW); RegisterClass(&cls);
-  EditorWindow context{}; auto frame = owned(new Frame);
+  EditorWindow context{}; context.size = size; auto frame = owned(new Frame); frame->context = &context;
   DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
   if (view->canResize() == kResultOk) style |= WS_THICKFRAME;
-  RECT bounds{0, 0, size.getWidth(), size.getHeight() + 40}; AdjustWindowRect(&bounds, style, FALSE);
+  RECT bounds{0, 0, size.getWidth(), size.getHeight() + editorFooterHeight}; AdjustWindowRect(&bounds, style, FALSE);
   auto title = fs::u8path("SESSION — " + plugin.name + " — audition: Z S X D C V G B H N J M").wstring();
   frame->window = CreateWindowEx(0, cls.lpszClassName, title.c_str(), style, CW_USEDEFAULT, CW_USEDEFAULT, bounds.right - bounds.left, bounds.bottom - bounds.top, nullptr, nullptr, cls.hInstance, &context);
   require(frame->window != nullptr, "Could not create editor window"); frame->view = view;
   bool attached = false;
   try {
     check(view->setFrame(frame), "Editor refused native frame"); check(view->attached(frame->window, kPlatformTypeHWND), "Could not attach instrument editor"); attached = true; context.view = view;
-    context.auditionButton = CreateWindowEx(0, L"BUTTON", L"Play A4 — keyboard: Z S X D C V G B H N J M", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 8, size.getHeight() + 5, std::max(1, size.getWidth() - 16), 30, frame->window, reinterpret_cast<HMENU>(1), cls.hInstance, nullptr);
+    context.auditionButton = CreateWindowEx(0, L"BUTTON", L"Play A4 — keyboard: Z S X D C V G B H N J M", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 8, context.size.getHeight() + 5, std::max(1, context.size.getWidth() - 16), 30, frame->window, reinterpret_cast<HMENU>(1), cls.hInstance, nullptr);
     require(context.auditionButton != nullptr, "Could not create audition control");
     plugin.start(48000, bpm, kRealtime);
     Monitor monitor; const auto audioAvailable = monitor.open();

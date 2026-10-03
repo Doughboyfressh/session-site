@@ -55,10 +55,11 @@ async function main() {
   const build = path.join(output, 'build');
   const cmakePath = value => value.replaceAll('\\', '/');
   run(cmake, ['-S', path.join(root, 'companion', 'native'), '-B', build, '-G', 'Visual Studio 17 2022', '-A', 'x64', `-DCMAKE_GENERATOR_INSTANCE=${cmakePath(installation)}`, `-DSESSION_VST3_SDK=${cmakePath(sdk)}`, `-DSESSION_JSON_INCLUDE=${cmakePath(dependencies)}`, `-DSESSION_OUTPUT_DIR=${cmakePath(output)}`]);
-  run(cmake, ['--build', build, '--config', 'Release', '--target', 'session-vst3-host', 'note-expression-synth', '--parallel', '4']);
+  run(cmake, ['--build', build, '--config', 'Release', '--target', 'session-vst3-host', 'note-expression-synth', 'session-strict-fixture', 'session-vst3-host-checks', '--parallel', '4']);
   const testPlugin = path.join(output, 'test-plugin', 'note-expression-synth.vst3');
   await mkdir(path.dirname(testPlugin), { recursive: true });
   await cp(path.join(build, 'VST3', 'Release', 'note-expression-synth.vst3'), testPlugin, { recursive: true, force: true });
+  await cp(path.join(build, 'VST3', 'Release', 'session-strict-fixture.vst3'), path.join(output, 'regression-plugin', 'session-strict-fixture.vst3'), { recursive: true, force: true });
   const licenses = path.join(output, 'licenses');
   await mkdir(licenses, { recursive: true });
   for (const [source, target] of [[path.join(sdk, 'LICENSE.txt'), 'Steinberg-SDK.txt'], [path.join(sdk, 'vstgui4', 'LICENSE'), 'VSTGUI.txt'], [path.join(jsonDir, 'LICENSE.MIT'), 'nlohmann-json.txt']]) {

@@ -2,7 +2,7 @@
 
 The Windows companion lets SESSION render notes through installed VST3 instruments and open their native editors. Plug-ins run on your computer. Install and license an instrument through its vendor; SESSION does not download instruments or bypass licensing.
 
-Download the [Windows x64 companion](https://github.com/Doughboyfressh/session-site/releases/tag/session-companion-v0.1.0), extract the whole ZIP, then run `start-session-companion.cmd`. It includes Node and the native host; keep the files and notices together. Leave the console open and paste its fresh code into **Studio → Piano roll → Instrument plugins → Connect installed VST3 instruments**. This initial build is unsigned and early access. Actual licensed Serum 2 operation is unverified; acceptance used Steinberg's official SDK test synth.
+Download the [Windows x64 companion](https://github.com/Doughboyfressh/session-site/releases/tag/session-companion-v0.1.1), extract the whole ZIP, then run `start-session-companion.cmd`. It includes Node and the native host; keep the files and notices together. Leave the console open and paste its fresh code into **Studio → Piano roll → Instrument plugins → Connect installed VST3 instruments**. This build is unsigned and early access. Actual licensed Serum 2 operation is unverified; acceptance used Steinberg's official SDK test synth and a separate strict lifecycle fixture.
 
 For development, build with `node scripts/build-companion.mjs`, then launch `companion/start-session-companion.cmd` with Node.js 22 or newer. The launcher prefers a sibling `node.exe` and finds the host in `outputs/companion/session-vst3-host.exe` or beside itself. See [native build requirements](native/README.md).
 
