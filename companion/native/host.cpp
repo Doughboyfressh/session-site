@@ -25,6 +25,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -401,14 +402,18 @@ constexpr int editorFooterHeight = 40;
 bool validViewSize(const ViewRect& size) {
   return size.getWidth() > 0 && size.getHeight() > 0 && size.getWidth() <= 8192 && size.getHeight() <= 8192;
 }
+bool sameViewSize(const ViewRect& a, const ViewRect& b) { return a.getWidth() == b.getWidth() && a.getHeight() == b.getHeight(); }
+struct CorrectedResize { ViewRect constrained, accepted; };
 struct EditorWindow {
   IPlugView* view = nullptr; HWND auditionButton = nullptr;
-  ViewRect size; bool closing = false, audition = false, resizing = false;
+  ViewRect size; std::optional<ViewRect> resizeTarget;
+  std::optional<CorrectedResize> correction;
+  bool closing = false, audition = false, resizing = false, resizeCorrected = false;
 };
 struct ResizeScope {
-  bool& resizing;
-  explicit ResizeScope(bool& value) : resizing(value) { resizing = true; }
-  ~ResizeScope() { resizing = false; }
+  EditorWindow& context;
+  explicit ResizeScope(EditorWindow& value) : context(value) { context.resizing = true; }
+  ~ResizeScope() { context.resizeTarget.reset(); context.resizing = false; context.resizeCorrected = false; }
 };
 RECT windowBounds(HWND window, const ViewRect& size) {
   RECT bounds{0, 0, size.getWidth(), size.getHeight() + editorFooterHeight};
@@ -418,6 +423,9 @@ RECT windowBounds(HWND window, const ViewRect& size) {
 ViewRect constrainedSize(EditorWindow& context, int width, int height) {
   ViewRect requested(0, 0, std::clamp(width, 1, 8192), std::clamp(height, 1, 8192));
   context.view->checkSizeConstraint(&requested);
+  // An unchanged SDK zoom may regenerate the unrounded target without sending
+  // another callback. Reuse only the exact previously accepted bounded pair.
+  if (context.correction && sameViewSize(requested, context.correction->constrained) && sameViewSize(context.size, context.correction->accepted)) return context.size;
   return validViewSize(requested) ? requested : context.size;
 }
 class Frame final : public U::Implements<U::Directly<IPlugFrame>> {
@@ -425,12 +433,34 @@ public:
   HWND window = nullptr; IPlugView* view = nullptr; EditorWindow* context = nullptr;
   tresult PLUGIN_API resizeView(IPlugView* source, ViewRect* size) override {
     if (!window || !context || source != view || !size || !validViewSize(*size)) return kInvalidArgument;
-    if (context->resizing) return kResultFalse;
-    ResizeScope scope(context->resizing);
+    // SDK zoom editors acknowledge onSize through resizeView. Their floating-point
+    // zoom arithmetic can floor the callback a pixel away from the constrained size.
+    // Accept one such correction without another onSize; further changes must wait.
+    if (context->resizing) {
+      if (!context->resizeTarget) return kResultFalse;
+      const auto widthDifference = std::abs(context->resizeTarget->getWidth() - size->getWidth());
+      const auto heightDifference = std::abs(context->resizeTarget->getHeight() - size->getHeight());
+      if (!widthDifference && !heightDifference) return kResultOk;
+      if (context->resizeCorrected || widthDifference > 1 || heightDifference > 1) return kResultFalse;
+      const auto bounds = windowBounds(window, *size);
+      if (!SetWindowPos(window, nullptr, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)) return kInternalError;
+      context->correction = CorrectedResize{*context->resizeTarget, *size};
+      context->resizeTarget = *size; context->resizeCorrected = true;
+      return kResultOk;
+    }
+    const auto previous = context->size;
+    const auto previousCorrection = context->correction;
+    ResizeScope scope(*context); context->resizeTarget = *size;
     const auto bounds = windowBounds(window, *size);
     if (!SetWindowPos(window, nullptr, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)) return kInternalError;
+    context->correction.reset();
     const auto result = view->onSize(size);
-    if (result == kResultOk) context->size = *size;
+    if (result == kResultOk) context->size = *context->resizeTarget;
+    else {
+      context->correction = previousCorrection;
+      const auto original = windowBounds(window, previous);
+      SetWindowPos(window, nullptr, 0, 0, original.right - original.left, original.bottom - original.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
     return result;
   }
 };
@@ -442,7 +472,7 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM w, LPARAM l) {
     context->audition = !context->audition; SetWindowText(context->auditionButton, context->audition ? L"Stop A4 — keyboard: Z S X D C V G B H N J M" : L"Play A4 — keyboard: Z S X D C V G B H N J M"); return 0;
   }
   if (context && context->view && message == WM_SIZING && !context->resizing) {
-    ResizeScope scope(context->resizing);
+    ResizeScope scope(*context);
     auto bounds = reinterpret_cast<RECT*>(l);
     RECT nonClient{0, 0, 0, 0};
     AdjustWindowRectEx(&nonClient, static_cast<DWORD>(GetWindowLongPtr(window, GWL_STYLE)), FALSE, static_cast<DWORD>(GetWindowLongPtr(window, GWL_EXSTYLE)));
@@ -456,14 +486,26 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM w, LPARAM l) {
   if (context && context->view && message == WM_SIZE) {
     // Minimizing reports a zero client size; it must not resize the plug-in's view.
     if (w == SIZE_MINIMIZED || LOWORD(l) == 0 || HIWORD(l) <= editorFooterHeight) return 0;
-    if (!context->resizing) {
-      ResizeScope scope(context->resizing);
+    // Restore can report an already accepted SDK rounding correction. Rechecking
+    // constraints would undo it while an unchanged zoom produces no callback.
+    if (!context->resizing && (context->size.getWidth() != LOWORD(l) || context->size.getHeight() != static_cast<int>(HIWORD(l)) - editorFooterHeight)) {
+      ResizeScope scope(*context);
+      const auto previousCorrection = context->correction;
       auto size = constrainedSize(*context, LOWORD(l), static_cast<int>(HIWORD(l)) - editorFooterHeight);
+      context->resizeTarget = size;
       if (size.getWidth() != LOWORD(l) || size.getHeight() != static_cast<int>(HIWORD(l)) - editorFooterHeight) {
         const auto bounds = windowBounds(window, size);
         if (!SetWindowPos(window, nullptr, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)) return 0;
       }
-      if (context->view->onSize(&size) == kResultOk) context->size = size;
+      if (!sameViewSize(size, context->size)) {
+        context->correction.reset();
+        if (context->view->onSize(&size) == kResultOk) context->size = *context->resizeTarget;
+        else {
+          context->correction = previousCorrection;
+          const auto original = windowBounds(window, context->size);
+          SetWindowPos(window, nullptr, 0, 0, original.right - original.left, original.bottom - original.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+      }
     }
     RECT client{}; GetClientRect(window, &client);
     if (context->auditionButton) MoveWindow(context->auditionButton, 8, client.bottom - editorFooterHeight + 5, std::max(1, static_cast<int>(client.right) - 16), 30, TRUE);
