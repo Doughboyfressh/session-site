@@ -8,6 +8,7 @@ import {
   type StudioOutput,
 } from './audio';
 import { playSample } from './sample-instrument';
+import { playBrowserNote } from './browser-instruments';
 import {
   midiEvent,
   MidiPerformance,
@@ -148,6 +149,8 @@ export class MidiRecorder {
       }));
   }
   async connect() {
+    if (this.target.plugin?.format === 'vst3')
+      throw Error('Record MIDI with a browser instrument, then assign the VST3 instrument to render the performance.');
     this.release();
     this.performance = null;
     this.control = new AbortController();
@@ -329,6 +332,23 @@ export class MidiRecorder {
             down: true,
             stop: release,
           });
+          this.hooks.activity(event.pitch, this.voices.size);
+          return;
+        }
+        if (this.target.plugin?.format === 'browser') {
+          const c = this.c;
+          const voice = playBrowserNote(c, this.monitor.input, event.pitch,
+            c.currentTime, 120, event.velocity, this.target.plugin);
+          let released = false;
+          const dispose = () => { voice.stop(c.currentTime); voice.disconnect(); this.releasing.delete(dispose); };
+          const release = () => {
+            if (released) return;
+            released = true;
+            voice.release(c.currentTime);
+            this.releasing.add(dispose);
+            if (this.releasing.size > 64) this.releasing.values().next().value!();
+          };
+          this.voices.set(key, { channel: event.channel, down: true, stop: release });
           this.hooks.activity(event.pitch, this.voices.size);
           return;
         }

@@ -269,6 +269,7 @@ export function keepMidi(
     JSON.stringify([
       t.notes,
       t.sound || 'keys',
+      t.plugin,
       t.sample,
       t.offset,
       t.trimStart,

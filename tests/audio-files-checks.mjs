@@ -192,8 +192,9 @@ await assert.rejects(() => zipAudio(files, control.signal), {
   name: 'AbortError',
 });
 checks++;
+await fs.mkdir(new URL('../outputs/release-checks/', import.meta.url), { recursive: true });
 await fs.writeFile(
-  new URL('../../../outputs/export-format-fixtures.zip', import.meta.url),
+  new URL('../outputs/release-checks/export-format-fixtures.zip', import.meta.url),
   bytes,
 );
 console.log(

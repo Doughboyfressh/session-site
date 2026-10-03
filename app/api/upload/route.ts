@@ -1,6 +1,7 @@
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { uploadBankTake } from '@/lib/take-bank-server';
 import { uploadForm } from '@/lib/upload-body';
+import { MAX_PLUGIN_STATE_JSON, validateVst3State } from '@/lib/instrument-plugins';
 import {
   one,
   run,
@@ -29,6 +30,7 @@ export async function POST(req: Request) {
       'take',
       'photo',
       'video',
+      'plugin-state',
     ]);
     if (!(file instanceof File) || file.size === 0) fail('Choose a file.');
     const purposeCap = {
@@ -37,6 +39,7 @@ export async function POST(req: Request) {
       photo: 8,
       video: 60,
       take: 25,
+      'plugin-state': MAX_PLUGIN_STATE_JSON / (1024 * 1024),
     }[purpose] as number;
     if (file.size > purposeCap * 1024 * 1024)
       fail(
@@ -46,7 +49,9 @@ export async function POST(req: Request) {
             ? 'Choose a photo smaller than 8 MB.'
             : purpose === 'video'
               ? 'Choose a video smaller than 60 MB.'
-              : 'Choose audio smaller than 25 MB.',
+              : purpose === 'plugin-state'
+                ? 'Use plugin state smaller than 12 MB.'
+                : 'Choose audio smaller than 25 MB.',
         413,
       );
     if (purpose === 'take')
@@ -56,7 +61,7 @@ export async function POST(req: Request) {
       : '';
     if (
       projectId &&
-      (purpose !== 'audio' ||
+      (!['audio', 'plugin-state'].includes(purpose) ||
         !(await one(
           'SELECT 1 FROM projects p WHERE p.id=? AND ' +
             projectEditCondition('p'),
@@ -75,7 +80,11 @@ export async function POST(req: Request) {
     const bytes = new Uint8Array(await file.slice(0, 32).arrayBuffer());
     const text = new TextDecoder('latin1').decode(bytes);
     let mime = '';
-    if (purpose === 'avatar') {
+    if (purpose === 'plugin-state') {
+      try { validateVst3State(JSON.parse(await file.text())); }
+      catch { fail('This plugin state is invalid or exceeds the 8 MB limit.'); }
+      mime = 'application/vnd.session.vst3-state+json';
+    } else if (purpose === 'avatar') {
       if (bytes[0] === 137 && text.slice(1, 4) === 'PNG') mime = 'image/png';
       else if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255)
         mime = 'image/jpeg';

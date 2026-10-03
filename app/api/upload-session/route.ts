@@ -2,7 +2,7 @@ import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { all, one, run, bucket, fail, limit, readJSON } from '@/lib/server';
 import { POST as acceptUpload } from '@/app/api/upload/route';
 const CHUNK = 3 * 1024 * 1024;
-const cap: Record<string, number> = { audio: 25, avatar: 3, photo: 8, video: 60, take: 25 };
+const cap: Record<string, number> = { audio: 25, avatar: 3, photo: 8, video: 60, take: 25, 'plugin-state': 12 };
 const privateHeaders = { 'Cache-Control': 'private, no-store' };
 const partKey = (id: string, part: number) => `staging/${id}/${part}`;
 function uploadError(error: unknown, context: string) {

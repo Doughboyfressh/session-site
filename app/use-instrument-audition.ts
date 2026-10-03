@@ -14,12 +14,10 @@ export function useInstrumentAudition(
   }, [track, disabled, onError]);
   const requests = useRef(new Set<AbortController>()),
     voices = useRef<(() => void)[]>([]);
-  const signature = JSON.stringify([
-    track?.id,
-    track?.fileId,
-    track?.sample,
-    track?.sound,
+  const voiceKey = (value?: MixerTrack) => JSON.stringify([
+    value?.id, value?.fileId, value?.sample, value?.sound, value?.plugin,
   ]);
+  const signature = voiceKey(track);
   useEffect(() => {
     const stop = () => {
       requests.current.forEach((r) => r.abort());
@@ -46,7 +44,7 @@ export function useInstrumentAudition(
     sample?: SampleSettings,
   ) => {
     const value = current.current;
-    if (value.disabled || !value.track) return;
+    if (value.disabled || !value.track || value.track.plugin?.format === 'vst3') return;
     const controller = new AbortController();
     requests.current.add(controller);
     while (requests.current.size > 8) {
@@ -66,15 +64,7 @@ export function useInstrumentAudition(
         : null;
       if (controller.signal.aborted || current.current.disabled) return;
       const now = current.current.track;
-      if (
-        JSON.stringify([now?.id, now?.fileId, now?.sample, now?.sound]) !==
-        JSON.stringify([
-          value.track.id,
-          value.track.fileId,
-          value.track.sample,
-          value.track.sound,
-        ])
-      )
+      if (voiceKey(now) !== voiceKey(value.track))
         return;
       let stop: () => void;
       if (buffer)
@@ -97,6 +87,7 @@ export function useInstrumentAudition(
           length,
           velocity,
           target.sound,
+          target.plugin,
         );
         stop = () => {
           try {

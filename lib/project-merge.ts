@@ -151,6 +151,7 @@ export function mergeProject(
     'notes',
     'noteLoopBeats',
     'sound',
+    'plugin',
     'demo',
     'sequence',
   ];
@@ -239,7 +240,7 @@ export function mergeProject(
       if (clips.length) merged.clips = clips;
       // A sample region belongs to its file. Never combine a replacement asset
       // with a concurrent zone edit, or merge half of an instrument-mode change.
-      const sampled = b.sample || l.sample || r.sample;
+      const sampled = b.sample || l.sample || r.sample || b.plugin || l.plugin || r.plugin;
       if (sampled)
         Object.assign(
           merged,

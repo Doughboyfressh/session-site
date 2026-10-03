@@ -10,5 +10,6 @@ tests
 plans
 .zcode
 .git
+.treehouse
 .env*
 !.env.example

@@ -1593,3 +1593,25 @@ main .feed {
 }
 .permalink-track { font-size: 13px; color: #a9a4a7; margin-top: 8px; }
 .permalink-track strong { color: #e9e6e7; }
+.plugin-instruments {
+  padding: 18px;
+  margin: 0 0 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #131214;
+  min-width: 0;
+}
+.plugin-instruments h3 { font-size: 18px; }
+.plugin-instruments p { color: #b8b2b6; font-size: 13px; line-height: 1.6; margin: 10px 0; }
+.plugin-instruments .section-title { align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+.plugin-instruments .field { min-width: 0; }
+.plugin-instruments .actions { flex-wrap: wrap; gap: 10px; align-items: end; }
+.companion-pairing { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.companion-pairing summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.companion-pairing input { width: 100%; min-width: 0; }
+.companion-pairing .field { flex: 1 1 220px; }
+.native-instrument-actions { margin-top: 16px; }
+@media (max-width: 600px) {
+  .plugin-instruments { padding: 14px; }
+  .plugin-instruments .actions .button { white-space: normal; }
+}

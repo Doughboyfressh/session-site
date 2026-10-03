@@ -4,6 +4,7 @@ import { validCreation, type ProjectCreation } from './project-creation';
 import { cleanRouting, validateRouting } from './mixer-routing';
 import { sampleSettings } from './sample-instrument';
 import { SOUNDS } from './instruments';
+import { validateInstrumentPlugin } from './instrument-plugins';
 import { cleanDrumPattern } from './drum-pattern';
 import {
   AUTOMATION_TARGETS,
@@ -43,6 +44,7 @@ const fields = [
   'notes',
   'noteLoopBeats',
   'sound',
+  'plugin',
   'sample',
   'volume',
   'pan',
@@ -112,6 +114,7 @@ export function recoverySnapshot(value: any): DraftSnapshot {
       if (t.sound !== undefined && !SOUNDS.includes(t.sound))
         throw new Error('Invalid instrument in draft.');
       if (t.sample !== undefined) t.sample = sampleSettings(t.sample);
+      if (t.plugin !== undefined) t.plugin = validateInstrumentPlugin(t.plugin);
       if (t.sequence !== undefined) {
         if (!Array.isArray(t.sequence) || t.sequence.length !== 3)
           throw new Error('Invalid drum pattern.');

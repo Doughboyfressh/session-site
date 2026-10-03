@@ -17,6 +17,9 @@
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.mjs",
     "check:release": "node scripts/check.mjs",
+    "companion:build": "node scripts/build-companion.mjs",
+    "companion:start": "node companion/bridge.mjs",
+    "companion:package": "node scripts/package-companion.mjs",
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate"
   },

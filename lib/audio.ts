@@ -15,6 +15,9 @@ import {
 } from './mixer-routing';
 import { buildInsertFx, type DriveType, type ModType } from './effects';
 import { voiceFor, type Sound } from './instruments';
+import { pluginFingerprint, type InstrumentPlugin } from './instrument-plugins';
+import { playBrowserNote } from './browser-instruments';
+import { renderVst3 } from './plugin-companion';
 import { AudioCache } from './audio-cache';
 import { schedulePump } from './pump';
 import {
@@ -75,6 +78,7 @@ export type MixerTrack = {
   notes?: Note[];
   noteLoopBeats?: number;
   sound?: Sound;
+  plugin?: InstrumentPlugin;
   sample?: SampleSettings;
   volume: number;
   pan: number;
@@ -425,7 +429,12 @@ export function playNote(
   length: number,
   velocity = 0.75,
   sound = 'keys',
+  plugin?: InstrumentPlugin,
 ) {
+  if (plugin?.format === 'browser')
+    return playBrowserNote(c, dest, pitch, time, length, velocity, plugin);
+  if (plugin?.format === 'vst3')
+    throw Error('Use the companion editor for live VST3 playing, or render these notes in Studio.');
   const v = voiceFor(sound);
   const oscillator = c.createOscillator(),
     gain = c.createGain(),
@@ -534,13 +543,13 @@ export async function bufferFor(
     throw new Error(
       'AutoPitch is unavailable while its audio quality is being improved. Turn it off in Vocal effects to play or export.',
     );
-  if (t.sample) validateArrangement({ bpm, tracks: [t] }, true);
+  if (t.sample || t.plugin) validateArrangement({ bpm, tracks: [t] }, true);
   const key =
     (t.sample
       ? `sample-${t.fileId}-${bpm}-${JSON.stringify(t.sample)}-${JSON.stringify(t.notes)}`
       : t.fileId ||
         `${t.demo || 'seq'}-${bpm}-${t.sound}-${t.noteLoopBeats || ''}-${JSON.stringify(t.notes ?? t.drumPattern ?? t.sequence ?? [])}`) +
-    ':' +
+    (t.plugin ? '-plugin-' + JSON.stringify(t.plugin) : '') + ':' +
     (options.sampleRate || 'playback') +
     (t.denoise || t.autoPitch
       ? `-v${t.denoise || 0},${t.autoPitch || 0},${t.pitchKey || 0},${
@@ -553,9 +562,37 @@ export async function bufferFor(
   const cached = cache.get(key);
   if (options.signal?.aborted)
     throw new DOMException('Playback cancelled.', 'AbortError');
-  if (cached && !(t.fileId && options.revalidate)) return cached;
+  if (cached && !(t.fileId && options.revalidate) && t.plugin?.format !== 'vst3') return cached;
   let b: AudioBuffer;
-  if (t.sample) {
+  if (t.plugin?.format === 'vst3') {
+    const fingerprint = await pluginFingerprint(t, bpm);
+    const frozen = t.plugin.freeze?.fingerprint === fingerprint ? t.plugin.freeze : undefined;
+    const asset = frozen?.fileId || t.plugin.stateFileId;
+    if (cached) {
+      if (asset) {
+        const permission = await fetch('/api/file/' + asset, {
+          method: 'HEAD', cache: 'no-store', signal: options.signal,
+        });
+        if (!permission.ok) throw Error('This instrument is private or is no longer available.');
+      }
+      return cached;
+    }
+    let bytes: ArrayBuffer;
+    if (frozen) {
+      const response = await fetch('/api/file/' + frozen.fileId, {
+        signal: options.signal, cache: 'no-store',
+      });
+      if (!response.ok) throw Error('This rendered instrument is private or is no longer available.');
+      if (Number(response.headers.get('content-length')) > 25 * 1024 * 1024)
+        throw Error('This rendered instrument exceeds the supported size.');
+      bytes = await response.arrayBuffer();
+      if (bytes.byteLength > 25 * 1024 * 1024) throw Error('This rendered instrument exceeds the supported size.');
+    } else bytes = await renderVst3(t, bpm, sampleRate, options.signal);
+    const decoder = new OfflineAudioContext(2, 1, sampleRate);
+    b = await decoder.decodeAudioData(bytes);
+    if (b.duration > 300 || b.numberOfChannels > 2)
+      throw Error('Use a mono or stereo instrument source within five minutes.');
+  } else if (t.sample) {
     sampleSettings(t.sample);
     if (!t.fileId || !t.notes || t.demo || t.sequence)
       throw new Error('This sampled instrument is incomplete.');
@@ -642,6 +679,7 @@ export async function bufferFor(
         (n.length * 60) / bpm,
         n.velocity,
         t.sound,
+        t.plugin,
       );
     b = await c.startRendering();
   } else b = await synth(bpm, t.sequence || defaultPattern, t.demo, sampleRate);
