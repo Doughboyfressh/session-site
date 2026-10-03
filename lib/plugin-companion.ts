@@ -4,8 +4,8 @@ import {
 } from './instrument-plugins';
 
 export type InstalledPlugin = { classId: string; name: string; vendor: string; version: string };
-type CompanionSnapshot = { connected: boolean; plugins: InstalledPlugin[] };
-const EMPTY: CompanionSnapshot = { connected: false, plugins: [] };
+type CompanionSnapshot = { connected: boolean; plugins: InstalledPlugin[]; scanWarnings: number };
+const EMPTY: CompanionSnapshot = { connected: false, plugins: [], scanWarnings: 0 };
 let snapshot = EMPTY;
 let pairing = '';
 let epoch = 0;
@@ -62,7 +62,9 @@ async function request(
   signal?.addEventListener('abort', cancel, { once: true });
   session.signal.addEventListener('abort', cancel, { once: true });
   if (signal?.aborted || session.signal.aborted) cancel();
-  const timer = setTimeout(cancel, path === '/editor' ? 30 * 60000 : path === '/render' ? 125000 : 60000);
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; cancel(); },
+    path === '/health' ? 15000 : path === '/editor' ? 30 * 60000 : path === '/render' ? 125000 : 60000);
   try {
     const response = await fetch('http://127.0.0.1:17341/v1' + path, {
       method: body === undefined ? 'GET' : 'POST',
@@ -84,8 +86,18 @@ async function request(
     if (binary) return result;
     return JSON.parse(new TextDecoder().decode(result));
   } catch (error) {
-    if (controller.signal.aborted)
-      throw new DOMException('Plugin operation cancelled or timed out.', 'AbortError');
+    if (controller.signal.aborted) {
+      if (!timedOut || signal?.aborted || session.signal.aborted)
+        throw new DOMException('Plugin operation cancelled.', 'AbortError');
+      const message = path === '/health'
+        ? 'The companion did not respond. Keep its console open and allow SESSION local network access in your browser, then retry. An in-app browser may block this connection.'
+        : path === '/plugins' || path === '/rescan'
+          ? 'The instrument scan timed out. Keep the companion open and retry the connection or rescan.'
+          : path === '/editor'
+            ? 'The instrument editor timed out. Close its window and reopen it from SESSION.'
+            : 'The instrument render timed out. Try a shorter score or a different instrument.';
+      throw Error(message);
+    }
     if (error instanceof TypeError)
       throw Error('The companion could not connect. Start it, check the pairing code, and allow local network access when your browser asks.');
     throw error;
@@ -107,25 +119,44 @@ function installed(value: unknown): InstalledPlugin[] {
     return { classId: plugin.classId, name: plugin.name, vendor: plugin.vendor, version: plugin.version };
   });
 }
-export async function connectCompanion(token: string, signal?: AbortSignal) {
+function scanWarnings(value: unknown) {
+  if (value === undefined) return 0;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 100000)
+    throw Error('The companion returned an invalid scan report.');
+  return value;
+}
+export async function connectCompanion(token: string, signal?: AbortSignal,
+  onProgress?: (stage: 'checking' | 'scanning') => void) {
   if (!/^[0-9a-f]{64}$/i.test(token.trim())) throw Error('Paste the 64-character pairing code from the companion.');
   disconnectCompanion();
   const current = epoch;
-  const value = token.trim();
+  const value = token.trim().toLowerCase();
+  const checkPairing = () => {
+    if (epoch !== current || signal?.aborted) throw new DOMException('Pairing cancelled.', 'AbortError');
+  };
+  checkPairing();
+  onProgress?.('checking');
+  checkPairing();
   const health = await request('/health', undefined, signal, value);
-  if (epoch !== current || signal?.aborted) throw new DOMException('Pairing cancelled.', 'AbortError');
+  checkPairing();
   if (health.version !== 1 || health.platform !== 'win32' || health.nativeAvailable !== true)
     throw Error('Build and start the Windows companion before connecting.');
-  const plugins = installed((await request('/plugins', undefined, signal, value)).plugins);
-  if (epoch !== current || signal?.aborted) throw new DOMException('Pairing cancelled.', 'AbortError');
+  onProgress?.('scanning');
+  checkPairing();
+  const report = await request('/plugins', undefined, signal, value);
+  const plugins = installed(report.plugins);
+  const warnings = scanWarnings(report.warnings);
+  checkPairing();
   pairing = value;
-  publish({ connected: true, plugins });
+  publish({ connected: true, plugins, scanWarnings: warnings });
 }
 export async function rescanCompanion(signal?: AbortSignal) {
   const current = epoch;
-  const plugins = installed((await request('/rescan', {}, signal)).plugins);
+  const report = await request('/rescan', {}, signal);
+  const plugins = installed(report.plugins);
+  const warnings = scanWarnings(report.warnings);
   if (current !== epoch || signal?.aborted) throw new DOMException('Scan cancelled.', 'AbortError');
-  publish({ connected: true, plugins });
+  publish({ connected: true, plugins, scanWarnings: warnings });
 }
 export async function readPluginState(plugin: Vst3Instrument, signal?: AbortSignal): Promise<Vst3State | undefined> {
   if (!plugin.stateFileId) return undefined;

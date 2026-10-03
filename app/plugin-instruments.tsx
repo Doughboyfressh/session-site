@@ -108,6 +108,7 @@ export default function PluginInstruments({ track, bpm, projectId = '', disabled
     <details className="companion-pairing" open={instrument?.format === 'vst3' && !companion.connected ? true : undefined}>
       <summary>{companion.connected ? 'Windows companion connected' : 'Connect installed VST3 instruments'}</summary>
       <p>Start the companion on your computer and paste its pairing code. Keep your plugins installed and licensed on that computer.</p>
+      <p>Allow SESSION local network access when your browser asks. If an in-app browser blocks the connection, open SESSION in a regular browser on the same Windows computer.</p>
       {companion.connected ? <div className="actions">
         <button type="button" className="button secondary" disabled={disabled || !!busy}
           onClick={() => void run('Scanning installed instruments', async (signal) => {
@@ -120,11 +121,16 @@ export default function PluginInstruments({ track, bpm, projectId = '', disabled
           autoComplete="off" spellCheck={false} maxLength={64} disabled={disabled || !!busy}
           onChange={(event) => setCode(event.target.value)} /></label>
         <button type="button" className="button primary" disabled={disabled || !!busy || !code.trim()}
-          onClick={() => void run('Connecting companion', async (signal) => {
-            await connectCompanion(code, signal); setCode(''); setMessage('Companion connected. Choose an installed instrument.');
+          onClick={() => void run('Checking companion connection', async (signal) => {
+            await connectCompanion(code, signal, (stage) => {
+              if (!signal.aborted) setBusy(stage === 'scanning' ? 'Scanning installed instruments' : 'Checking companion connection');
+            });
+            setCode(''); setMessage('Companion connected.');
           })}>Connect companion</button>
       </div>}
     </details>
+    {companion.connected && !companion.plugins.length && <p><output>No compatible instruments found. Install a licensed Windows x64 VST3 instrument in a standard plugin folder, then rescan.</output></p>}
+    {companion.connected && companion.scanWarnings > 0 && <p><output>Some instruments or folders could not be scanned. Check your Windows x64 VST3 installation, then rescan.</output></p>}
     {instrument?.format === 'vst3' && <div className="native-instrument-actions">
       <p>{rendered ? 'Rendered audio is available to project collaborators without this plugin.' : 'Render the current notes so collaborators can play and export this instrument without the plugin.'}</p>
       <p>Open the companion editor to audition sounds live. Piano-roll playback and export render the saved instrument state before playing.</p>
