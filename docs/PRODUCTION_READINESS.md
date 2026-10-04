@@ -8,7 +8,7 @@ SESSION is still an early-access service. The changes below are suitable for a c
 
 ## Changes since September 28 (this release)
 
-A private, read-only developer dashboard now reports creator profiles, recent recorded activity, saved projects, community tracks, storage metadata, rooms/presence, and database query health. Its server-only immutable-account allowlist defaults to denying access. See [metric definitions and operator enrollment](DEVELOPER_DASHBOARD.md); enrollment and authorized production acceptance remain pending a sign-in control check. Traffic analytics and log history remain in the hosting provider's dashboard.
+A private, read-only developer dashboard now reports creator profiles, recent recorded activity, saved projects, community tracks, storage metadata, rooms/presence, and database query health. Its server-only immutable-account allowlist defaults to denying access. See [metric definitions and operator enrollment](DEVELOPER_DASHBOARD.md); the selected operator's ID was confirmed through the normal signed-in page before enrollment, and authorized production loading/navigation plus guest denial passed. Traffic analytics and log history remain in the hosting provider's dashboard.
 
 Studio now includes original SESSION Wavetable/FM browser synths and a paired Windows x64 VST3 companion. Notes/settings survive undo, recovery and cloud saves. Native state remains private; matching rendered WAV audio lets authorized collaborators play/export without the plugin. See [setup, limits and verification](INSTRUMENT_PLUGINS.md). Native acceptance uses Steinberg's official SDK test synth; actual licensed Serum 2 operation is unverified. The companion is an unsigned early-access build.
 

@@ -36,6 +36,7 @@ for (const route of ['/developer', '/app']) {
     assert.match(html, /Sign in to SESSION/);
     assert.match(html, /noindex/);
     assert.doesNotMatch(html, /Search creator profiles|Database reachable/);
+    assert.doesNotMatch(html, /Account ID:/);
   } else {
     assert.doesNotMatch(html, /href="\/developer"/);
   }
