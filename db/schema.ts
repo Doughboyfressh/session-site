@@ -5,6 +5,7 @@ import {
   primaryKey,
   index,
   uniqueIndex,
+  check,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 export const profiles = sqliteTable('profiles', {
@@ -391,5 +392,23 @@ export const postLikes = sqliteTable(
     user: text().notNull(),
     post: text().notNull(),
   },
-  (t) => [primaryKey({ columns: [t.user, t.post] }), index('idx_post_likes_post').on(t.post)],
+  (t) => [
+    primaryKey({ columns: [t.user, t.post] }),
+    index('idx_post_likes_post').on(t.post),
+  ],
+);
+
+export const activityDaily = sqliteTable(
+  'activity_daily',
+  {
+    day: text().notNull(),
+    kind: text().notNull(),
+    subjectHash: text().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.day, t.kind, t.subjectHash] }),
+    check('activity_daily_day_length', sql`length(${t.day})=10`),
+    check('activity_daily_kind', sql`${t.kind} IN ('visitor','user')`),
+    check('activity_daily_hash_length', sql`length(${t.subjectHash})=64`),
+  ],
 );

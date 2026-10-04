@@ -85,6 +85,13 @@
       "when": 1790817651196,
       "tag": "0011_silver_daredevil",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1791000000000,
+      "tag": "0012_daily_activity",
+      "breakpoints": true
     }
   ]
 }

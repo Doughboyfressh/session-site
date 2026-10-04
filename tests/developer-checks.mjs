@@ -198,6 +198,7 @@ const fixture = {
   env: { SESSION_DEVELOPER_IDS: 'owner-immutable' },
 };
 let failQuery = false;
+let failActivityQuery = false;
 let numericMode = 'number';
 const convert = (row) => {
   if (!row || numericMode === 'number') return row;
@@ -223,6 +224,8 @@ fixture.env.DB = {
         'dashboard statements must be read only',
       );
       if (failQuery) throw new Error('PRIVATE_DATABASE_FAILURE');
+      if (failActivityQuery && sql.includes('activity_daily'))
+        throw new Error('PRIVATE_ACTIVITY_FAILURE');
       const statement = db.prepare(sql);
       return many
         ? statement.all(...params).map(convert)
@@ -281,6 +284,7 @@ vm.runInNewContext(bundled.outputFiles[0].text, {
   Request,
   performance,
   Date: FixedDate,
+  TextEncoder,
   __developerFixture: fixture,
   console: { info: (line) => logs.push(JSON.parse(line)) },
 });
@@ -339,6 +343,14 @@ for (const query of [
 let { response, body } = await call();
 equal(response.status, 200);
 equal(body.generatedAt, now);
+equal(body.activity, {
+  status: 'not-configured',
+  timezone: 'UTC',
+  collectedSince: null,
+  visitorsToday: null,
+  dailyActiveUsersToday: null,
+  days: [],
+});
 equal(body.metrics, {
   profiles: 32,
   profiles7d: 3,
@@ -390,6 +402,60 @@ ok(
 );
 equal(body.users.items.find((item) => item.id === 'creator').projects, 1);
 equal(body.users.items.find((item) => item.id === 'creator').tracks, 1);
+fixture.env.SESSION_ACTIVITY_SECRET =
+  'developer-offline-activity-secret-'.repeat(2);
+body = (await call()).body;
+equal(body.activity.status, 'ready');
+equal(body.activity.collectedSince, null);
+equal(body.activity.visitorsToday, 0);
+equal(body.activity.dailyActiveUsersToday, 0);
+equal(body.activity.days.length, 14);
+equal(body.activity.days[13], {
+  day: '2026-10-03',
+  visitors: 0,
+  activeUsers: 0,
+});
+db.prepare(
+  'INSERT INTO activity_daily(day,kind,subjectHash) VALUES (?,?,?)',
+).run('2026-10-02', 'visitor', 'a'.repeat(64));
+db.prepare(
+  'INSERT INTO activity_daily(day,kind,subjectHash) VALUES (?,?,?)',
+).run('2026-10-03', 'visitor', 'b'.repeat(64));
+db.prepare(
+  'INSERT INTO activity_daily(day,kind,subjectHash) VALUES (?,?,?)',
+).run('2026-10-03', 'user', 'c'.repeat(64));
+body = (await call()).body;
+equal(body.activity.collectedSince, '2026-10-02');
+equal(body.activity.visitorsToday, 1);
+equal(body.activity.dailyActiveUsersToday, 1);
+equal(body.activity.days[11], {
+  day: '2026-10-01',
+  visitors: null,
+  activeUsers: null,
+});
+equal(body.activity.days[12], {
+  day: '2026-10-02',
+  visitors: 1,
+  activeUsers: 0,
+});
+failActivityQuery = true;
+({ response, body } = await call());
+equal(
+  response.status,
+  200,
+  'activity failure does not prevent other dashboard metrics',
+);
+equal(body.metrics.profiles, 32);
+equal(body.activity, {
+  status: 'unavailable',
+  timezone: 'UTC',
+  collectedSince: null,
+  visitorsToday: null,
+  dailyActiveUsersToday: null,
+  days: [],
+});
+ok(!JSON.stringify(body).includes('PRIVATE_ACTIVITY_FAILURE'));
+failActivityQuery = false;
 const page1Ids = body.users.items.map((item) => item.id);
 body = (await call('?page=2')).body;
 equal(body.users.items.length, 7);
@@ -483,24 +549,31 @@ const pageBundle = await build({
   platform: 'node',
   jsx: 'automatic',
   external: ['react', 'react/jsx-runtime'],
-  plugins: [{
-    name: 'access-page-fixture',
-    setup(builder) {
-      builder.onResolve({ filter: /chatgpt-auth|^cloudflare:workers$|^next\/link$|^\.\/dashboard$|\.css$/ },
-        args => ({ path: args.path, namespace: 'page-fixture' }));
-      builder.onLoad({ filter: /.*/, namespace: 'page-fixture' }, args => ({
-        contents: args.path.includes('chatgpt-auth')
-          ? 'export async function getChatGPTUser(){return globalThis.__developerFixture.user;} export function chatGPTSignInPath(){return "/fixture-signin";}'
-          : args.path === 'cloudflare:workers'
-            ? 'export const env=globalThis.__developerFixture.env;'
-            : args.path === 'next/link'
-              ? 'import {jsx} from "react/jsx-runtime"; export default function Link(props){return jsx("a",props);}'
-              : args.path === './dashboard'
-                ? 'import {jsx} from "react/jsx-runtime"; export default function Dashboard(){return jsx("div",{children:"AUTHORIZED_METRICS_FIXTURE"});}'
-                : '',
-      }));
+  plugins: [
+    {
+      name: 'access-page-fixture',
+      setup(builder) {
+        builder.onResolve(
+          {
+            filter:
+              /chatgpt-auth|^cloudflare:workers$|^next\/link$|^\.\/dashboard$|\.css$/,
+          },
+          (args) => ({ path: args.path, namespace: 'page-fixture' }),
+        );
+        builder.onLoad({ filter: /.*/, namespace: 'page-fixture' }, (args) => ({
+          contents: args.path.includes('chatgpt-auth')
+            ? 'export async function getChatGPTUser(){return globalThis.__developerFixture.user;} export function chatGPTSignInPath(){return "/fixture-signin";}'
+            : args.path === 'cloudflare:workers'
+              ? 'export const env=globalThis.__developerFixture.env;'
+              : args.path === 'next/link'
+                ? 'import {jsx} from "react/jsx-runtime"; export default function Link(props){return jsx("a",props);}'
+                : args.path === './dashboard'
+                  ? 'import {jsx} from "react/jsx-runtime"; export default function Dashboard(){return jsx("div",{children:"AUTHORIZED_METRICS_FIXTURE"});}'
+                  : '',
+        }));
+      },
     },
-  }],
+  ],
 });
 const pageModule = { exports: {} };
 vm.runInNewContext(pageBundle.outputFiles[0].text, {
@@ -509,7 +582,8 @@ vm.runInNewContext(pageBundle.outputFiles[0].text, {
   require: createRequire(import.meta.url),
   __developerFixture: fixture,
 });
-const renderPage = async () => renderToStaticMarkup(await pageModule.exports.default());
+const renderPage = async () =>
+  renderToStaticMarkup(await pageModule.exports.default());
 fixture.env.SESSION_DEVELOPER_IDS = 'owner-immutable';
 fixture.user = null;
 let pageHTML = await renderPage();
@@ -518,13 +592,19 @@ ok(!pageHTML.includes('Account ID:') && !pageHTML.includes('owner-immutable'));
 fixture.user = { userId: 'different-authenticated-id' };
 pageHTML = await renderPage();
 ok(pageHTML.includes('Account ID: <code>different-authenticated-id</code>'));
-ok(!pageHTML.includes('owner-immutable') && !pageHTML.includes('AUTHORIZED_METRICS_FIXTURE'));
+ok(
+  !pageHTML.includes('owner-immutable') &&
+    !pageHTML.includes('AUTHORIZED_METRICS_FIXTURE'),
+);
 fixture.user = { userId: '<img src=x onerror=alert(1)>' };
 pageHTML = await renderPage();
 ok(pageHTML.includes('&lt;img') && !pageHTML.includes('<img'));
 fixture.user = { userId: 'owner-immutable' };
 pageHTML = await renderPage();
-ok(pageHTML.includes('AUTHORIZED_METRICS_FIXTURE') && !pageHTML.includes('Account ID:'));
+ok(
+  pageHTML.includes('AUTHORIZED_METRICS_FIXTURE') &&
+    !pageHTML.includes('Account ID:'),
+);
 
 db.close();
 console.log(
