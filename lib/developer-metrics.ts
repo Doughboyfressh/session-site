@@ -1,6 +1,7 @@
 import { all, one } from './server';
 import { requireDeveloper } from './developer-server';
 import type { DeveloperDashboard, DeveloperProfile } from './developer-types';
+import { readDeveloperActivity } from './activity-server';
 
 const DAY = 86400000;
 const PAGE_SIZE = 25;
@@ -93,6 +94,7 @@ export async function readDeveloperDashboard(
     daily,
     total,
     rows,
+    activity,
   ] = await Promise.all([
     one(
       `SELECT COUNT(*) AS profiles,
@@ -148,6 +150,7 @@ export async function readDeveloperDashboard(
       PAGE_SIZE,
       (page - 1) * PAGE_SIZE,
     ),
+    readDeveloperActivity(generatedAt),
   ]);
   const signupDays = Array.from({ length: 14 }, (_, day) => ({
     day: new Date(firstDay + day * DAY).toISOString().slice(0, 10),
@@ -177,6 +180,7 @@ export async function readDeveloperDashboard(
       recordedActiveCreators7d: count(active?.count),
     },
     signupDays,
+    activity,
     users: {
       items: rows.map(profile),
       page,

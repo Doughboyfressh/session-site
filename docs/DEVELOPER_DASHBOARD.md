@@ -14,6 +14,7 @@ The API returns `private, no-store` on success and failure. Guests receive 401; 
 
 ## Metrics
 
+- **Visitors today** estimates distinct foreground browsers, including guests, during the current UTC day. **Daily active users today** counts distinct verified signed-in accounts with a foreground visit or interaction, including accounts without creator profiles. The Audience section includes fourteen UTC days; dates before collection began are marked Not measured. See [collection, privacy, deployment and limits](DAILY_ACTIVITY.md).
 - **Creator profiles** counts SESSION profiles, including private profiles. It is not the number of all authentication accounts; an account can exist without a creator profile.
 - **New profiles** uses profile creation timestamps. The chart covers the last fourteen calendar days in UTC, including the current partial day. Seven-day counts use a rolling interval.
 - **Recorded active creators** counts distinct profiled accounts with a qualifying record in the last seven days: profile creation, latest project update, track/post/comment/room creation, or room presence. The latest project editor is used when recorded. This is a signal from current records, not visits, logins, retention, or a complete historical activity log. Deleted records and overwritten latest-update timestamps can change it.
@@ -26,6 +27,7 @@ The user list contains only account IDs, names, usernames, profile visibility/cr
 
 ## Verification
 
+Daily audience acceptance (October 3, 2026): all 47 offline suites, TypeScript, scoped lint, both builds, real PostgreSQL rollback checks, independent review and credential scans passed. Production deployment `dpl_27kBdzadua8nB51nymAZNW4bnM3J` is READY. Signed-in profileless activity, repeat-visit deduplication, fourteen UTC days, mobile layout and live denial checks passed. Collection began October 4 UTC (October 3 local); prior dates are unmeasured. See [complete measurement acceptance](DAILY_ACTIVITY.md).
 Web Analytics acceptance (October 3, 2026): `@vercel/analytics` 2.0.1 passed 15 URL-redaction assertions, all 45 offline suites, TypeScript, scoped lint, both production builds, independent review, and a source/client credential scan. Production deployment `dpl_9Au67nunAF5W3UugWpEpPdw77YTV` is READY from source `e5121326876d0afa9b691e779b36b150953fdd85`. The live browser loaded one Next.js tracker with no console errors; Vercel's production page-view metric received both the landing visit and client navigation to `/app`. Four guest-access and fourteen landing/workspace HTTP checks passed after deployment. Evidence is in ignored `outputs/analytics-evidence`.
 
 `tests/developer-checks.mjs` exercises the actual access check, route, and SQLite queries with disposable local fixtures. `tests/developer-harness.html` uses the actual dashboard with synthetic response controls for pagination, mobile layout, access loss, outages, and responses arriving after cancellation. Production SQL must also be checked through the PostgreSQL translation layer; read-only `EXPLAIN` can verify query compatibility without copying private rows into test evidence.

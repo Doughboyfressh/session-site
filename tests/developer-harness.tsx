@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import DeveloperDashboardClient from '@/app/developer/dashboard';
 import type {
+  DeveloperActivity,
   DeveloperDashboard,
   DeveloperProfile,
 } from '@/lib/developer-types';
@@ -29,6 +30,7 @@ type HeldRequest = {
   id: number;
   query: string;
   page: number;
+  activityMode: string;
   aborted: boolean;
   completed: boolean;
   resolve: (response: Response) => void;
@@ -38,6 +40,63 @@ let resultLimit = 30;
 let requests: HeldRequest[] = [];
 const changed = () =>
   window.dispatchEvent(new Event('developer-fixture-change'));
+
+function fixtureActivity(responseMode: string): DeveloperActivity {
+  if (
+    responseMode === 'activity-not-configured' ||
+    responseMode === 'activity-unavailable'
+  )
+    return {
+      status:
+        responseMode === 'activity-not-configured'
+          ? 'not-configured'
+          : 'unavailable',
+      timezone: 'UTC',
+      collectedSince: null,
+      visitorsToday: null,
+      dailyActiveUsersToday: null,
+      days: [],
+    };
+
+  const empty = responseMode === 'activity-empty';
+  const visitors = [31, 44, 58, 62, 87];
+  const activeUsers = [9, 13, 12, 18, 24];
+  const activity: DeveloperActivity = {
+    status: 'ready',
+    timezone: 'UTC',
+    collectedSince: empty ? null : '2026-09-29',
+    visitorsToday: empty ? 0 : 87,
+    dailyActiveUsersToday: empty ? 0 : 24,
+    days: Array.from({ length: 14 }, (_, index) => ({
+      day: new Date(now - (13 - index) * 86400000).toISOString().slice(0, 10),
+      visitors: empty
+        ? index === 13
+          ? 0
+          : null
+        : index < 9
+          ? null
+          : visitors[index - 9],
+      activeUsers: empty
+        ? index === 13
+          ? 0
+          : null
+        : index < 9
+          ? null
+          : activeUsers[index - 9],
+    })),
+  };
+  // Malformed payloads verify validation fails before any metrics render.
+  if (responseMode === 'activity-invalid-day')
+    activity.days[0].day = '2026-02-30';
+  if (responseMode === 'activity-invalid-count')
+    activity.days[13].visitors = 1.5;
+  if (responseMode === 'activity-invalid-null') activity.days[0].visitors = 0;
+  if (responseMode === 'activity-invalid-today') activity.visitorsToday = 88;
+  if (responseMode === 'activity-invalid-status')
+    activity.status = 'broken' as DeveloperActivity['status'];
+  return activity;
+}
+
 function complete(request: HeldRequest, status = 200) {
   if (request.completed) return;
   request.completed = true;
@@ -70,6 +129,7 @@ function complete(request: HeldRequest, status = 200) {
       day: new Date(now - (13 - index) * 86400000).toISOString().slice(0, 10),
       count: index % 4,
     })),
+    activity: fixtureActivity(request.activityMode),
     users: {
       items: matched.slice((request.page - 1) * 25, request.page * 25),
       page: request.page,
@@ -110,6 +170,7 @@ window.fetch = async (input, init) => {
       id: requests.length + 1,
       query: url.searchParams.get('q') || '',
       page: Number(url.searchParams.get('page') || 1),
+      activityMode: mode,
       aborted: !!init?.signal?.aborted,
       completed: false,
       resolve,
@@ -174,6 +235,26 @@ function Fixture() {
             <option value="unauthorized">Signed out</option>
             <option value="forbidden">Access removed</option>
             <option value="failure">Database unavailable</option>
+            <option value="activity-empty">
+              Audience awaiting first visit
+            </option>
+            <option value="activity-not-configured">
+              Audience not configured
+            </option>
+            <option value="activity-unavailable">Audience unavailable</option>
+            <option value="activity-invalid-day">Audience invalid date</option>
+            <option value="activity-invalid-count">
+              Audience invalid count
+            </option>
+            <option value="activity-invalid-null">
+              Audience invalid unknown day
+            </option>
+            <option value="activity-invalid-today">
+              Audience mismatched today
+            </option>
+            <option value="activity-invalid-status">
+              Audience invalid status
+            </option>
           </select>
         </label>
         <button onClick={() => setMounted((value) => !value)}>

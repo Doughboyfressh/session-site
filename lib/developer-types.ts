@@ -8,6 +8,15 @@ export type DeveloperProfile = {
   tracks: number;
 };
 
+export type DeveloperActivity = {
+  status: 'ready' | 'not-configured' | 'unavailable';
+  timezone: 'UTC';
+  collectedSince: string | null;
+  visitorsToday: number | null;
+  dailyActiveUsersToday: number | null;
+  days: { day: string; visitors: number | null; activeUsers: number | null }[];
+};
+
 export type DeveloperDashboard = {
   generatedAt: number;
   metrics: {
@@ -27,6 +36,7 @@ export type DeveloperDashboard = {
     recordedActiveCreators7d: number;
   };
   signupDays: { day: string; count: number }[];
+  activity: DeveloperActivity;
   users: {
     items: DeveloperProfile[];
     page: number;

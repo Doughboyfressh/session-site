@@ -5,6 +5,7 @@ const client = await pool.connect();
 try {
   await client.query('BEGIN');
   await client.query(fs.readFileSync('deploy/001-session-postgres.sql','utf8'));
+  await client.query(fs.readFileSync('deploy/002-session-activity.sql','utf8'));
   await client.query('COMMIT');
   console.log('SESSION PostgreSQL schema applied.');
 } catch (error) {
