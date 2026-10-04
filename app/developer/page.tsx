@@ -36,6 +36,14 @@ export default async function DeveloperPage() {
           >
             {user ? 'Return to SESSION' : 'Sign in to SESSION'}
           </a>
+          {user && (
+            <details className="developer-account-details">
+              <summary>Signed-in account details</summary>
+              <p>
+                Account ID: <code>{user.userId}</code>
+              </p>
+            </details>
+          )}
         </div>
       </main>
     );

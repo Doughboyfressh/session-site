@@ -8,6 +8,8 @@ Set the server-only `SESSION_DEVELOPER_IDS` variable to a comma-separated list o
 
 Resolve a requested operator's account against the correct provider and production branch. An email lookup alone does not prove control of an unverified account: verify the intended signed-in account before enrollment. Do not commit real operator IDs or emails. Removing an ID revokes subsequent page/API requests after the hosting configuration is deployed; it does not delete that account or its music.
 
+Signed-in visitors without dashboard access can expand **Signed-in account details** on the access screen to see their own server-confirmed account ID. Guests see no ID, and the panel does not expose configured operator IDs or another account's information. Use this panel to confirm the intended account before changing the allowlist.
+
 The API returns `private, no-store` on success and failure. Guests receive 401; other accounts receive 403 before dashboard queries run. The client discards prior data while reloading and on failed or denied requests. A page already in an operator's browser is a snapshot; use refresh or navigate again to check current access. No route bypasses existing private project, file, or conversation authorization.
 
 ## Metrics

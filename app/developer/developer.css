@@ -458,6 +458,17 @@
   max-width: 54ch;
   font-size: 14px;
 }
+.developer-account-details {
+  margin-top: 24px;
+  color: #bfaeb5;
+  font-size: 13px;
+}
+.developer-account-details summary {
+  cursor: pointer;
+}
+.developer-account-details code {
+  overflow-wrap: anywhere;
+}
 .developer-sr-only {
   position: absolute;
   width: 1px;

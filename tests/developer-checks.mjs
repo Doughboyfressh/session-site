@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { createRequire } from 'node:module';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { performance } from 'node:perf_hooks';
 import { DatabaseSync } from 'node:sqlite';
 import { build } from 'esbuild';
@@ -472,6 +474,58 @@ fs.writeFileSync(
   'outputs/release-checks/developer-query-evidence.json',
   JSON.stringify(uniqueQueries, null, 2),
 );
+// The access page exposes only the authenticated visitor's immutable ID.
+const pageBundle = await build({
+  entryPoints: ['app/developer/page.tsx'],
+  bundle: true,
+  write: false,
+  format: 'cjs',
+  platform: 'node',
+  jsx: 'automatic',
+  external: ['react', 'react/jsx-runtime'],
+  plugins: [{
+    name: 'access-page-fixture',
+    setup(builder) {
+      builder.onResolve({ filter: /chatgpt-auth|^cloudflare:workers$|^next\/link$|^\.\/dashboard$|\.css$/ },
+        args => ({ path: args.path, namespace: 'page-fixture' }));
+      builder.onLoad({ filter: /.*/, namespace: 'page-fixture' }, args => ({
+        contents: args.path.includes('chatgpt-auth')
+          ? 'export async function getChatGPTUser(){return globalThis.__developerFixture.user;} export function chatGPTSignInPath(){return "/fixture-signin";}'
+          : args.path === 'cloudflare:workers'
+            ? 'export const env=globalThis.__developerFixture.env;'
+            : args.path === 'next/link'
+              ? 'import {jsx} from "react/jsx-runtime"; export default function Link(props){return jsx("a",props);}'
+              : args.path === './dashboard'
+                ? 'import {jsx} from "react/jsx-runtime"; export default function Dashboard(){return jsx("div",{children:"AUTHORIZED_METRICS_FIXTURE"});}'
+                : '',
+      }));
+    },
+  }],
+});
+const pageModule = { exports: {} };
+vm.runInNewContext(pageBundle.outputFiles[0].text, {
+  module: pageModule,
+  exports: pageModule.exports,
+  require: createRequire(import.meta.url),
+  __developerFixture: fixture,
+});
+const renderPage = async () => renderToStaticMarkup(await pageModule.exports.default());
+fixture.env.SESSION_DEVELOPER_IDS = 'owner-immutable';
+fixture.user = null;
+let pageHTML = await renderPage();
+ok(pageHTML.includes('Sign in to SESSION'));
+ok(!pageHTML.includes('Account ID:') && !pageHTML.includes('owner-immutable'));
+fixture.user = { userId: 'different-authenticated-id' };
+pageHTML = await renderPage();
+ok(pageHTML.includes('Account ID: <code>different-authenticated-id</code>'));
+ok(!pageHTML.includes('owner-immutable') && !pageHTML.includes('AUTHORIZED_METRICS_FIXTURE'));
+fixture.user = { userId: '<img src=x onerror=alert(1)>' };
+pageHTML = await renderPage();
+ok(pageHTML.includes('&lt;img') && !pageHTML.includes('<img'));
+fixture.user = { userId: 'owner-immutable' };
+pageHTML = await renderPage();
+ok(pageHTML.includes('AUTHORIZED_METRICS_FIXTURE') && !pageHTML.includes('Account ID:'));
+
 db.close();
 console.log(
   `PASS: ${checks} developer authorization, privacy, metrics, UTC, pagination, literal search, logging and failure assertions.`,
