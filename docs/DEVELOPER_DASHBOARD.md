@@ -14,6 +14,7 @@ The API returns `private, no-store` on success and failure. Guests receive 401; 
 
 ## Metrics
 
+- **Visitors today** estimates distinct foreground browsers, including guests, during the current UTC day. **Daily active users today** counts distinct verified signed-in accounts with a foreground visit or interaction, including accounts without creator profiles. The Audience section includes fourteen UTC days; dates before collection began are marked Not measured. See [collection, privacy, deployment and limits](DAILY_ACTIVITY.md).
 - **Creator profiles** counts SESSION profiles, including private profiles. It is not the number of all authentication accounts; an account can exist without a creator profile.
 - **New profiles** uses profile creation timestamps. The chart covers the last fourteen calendar days in UTC, including the current partial day. Seven-day counts use a rolling interval.
 - **Recorded active creators** counts distinct profiled accounts with a qualifying record in the last seven days: profile creation, latest project update, track/post/comment/room creation, or room presence. The latest project editor is used when recorded. This is a signal from current records, not visits, logins, retention, or a complete historical activity log. Deleted records and overwritten latest-update timestamps can change it.

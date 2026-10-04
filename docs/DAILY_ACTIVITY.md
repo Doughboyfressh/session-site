@@ -20,6 +20,8 @@ Daily, domain-separated HMAC digests are stored in `activity_daily`; raw account
 
 Apply the new append-only SQLite migration through the existing Sites migration flow. For an existing SESSION PostgreSQL database, apply only `deploy/002-session-activity.sql` with the activity migration script; `deploy/001-session-postgres.sql` remains the fresh-database initialization and must not be reapplied to upgrade an existing installation.
 
+For a fresh PostgreSQL database, `npm run db:migrate:neon` now applies initialization and the activity migration together. For an existing database, use `npm run db:migrate:activity:neon`, with the intended database URL in ignored `.env.local`.
+
 Configure a stable, server-only `SESSION_ACTIVITY_SECRET` of at least 32 characters in encrypted hosting variables. Vercel can use the existing `NEON_AUTH_COOKIE_SECRET` as a domain-separated fallback. Sites requires the dedicated secret when the fallback is absent. Missing or malformed configuration disables measurement and is shown as Not configured. Do not expose either key through `NEXT_PUBLIC_` variables. Changing the measurement key during a day can change deduplication; keep it stable for consistent counts.
 
 Counts begin after deployment and the first measured visit. This release adds no automatic erasure of historical measurement rows or changes to account deletion, authentication roles, existing projects, or Vercel analytics settings. The new rows are private telemetry; any future retention policy must cover them explicitly.
