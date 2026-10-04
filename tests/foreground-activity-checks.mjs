@@ -65,6 +65,30 @@ release(true);
 await flush();
 assert.equal(serialized, 2, 'completion does not record a hidden page');
 
+// A real interaction after midnight must survive an older request still pending.
+visible = true;
+now = Date.parse('2026-10-03T23:59:59Z');
+const sentDays = [];
+const rollover = createForegroundActivity({
+  now: () => now,
+  visible: () => visible,
+  send: () => {
+    sentDays.push(new Date(now).toISOString().slice(0, 10));
+    return new Promise(resolve => { release = resolve; });
+  },
+});
+const priorDay = rollover.record(true);
+await flush();
+now += 2000;
+void rollover.record();
+release(true);
+await priorDay;
+await flush();
+assert.deepEqual(sentDays, ['2026-10-03', '2026-10-04'],
+  'next-day interaction queues behind an in-flight prior-day visit');
+release(true);
+await flush();
+
 // Run the actual client component's effects, including StrictMode's setup /
 // cleanup / setup cycle before the initial timer fires.
 class EventTargetFixture {

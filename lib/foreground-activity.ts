@@ -14,6 +14,7 @@ export function createForegroundActivity(environment: ActivityEnvironment) {
   let lastDay = '';
   let retryAt = 0;
   let inFlight: Promise<void> | null = null;
+  let inFlightDay = '';
   let queuedVisit = false;
 
   function record(visit = false): Promise<void> {
@@ -26,7 +27,7 @@ export function createForegroundActivity(environment: ActivityEnvironment) {
       return Promise.resolve();
     const day = new Date(now).toISOString().slice(0, 10);
     if (inFlight) {
-      if (visit) queuedVisit = true;
+      if (visit || day !== inFlightDay) queuedVisit = true;
       return inFlight;
     }
     if (
@@ -34,6 +35,7 @@ export function createForegroundActivity(environment: ActivityEnvironment) {
       now >= lastSuccess && now - lastSuccess < INTERVAL
     ) return Promise.resolve();
 
+    inFlightDay = day;
     inFlight = Promise.resolve().then(environment.send).then((success) => {
       if (success) {
         lastSuccess = now;
@@ -46,6 +48,7 @@ export function createForegroundActivity(environment: ActivityEnvironment) {
       retryAt = environment.now() + RETRY_DELAY;
     }).finally(() => {
       inFlight = null;
+      inFlightDay = '';
       if (queuedVisit) {
         queuedVisit = false;
         void record(true);
