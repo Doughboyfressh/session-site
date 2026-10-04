@@ -10,7 +10,10 @@ import {
   RefreshCw,
   Search,
 } from 'lucide-react';
-import type { DeveloperDashboard } from '@/lib/developer-types';
+import type {
+  DeveloperActivity,
+  DeveloperDashboard,
+} from '@/lib/developer-types';
 
 const numberFormat = new Intl.NumberFormat('en-US');
 const dateFormat = new Intl.DateTimeFormat('en-US', {
@@ -49,6 +52,71 @@ function finiteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
+function activityCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function utcDay(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value))
+    return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return (
+    Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+  );
+}
+
+function isActivity(
+  value: unknown,
+  generatedAt: number,
+): value is DeveloperActivity {
+  if (!value || typeof value !== 'object') return false;
+  const activity = value as DeveloperActivity;
+  const today = new Date(generatedAt).toISOString().slice(0, 10);
+  if (
+    !['ready', 'not-configured', 'unavailable'].includes(activity.status) ||
+    activity.timezone !== 'UTC' ||
+    (activity.collectedSince !== null &&
+      (!utcDay(activity.collectedSince) || activity.collectedSince > today)) ||
+    !Array.isArray(activity.days)
+  )
+    return false;
+  if (activity.status !== 'ready')
+    return (
+      activity.collectedSince === null &&
+      activity.visitorsToday === null &&
+      activity.dailyActiveUsersToday === null &&
+      activity.days.length === 0
+    );
+  if (activity.days.length !== 14) return false;
+
+  const todayStart = Date.parse(`${today}T00:00:00.000Z`);
+  if (
+    !activity.days.every((entry, index) => {
+      if (!entry || typeof entry !== 'object' || !utcDay(entry.day))
+        return false;
+      const expectedDay = new Date(todayStart - (13 - index) * 86400000)
+        .toISOString()
+        .slice(0, 10);
+      if (entry.day !== expectedDay) return false;
+      if (activity.collectedSince === null && index === 13)
+        return entry.visitors === 0 && entry.activeUsers === 0;
+      const measured =
+        activity.collectedSince !== null &&
+        entry.day >= activity.collectedSince;
+      return measured
+        ? activityCount(entry.visitors) && activityCount(entry.activeUsers)
+        : entry.visitors === null && entry.activeUsers === null;
+    })
+  )
+    return false;
+
+  const latest = activity.days[13];
+  return (
+    activity.visitorsToday === latest.visitors &&
+    activity.dailyActiveUsersToday === latest.activeUsers
+  );
+}
+
 // Check the response before rendering so a failed or incomplete response cannot
 // appear as a successful dashboard with fabricated zero counts.
 function isDashboard(value: unknown): value is DeveloperDashboard {
@@ -56,6 +124,8 @@ function isDashboard(value: unknown): value is DeveloperDashboard {
   const data = value as DeveloperDashboard;
   return (
     finiteNumber(data.generatedAt) &&
+    Number.isFinite(new Date(data.generatedAt).getTime()) &&
+    isActivity(data.activity, data.generatedAt) &&
     !!data.metrics &&
     metricKeys.every((key) => finiteNumber(data.metrics[key])) &&
     Array.isArray(data.signupDays) &&
@@ -109,7 +179,7 @@ function Metric({
   featured = false,
 }: {
   label: string;
-  value: number | string;
+  value: number | string | null;
   detail: string;
   featured?: boolean;
 }) {
@@ -119,8 +189,15 @@ function Metric({
     >
       <dt>{label}</dt>
       <dd>
-        <span className="developer-metric-value">
-          {typeof value === 'number' ? numberFormat.format(value) : value}
+        <span
+          className="developer-metric-value"
+          aria-label={value === null ? 'Not measured' : undefined}
+        >
+          {value === null
+            ? '—'
+            : typeof value === 'number'
+              ? numberFormat.format(value)
+              : value}
         </span>
         <p>{detail}</p>
       </dd>
@@ -140,6 +217,184 @@ function PanelHeading({
       <h2>{title}</h2>
       <p>{children}</p>
     </div>
+  );
+}
+
+function Audience({
+  activity,
+  generatedAt,
+}: {
+  activity: DeveloperActivity;
+  generatedAt: number;
+}) {
+  const today = new Date(generatedAt).toISOString().slice(0, 10);
+  const maxCount = Math.max(
+    1,
+    ...activity.days.flatMap((day) => [
+      day.visitors ?? 0,
+      day.activeUsers ?? 0,
+    ]),
+  );
+  const statusLabel =
+    activity.status === 'ready'
+      ? 'Collecting'
+      : activity.status === 'not-configured'
+        ? 'Not configured'
+        : 'Unavailable';
+  const statusDescription =
+    activity.status === 'not-configured'
+      ? 'Audience collection is not configured for this deployment. Counts will appear after collection is enabled and receives a visit.'
+      : activity.status === 'unavailable'
+        ? 'Audience data is temporarily unavailable. Refresh to try again.'
+        : activity.collectedSince === null
+          ? 'Collection is ready and awaiting its first visit.'
+          : null;
+
+  return (
+    <section
+      className="developer-panel developer-audience"
+      aria-labelledby="developer-audience-title"
+    >
+      <div className="developer-audience-heading">
+        <div>
+          <h2 id="developer-audience-title">Audience</h2>
+          <p>Daily visitors and signed-in activity measured by SESSION.</p>
+        </div>
+        <span
+          className={`developer-audience-status developer-audience-status-${activity.status}`}
+        >
+          {statusLabel}
+        </span>
+      </div>
+      <p className="developer-audience-date">
+        <time dateTime={today}>{dateFormat.format(generatedAt)}</time>
+        {' · UTC · Today in progress'}
+      </p>
+      <dl className="developer-audience-metrics">
+        <Metric
+          label="Visitors today"
+          value={activity.visitorsToday}
+          detail="Estimated distinct browsers, including guests, using a daily first-party cookie."
+          featured
+        />
+        <Metric
+          label="Daily active users today"
+          value={activity.dailyActiveUsersToday}
+          detail="Unique verified signed-in accounts with a visible page or interaction, including accounts without a creator profile."
+        />
+      </dl>
+      <div className="developer-audience-notes">
+        {statusDescription && <output>{statusDescription}</output>}
+        <p>
+          {activity.collectedSince !== null && (
+            <>
+              Collected since{' '}
+              <time dateTime={activity.collectedSince}>
+                {dateFormat.format(
+                  Date.parse(`${activity.collectedSince}T00:00:00.000Z`),
+                )}
+              </time>{' '}
+              (UTC).{' '}
+            </>
+          )}
+          Earlier dates are not measured. There is no historical backfill.
+        </p>
+      </div>
+      {activity.status === 'ready' && (
+        <div className="developer-audience-trend">
+          <div className="developer-audience-trend-heading">
+            <h3>Last 14 days</h3>
+            <div className="developer-audience-legend" aria-hidden="true">
+              <span>
+                <i className="developer-audience-key-visitors" />
+                Visitors
+              </span>
+              <span>
+                <i className="developer-audience-key-users" />
+                Active users
+              </span>
+              <span>
+                <i className="developer-audience-key-unknown" />
+                Not measured
+              </span>
+            </div>
+          </div>
+          <div className="developer-audience-chart" aria-hidden="true">
+            {activity.days.map((day) => (
+              <div className="developer-chart-day" key={day.day}>
+                <div
+                  className={`developer-audience-track${day.visitors === null ? ' developer-audience-track-unknown' : ''}`}
+                >
+                  {day.visitors !== null && day.activeUsers !== null && (
+                    <>
+                      <span
+                        className="developer-audience-bar-visitors"
+                        style={{
+                          height: `${(day.visitors / maxCount) * 100}%`,
+                        }}
+                      />
+                      <span
+                        className="developer-audience-bar-users"
+                        style={{
+                          height: `${(day.activeUsers / maxCount) * 100}%`,
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
+                <span
+                  className={`developer-chart-label${day.day === today ? ' developer-audience-today' : ''}`}
+                >
+                  {day.day.slice(5)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {activity.status === 'ready' && (
+        <details className="developer-chart-data">
+          <summary>View daily audience counts</summary>
+          <table className="developer-table developer-audience-table">
+            <caption className="developer-sr-only">
+              Visitors and daily active users for the last 14 UTC calendar days.
+              Today is in progress. Not measured means no count is available.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Date · UTC</th>
+                <th scope="col">Visitors</th>
+                <th scope="col">Active users</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activity.days.map((day) => (
+                <tr key={day.day}>
+                  <th scope="row">
+                    <time dateTime={day.day}>{day.day}</time>
+                    {day.day === today && (
+                      <span className="developer-audience-partial">
+                        In progress
+                      </span>
+                    )}
+                  </th>
+                  <td>
+                    {day.visitors === null
+                      ? 'Not measured'
+                      : numberFormat.format(day.visitors)}
+                  </td>
+                  <td>
+                    {day.activeUsers === null
+                      ? 'Not measured'
+                      : numberFormat.format(day.activeUsers)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+    </section>
   );
 }
 
@@ -313,6 +568,10 @@ export function DeveloperDashboardClient({
                   . Refresh for current data.
                 </p>
               </div>
+              <Audience
+                activity={data.activity}
+                generatedAt={data.generatedAt}
+              />
               <section
                 aria-labelledby="developer-overview-title"
                 className="developer-overview"
@@ -342,8 +601,8 @@ export function DeveloperDashboardClient({
                   />
                 </dl>
                 <p className="developer-footnote">
-                  Recorded activity is based on stored actions. It does not
-                  measure visitors or daily active users.
+                  Recorded active creators are based on stored SESSION actions
+                  over the last 7 days, separate from daily audience counts.
                 </p>
               </section>
             </>

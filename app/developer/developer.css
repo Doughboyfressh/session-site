@@ -336,6 +336,151 @@
   font-size: 11px;
   margin: 12px 0 0;
 }
+.developer-audience-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 23px 0;
+}
+.developer-audience-heading p {
+  margin-top: 7px;
+}
+.developer-audience-status {
+  flex: none;
+  padding: 5px 8px;
+  border: 1px solid #516455;
+  border-radius: 5px;
+  background: #262b28;
+  color: #c5dfce;
+  font-size: 10px;
+}
+.developer-audience-status-not-configured,
+.developer-audience-status-unavailable {
+  border-color: #72565e;
+  background: #34252c;
+  color: #e3b8c8;
+}
+.developer-audience-date {
+  padding: 0 23px;
+  margin-top: 16px;
+  font-size: 11px;
+}
+.developer-audience-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 0 23px;
+  margin: 14px 0 0;
+}
+.developer-audience-notes {
+  padding: 0 23px;
+  margin: 14px 0 22px;
+}
+.developer-audience-notes p,
+.developer-audience-notes output {
+  display: block;
+  font-size: 11px;
+  margin-top: 7px;
+  color: #b7afb1;
+  line-height: 1.6;
+}
+.developer-audience-trend {
+  border-top: 1px solid #3d3336;
+  padding: 19px 23px;
+}
+.developer-audience-trend-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.developer-audience-trend h3 {
+  font-size: 12px;
+  font-weight: 550;
+  color: #e7d7df;
+}
+.developer-audience-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 13px;
+  font-size: 10px;
+  color: #c6b2bb;
+}
+.developer-audience-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.developer-audience-legend i {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+}
+.developer-audience-key-visitors,
+.developer-audience-bar-visitors {
+  background: #e64c69;
+}
+.developer-audience-key-users,
+.developer-audience-bar-users {
+  background: #d7b7ec;
+}
+.developer-audience-key-unknown {
+  border: 1px dashed #9b7f89;
+}
+.developer-audience-chart {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 20px;
+}
+.developer-audience-track {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  width: 100%;
+  height: 105px;
+  padding: 0 3px;
+  background: #282023;
+  border-bottom: 1px solid #6d505b;
+}
+.developer-audience-track > span {
+  flex: 1;
+  min-width: 0;
+  border-radius: 3px 3px 0 0;
+}
+.developer-audience-track-unknown {
+  border: 1px dashed #6c535d;
+  background: transparent;
+}
+.developer-audience-today {
+  color: #fff2f8;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.developer-audience-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+.developer-audience-table th,
+.developer-audience-table td {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.developer-audience-table tbody th {
+  max-width: none;
+  width: auto;
+}
+.developer-audience-table thead th:first-child {
+  text-align: left;
+}
+.developer-audience-partial {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  color: #c6b2bb;
+}
 .developer-two-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -527,6 +672,40 @@
   }
   .developer-panel-heading {
     padding-bottom: 0;
+  }
+  .developer-audience-heading {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 19px 17px 0;
+  }
+  .developer-audience-date,
+  .developer-audience-metrics,
+  .developer-audience-notes {
+    padding: 0 17px;
+  }
+  .developer-audience-metrics {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .developer-audience-trend {
+    padding: 19px 17px;
+  }
+  .developer-audience-chart {
+    gap: 4px;
+  }
+  .developer-audience-track {
+    gap: 2px;
+    height: 90px;
+    padding: 0 1px;
+  }
+  .developer-audience-table th,
+  .developer-audience-table td {
+    padding: 12px 10px;
+    font-size: 11px;
+  }
+  .developer-audience-table thead th {
+    font-size: 9px;
+    letter-spacing: 0.3px;
   }
   .developer-compact-metrics .developer-metric {
     padding: 17px;
