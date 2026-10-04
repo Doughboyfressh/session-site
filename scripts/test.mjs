@@ -36,6 +36,7 @@ const suites = [
   'production',
   'deployment',
   'developer',
+  'web-analytics',
   'workspace-entry',
   'studio-ui',
   'room-media-controls',

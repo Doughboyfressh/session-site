@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
+import SessionAnalytics from './web-analytics';
 import './globals.css';
 import './advanced.css';
 
@@ -45,6 +46,9 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         {children}
+        {process.env.NEXT_PUBLIC_DEPLOYMENT_TARGET === 'vercel' && (
+          <SessionAnalytics />
+        )}
       </body>
     </html>
   );
