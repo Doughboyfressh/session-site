@@ -34,17 +34,20 @@ type HeldRequest = {
   resolve: (response: Response) => void;
 };
 let mode = 'automatic';
+let resultLimit = 30;
 let requests: HeldRequest[] = [];
 const changed = () =>
   window.dispatchEvent(new Event('developer-fixture-change'));
 function complete(request: HeldRequest, status = 200) {
   if (request.completed) return;
   request.completed = true;
-  const matched = creators.filter((user) =>
-    `${user.name} ${user.username}`
-      .toLowerCase()
-      .includes(request.query.toLowerCase()),
-  );
+  const matched = creators
+    .slice(0, resultLimit)
+    .filter((user) =>
+      `${user.name} ${user.username}`
+        .toLowerCase()
+        .includes(request.query.toLowerCase()),
+    );
   const result: DeveloperDashboard = {
     generatedAt: now,
     metrics: {
@@ -175,6 +178,22 @@ function Fixture() {
         </label>
         <button onClick={() => setMounted((value) => !value)}>
           {mounted ? 'Unmount dashboard' : 'Mount dashboard'}
+        </button>
+        <button
+          onClick={() => {
+            resultLimit = 25;
+            changed();
+          }}
+        >
+          Shrink to 25 profiles
+        </button>
+        <button
+          onClick={() => {
+            resultLimit = 30;
+            changed();
+          }}
+        >
+          Restore 30 profiles
         </button>
         <details>
           <summary>Fixture requests</summary>

@@ -203,6 +203,17 @@ export function DeveloperDashboardClient({
         if (!current()) return;
         if (!isDashboard(result))
           throw new Error('Dashboard response incomplete');
+        const lastPage = Math.max(
+          1,
+          Math.ceil(result.users.total / result.users.pageSize),
+        );
+        if (result.users.page > lastPage) {
+          // Profiles can disappear or be renamed while an operator is browsing.
+          // Reload a valid page before displaying its range or empty state.
+          invalidate();
+          setPage(lastPage);
+          return;
+        }
         setData(result);
       } catch {
         if (!current()) return;
@@ -327,7 +338,7 @@ export function DeveloperDashboardClient({
                   <Metric
                     label="Saved projects"
                     value={metrics.projects}
-                    detail="Projects across all creator profiles"
+                    detail="All saved SESSION projects"
                   />
                 </dl>
                 <p className="developer-footnote">
