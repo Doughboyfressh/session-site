@@ -26,6 +26,8 @@ The user list contains only account IDs, names, usernames, profile visibility/cr
 
 ## Verification
 
+Web Analytics acceptance (October 3, 2026): `@vercel/analytics` 2.0.1 passed 15 URL-redaction assertions, all 45 offline suites, TypeScript, scoped lint, both production builds, independent review, and a source/client credential scan. Production deployment `dpl_9Au67nunAF5W3UugWpEpPdw77YTV` is READY from source `e5121326876d0afa9b691e779b36b150953fdd85`. The live browser loaded one Next.js tracker with no console errors; Vercel's production page-view metric received both the landing visit and client navigation to `/app`. Four guest-access and fourteen landing/workspace HTTP checks passed after deployment. Evidence is in ignored `outputs/analytics-evidence`.
+
 `tests/developer-checks.mjs` exercises the actual access check, route, and SQLite queries with disposable local fixtures. `tests/developer-harness.html` uses the actual dashboard with synthetic response controls for pagination, mobile layout, access loss, outages, and responses arriving after cancellation. Production SQL must also be checked through the PostgreSQL translation layer; read-only `EXPLAIN` can verify query compatibility without copying private rows into test evidence.
 
 Release acceptance should record both builds, independent review, denied guest/non-operator access, authorized operator access, and the live More navigation link. Evidence belongs under ignored `outputs/developer-evidence`. No production users, songs, or messages are changed by this dashboard.
