@@ -12,6 +12,7 @@
     "dev:vercel": "node scripts/next-runtime.mjs dev --webpack",
     "start:vercel": "node scripts/next-runtime.mjs start",
     "db:migrate:neon": "node --env-file=.env.local scripts/migrate-postgres.mjs",
+    "db:migrate:activity:neon": "node --env-file=.env.local scripts/migrate-activity-postgres.mjs",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
     "typecheck": "tsc --noEmit",
