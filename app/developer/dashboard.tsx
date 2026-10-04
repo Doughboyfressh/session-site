@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import Link from 'next/link';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -179,9 +180,6 @@ export function DeveloperDashboardClient({
     const request = ++sequence.current;
     const controller = new AbortController();
     activeRequest.current = controller;
-    setData(null);
-    setLoading(true);
-    setError(false);
     const current = () =>
       sequence.current === request && !controller.signal.aborted;
 
@@ -244,12 +242,12 @@ export function DeveloperDashboardClient({
   return (
     <main className="developer-page">
       <header className="developer-header">
-        <a className="developer-brand" href="/app">
+        <Link className="developer-brand" href="/app">
           session<span>.</span>
-        </a>
-        <a className="developer-back" href="/app">
+        </Link>
+        <Link className="developer-back" href="/app">
           <ArrowLeft size={16} /> Back to studio
-        </a>
+        </Link>
       </header>
       <div className="developer-intro">
         <div>
@@ -377,9 +375,9 @@ export function DeveloperDashboardClient({
               </div>
             </div>
             {loading ? (
-              <div className="developer-state" role="status">
+              <output className="developer-state">
                 Loading current dashboard data…
-              </div>
+              </output>
             ) : error ? (
               <div className="developer-state" role="alert">
                 <h3>Dashboard data is unavailable</h3>
@@ -391,23 +389,23 @@ export function DeveloperDashboardClient({
             ) : data ? (
               <>
                 {data.users.items.length === 0 ? (
-                  <div className="developer-state" role="status">
-                    <h3>
+                  <output className="developer-state">
+                    <strong>
                       {query
                         ? 'No matching creator profiles'
                         : 'No creator profiles yet'}
-                    </h3>
-                    <p>
+                    </strong>
+                    <span>
                       {query
                         ? 'Try another name or username.'
                         : 'Profiles will appear here after creators set them up.'}
-                    </p>
-                  </div>
+                    </span>
+                  </output>
                 ) : (
-                  <div
+                  <section
                     className="developer-table-scroll"
+                    // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Keyboard users need focus to scroll this table horizontally.
                     tabIndex={0}
-                    role="region"
                     aria-label="Creator profiles table"
                   >
                     <table className="developer-table">
@@ -451,13 +449,13 @@ export function DeveloperDashboardClient({
                         ))}
                       </tbody>
                     </table>
-                  </div>
+                  </section>
                 )}
                 <div className="developer-pagination">
-                  <p role="status">
+                  <output>
                     {numberFormat.format(start)}–{numberFormat.format(end)} of{' '}
                     {numberFormat.format(data.users.total)} profiles
-                  </p>
+                  </output>
                   <div>
                     <button
                       className="developer-button"
@@ -574,10 +572,10 @@ export function DeveloperDashboardClient({
                 </div>
                 <details className="developer-chart-data">
                   <summary>View daily counts</summary>
-                  <div
+                  <section
                     className="developer-table-scroll"
+                    // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Keyboard users need focus to scroll this table horizontally.
                     tabIndex={0}
-                    role="region"
                     aria-label="Daily profile creation table"
                   >
                     <table className="developer-table developer-daily-table">
@@ -601,7 +599,7 @@ export function DeveloperDashboardClient({
                         ))}
                       </tbody>
                     </table>
-                  </div>
+                  </section>
                 </details>
               </section>
 

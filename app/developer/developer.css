@@ -239,6 +239,7 @@
   flex-wrap: wrap;
 }
 .developer-pagination p,
+.developer-pagination output,
 .developer-pagination > div > span {
   color: #c2b3bb;
   font-size: 11px;
@@ -262,7 +263,8 @@
   color: #d6c6cd;
   font-size: 13px;
 }
-.developer-state h3 {
+.developer-state h3,
+.developer-state > strong {
   color: #f4e9ef;
   font-size: 17px;
 }

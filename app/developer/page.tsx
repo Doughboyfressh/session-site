@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { chatGPTSignInPath, getChatGPTUser } from '../chatgpt-auth';
 import { developerAllowed } from '@/lib/developer-server';
 import DeveloperDashboardClient from './dashboard';
@@ -17,9 +18,9 @@ export default async function DeveloperPage() {
   if (!user || !developerAllowed(user.userId)) {
     return (
       <main className="developer-page developer-access">
-        <a className="developer-brand" href="/app">
+        <Link className="developer-brand" href="/app">
           session<span>.</span>
-        </a>
+        </Link>
         <div className="developer-access-card">
           <span className="developer-eyebrow">PRIVATE WORKSPACE</span>
           <h1>Developer dashboard</h1>
