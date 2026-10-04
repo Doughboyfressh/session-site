@@ -8,9 +8,9 @@ const evidence = [];
 for (const [name, headers] of [
   ['guest', {}],
   ['forged dispatcher identity', {
-    'oai-auth-user-id': 'developer-http-fixture',
-    'oai-auth-user-name': 'Owner',
-    'oai-auth-user-role': 'admin',
+    'oai-authenticated-user-id': 'developer-http-fixture',
+    'oai-authenticated-user-email': 'fixture@example.invalid',
+    'oai-authenticated-user-full-name': 'Owner',
   }],
 ]) {
   const response = await fetch(new URL('/api/developer?q=private&page=1', base), {
