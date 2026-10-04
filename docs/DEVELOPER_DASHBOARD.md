@@ -27,3 +27,13 @@ The user list contains only account IDs, names, usernames, profile visibility/cr
 `tests/developer-checks.mjs` exercises the actual access check, route, and SQLite queries with disposable local fixtures. `tests/developer-harness.html` uses the actual dashboard with synthetic response controls for pagination, mobile layout, access loss, outages, and responses arriving after cancellation. Production SQL must also be checked through the PostgreSQL translation layer; read-only `EXPLAIN` can verify query compatibility without copying private rows into test evidence.
 
 Release acceptance should record both builds, independent review, denied guest/non-operator access, authorized operator access, and the live More navigation link. Evidence belongs under ignored `outputs/developer-evidence`. No production users, songs, or messages are changed by this dashboard.
+
+For read-only Vercel/Neon guest acceptance, set `SESSION_VERIFY_BASE` to the selected deployment and run `node tests/developer-http-checks.mjs`. This checks guest denial, rejection of forged dispatcher headers, private/no-store API responses, the sign-in page, and hidden operator navigation. It does not prove authorized operator access.
+
+### October 3, 2026 acceptance
+
+- TypeScript, scoped lint, all 44 offline suites, and both Sites and Vercel production builds passed.
+- The developer suite passed 252 assertions. All twelve translated queries passed PostgreSQL `EXPLAIN` without reading private rows; UTC bucket and literal search compatibility checks passed.
+- Ten browser checks passed with synthetic data, covering search/pagination, a shrinking last page, late cancelled responses, sign-out/access loss, database failure, a 390px viewport, and a fresh load without console errors.
+- Independent review found a last-page refresh defect when profiles disappeared. The regression and fix passed; review confirmed no remaining medium or high findings.
+- Source and client-build credential scans passed. Production operator enrollment and the authorized live dashboard/navigation checks remain pending proof of control of the selected signed-in account. The requested account's email was unverified at lookup; it has not been enrolled based on email alone.

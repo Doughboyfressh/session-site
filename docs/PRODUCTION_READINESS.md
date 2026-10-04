@@ -1,12 +1,14 @@
 # SESSION release readiness
 
-Updated October 2, 2026. This is a development release assessment, not a production certification or a legal compliance opinion.
+Updated October 3, 2026. This is a development release assessment, not a production certification or a legal compliance opinion.
 
 ## Status
 
 SESSION is still an early-access service. The changes below are suitable for a controlled release after the recorded checks pass. A general public launch remains blocked by the final device/network review, operational setup, account-deletion/moderation workflow, and operative legal policies. Keep the current Sites audience unchanged; an invitation to a room is not a grant of site access.
 
 ## Changes since September 28 (this release)
+
+A private, read-only developer dashboard now reports creator profiles, recent recorded activity, saved projects, community tracks, storage metadata, rooms/presence, and database query health. Its server-only immutable-account allowlist defaults to denying access. See [metric definitions and operator enrollment](DEVELOPER_DASHBOARD.md); enrollment and authorized production acceptance remain pending a sign-in control check. Traffic analytics and log history remain in the hosting provider's dashboard.
 
 Studio now includes original SESSION Wavetable/FM browser synths and a paired Windows x64 VST3 companion. Notes/settings survive undo, recovery and cloud saves. Native state remains private; matching rendered WAV audio lets authorized collaborators play/export without the plugin. See [setup, limits and verification](INSTRUMENT_PLUGINS.md). Native acceptance uses Steinberg's official SDK test synth; actual licensed Serum 2 operation is unverified. The companion is an unsigned early-access build.
 
@@ -37,7 +39,7 @@ Mastering presets are creative processing with a sample-peak ceiling. They do no
 
 ## Reproducible checks
 
-Use the committed lockfile and Node >=22.13. `npm run typecheck`, `npm test`, and `npm run build` provide the release checks. `npm test` writes individual logs and a JSON summary to `outputs/release-checks` and returns failure if any suite fails. The runner currently has 43 suites, including the reusable-playlist model, landing/workspace entry, Studio UI, room device-switch controls, scene geometry/lifecycle, community search, public creator service fields, drum draft synchronization, interrupted automation gestures, and conversation targeting/refresh, and track-detail ownership controls. `tests/production-checks.mjs` verifies presets/recovery, supported instruments, processed clip geometry, pitch/duration/stereo numerical checks, dry-source rules and pump alignment. `tests/backend-checks.mjs` executes actual API handlers with real migrations in isolated SQLite and simulated R2, including malformed multipart limits, throttling, range requests and denied private access.
+Use the committed lockfile and Node >=22.13. `npm run typecheck`, `npm test`, and `npm run build` provide the release checks. `npm test` writes individual logs and a JSON summary to `outputs/release-checks` and returns failure if any suite fails. The runner currently has 44 suites, including the developer dashboard authorization and metrics suite, the reusable-playlist model, landing/workspace entry, Studio UI, room device-switch controls, scene geometry/lifecycle, community search, public creator service fields, drum draft synchronization, interrupted automation gestures, and conversation targeting/refresh, and track-detail ownership controls. `tests/production-checks.mjs` verifies presets/recovery, supported instruments, processed clip geometry, pitch/duration/stereo numerical checks, dry-source rules and pump alignment. `tests/backend-checks.mjs` executes actual API handlers with real migrations in isolated SQLite and simulated R2, including malformed multipart limits, throttling, range requests and denied private access.
 
 `npm run check:release` runs those checks plus lint on the new hardening modules. This is explicitly a scoped lint check: the repository-wide lint baseline still contains pre-existing findings and has not been certified clean.
 
