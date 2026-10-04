@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan — developer-dashboard</title>
+<style>
+  :root{
+    --bg:#121010; --surface:#1b1818; --surface-2:#252121; --border:#393333;
+    --text:#f5f1f1; --muted:#b8aaaa; --primary:#df123b; --ok:#3fb27f;
+    --warn:#e0a458; --danger:#e05c5c;
+    --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"Cascadia Code",Consolas,monospace;
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.55}
+  main{max-width:880px;margin:0 auto;padding:32px 24px 96px}
+  header{border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:28px}
+  h1{font-size:26px;margin:0 0 4px}
+  .meta{color:var(--muted);font-size:13px}
+  .meta .badge{display:inline-block;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:999px;padding:1px 10px;margin-right:8px;color:var(--warn)}
+  section{margin:28px 0}
+  h2{font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+    border-bottom:1px solid var(--border);padding-bottom:6px}
+  [contenteditable]{border:1px dashed transparent;border-radius:6px;padding:2px 6px;margin:0 -6px;outline:none}
+  [contenteditable]:hover{border-color:var(--border)}
+  [contenteditable]:focus{border-color:var(--primary);background:var(--surface)}
+  .hint{color:var(--muted);font-size:13px;font-style:italic}
+  ul.plain{list-style:none;padding:0;margin:8px 0}
+  ul.plain li{padding:6px 8px;border-left:2px solid var(--border);margin:6px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+  .card h3{margin:0 0 6px;font-size:15px}
+  .card p{margin:0;color:var(--muted);font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{color:var(--muted);text-align:left;font-weight:500;font-size:12px;
+    text-transform:uppercase;letter-spacing:.06em;padding:6px 8px;border-bottom:1px solid var(--border)}
+  td{padding:8px;border-bottom:1px solid var(--border);vertical-align:top}
+  td.num{color:var(--muted);font-family:var(--mono);font-size:12px;white-space:nowrap}
+  input[type=checkbox]{width:16px;height:16px;accent-color:var(--ok)}
+  .done [contenteditable]{text-decoration:line-through;color:var(--muted)}
+  .risk{display:flex;gap:10px;align-items:baseline;padding:8px;border-left:2px solid var(--warn);margin:6px 0}
+  .risk .sev{font-size:11px;font-family:var(--mono);color:var(--warn);white-space:nowrap}
+  .decision{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:14px;margin:10px 0}
+  .decision .q{font-weight:600}
+  .choices{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+  .choices label{display:flex;gap:6px;align-items:center;background:var(--surface-2);
+    border:1px solid var(--border);border-radius:999px;padding:4px 12px;font-size:13px;cursor:pointer}
+  textarea{width:100%;min-height:52px;background:var(--bg);color:var(--text);
+    border:1px solid var(--border);border-radius:8px;padding:8px;font-family:var(--font);font-size:13px;resize:vertical}
+  .savebar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);
+    border-top:1px solid var(--border);padding:10px 24px;display:flex;gap:14px;align-items:center}
+  .savebar button{background:var(--primary);border:none;color:#fff;font-weight:600;
+    border-radius:8px;padding:8px 18px;cursor:pointer;font-size:14px}
+  .savebar .status{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>SESSION developer dashboard</h1>
+    <div class="meta"><span class="badge">in progress</span>2026-10-03 · First release uses existing SESSION records. You can annotate this plan while implementation continues.</div>
+  </header>
+
+  <section>
+    <h2>Goal</h2>
+    <div data-id="goal" contenteditable>Give the developer a private /developer dashboard showing creator profiles, recent recorded activity, content and storage totals, room presence, and hosting health links. Only an explicitly selected verified account ID can access the page or API; ordinary members and guests receive no metrics or private user rows.</div>
+  </section>
+
+  <section>
+    <h2>Non-goals</h2>
+    <ul class="plain">
+      <li data-id="nongoal-1" contenteditable>Account deletion, impersonation, private song/project contents, messages, credentials, and payments are outside this read-only overview.</li>
+      <li data-id="nongoal-2" contenteditable>Page views, visitors, retention, and error-rate history need additional instrumentation. Existing profile/action records will be labeled precisely; missing measurements will not be shown as zero.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Screens &amp; flows</h2>
+    <p class="hint">Uses SESSION's dark surfaces and red accents, with readable cards and a mobile user list.</p>
+    <div class="grid">
+      <div class="card"><h3 data-id="screen-1-title" contenteditable>Overview</h3>
+        <p data-id="screen-1-desc" contenteditable>Creator profiles, new profiles in seven days, recorded active creators, projects, community tracks/posts, media bytes, reports, and recent room presence. Fourteen UTC days of new profiles, explicit metric definitions, manual refresh, database reachability and Vercel logs links.</p></div>
+      <div class="card"><h3 data-id="screen-2-title" contenteditable>Creator directory</h3>
+        <p data-id="screen-2-desc" contenteditable>Search and paginate names/usernames with profile visibility, creation date, and project/track counts. No private content is opened. An owner-only link appears under SESSION's More navigation.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Tasks</h2>
+    <table>
+      <thead><tr><th></th><th>#</th><th>Task</th><th>Est</th></tr></thead>
+      <tbody>
+        <tr class="task"><td><input type="checkbox" data-id="task-1"></td><td class="num">1</td>
+          <td contenteditable data-id="task-1-text">Server account-ID allowlist, read-only metrics API, real SQLite fixtures, and PostgreSQL translation verification.</td>
+          <td contenteditable data-id="task-1-est" class="num">API</td></tr>
+        <tr class="task"><td><input type="checkbox" data-id="task-2"></td><td class="num">2</td>
+          <td contenteditable data-id="task-2-text">Protected dashboard and navigation, mobile/error/stale-search review, both builds, independent security review, owner enrollment, deployment and live access checks.</td>
+          <td contenteditable data-id="task-2-est" class="num">UI + release</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Risks</h2>
+    <div class="risk"><span class="sev">ACCESS</span><span data-id="risk-1" contenteditable>Editable profile roles must never grant developer access. Bind only a verified authentication ID through server configuration, check every request before any query, return private/no-store responses, and clear data when access ends. Profile creation is not total auth registration; recorded actions are not page visits.</span></div>
+  </section>
+
+  <section>
+    <h2>Possible follow-up</h2>
+    <div class="decision">
+      <div class="q" data-id="q-1-text" contenteditable>After this overview, which measurement would help most?</div>
+      <div class="choices">
+        <label><input type="radio" name="q-1" data-id="q-1" value="approve-a"> Visits and traffic sources</label>
+        <label><input type="radio" name="q-1" data-id="q-1" value="approve-b"> Studio use and retention</label>
+        <label><input type="radio" name="q-1" data-id="q-1" value="discuss"> Discuss later</label>
+      </div>
+      <textarea data-id="q-1-comment" placeholder="comment for the agent…"></textarea>
+    </div>
+  </section>
+</main>
+
+<div class="savebar">
+  <button onclick="save()">Save annotations</button>
+  <span class="status" id="status">edits stay in this page — save writes annotations.json</span>
+</div>
+
+<script>
+function collect(){
+  const out = {};
+  document.querySelectorAll('[data-id]').forEach(el => {
+    const id = el.dataset.id;
+    if (el.type === 'checkbox') out[id] = {kind:'check', value: el.checked};
+    else if (el.type === 'radio') { if (el.checked) out[id] = {kind:'decision', value: el.value}; }
+    else if (el.tagName === 'TEXTAREA') out[id] = {kind:'comment', value: el.value};
+    else if (el.isContentEditable) out[id] = {kind:'text', value: el.innerText};
+  });
+  document.querySelectorAll('tr.task').forEach(tr => {
+    const cb = tr.querySelector('input[type=checkbox]');
+    if (cb) tr.classList.toggle('done', cb.checked);
+  });
+  out._savedAt = new Date().toISOString();
+  return out;
+}
+async function save(){
+  const data = collect(), status = document.getElementById('status');
+  try {
+    const r = await fetch('/save', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
+    if (!r.ok) throw 0;
+    status.textContent = 'saved to annotations.json ✓ ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+    a.download = 'annotations.json'; a.click();
+    status.textContent = 'not served — downloaded annotations.json; put it next to index.html';
+  }
+}
+async function restore(){
+  try {
+    const r = await fetch('annotations.json'); if (!r.ok) return;
+    const data = await r.json();
+    for (const [id, rec] of Object.entries(data)) {
+      if (id.startsWith('_')) continue;
+      const el = document.querySelector('[data-id="'+id+'"]');
+      if (!el) continue;
+      if (rec.kind==='check') el.checked = rec.value;
+      else if (rec.kind==='decision'){
+        const radio = document.querySelector('input[type=radio][data-id="'+id+'"][value="'+rec.value+'"]');
+        if (radio) radio.checked = true;
+      }
+      else if (rec.kind==='comment') el.value = rec.value;
+      else if (rec.kind==='text') el.innerText = rec.value;
+    }
+    document.getElementById('status').textContent = 'restored annotations from disk';
+  } catch (e) {}
+}
+document.addEventListener('DOMContentLoaded', restore);
+document.addEventListener('keydown', e => { if ((e.ctrlKey||e.metaKey) && e.key==='s'){ e.preventDefault(); save(); } });
+</script>
+</body>
+</html>

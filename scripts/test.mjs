@@ -35,6 +35,7 @@ const suites = [
   'posts-e2e',
   'production',
   'deployment',
+  'developer',
   'workspace-entry',
   'studio-ui',
   'room-media-controls',
