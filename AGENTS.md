@@ -6,6 +6,7 @@ SESSION is a browser music studio with private projects, community features, and
 
 - `npm test` runs offline suites and writes evidence to `outputs/release-checks`.
 - `npm run typecheck` checks TypeScript.
+- `npm run db:migrate:local` applies `drizzle/` to the local D1 database that `npm run dev` uses; a fresh clone needs it once.
 - `npm run build` builds Sites; `npm run build:vercel` builds Next.js for Vercel.
 - `tests/deployment-http-checks.mjs` verifies an explicitly configured Neon backend using disposable fixtures; see `docs/VERCEL_NEON_DEPLOYMENT.md`.
 

@@ -2,6 +2,20 @@
 
 A private development release for artists, producers, and engineers.
 
+![SESSION home feed](docs/screenshot.png)
+
+## Run locally
+
+Requires Node.js 22.13 or newer.
+
+```bash
+npm ci
+npm run db:migrate:local   # creates the local database; needed once on a fresh clone
+npm run dev
+```
+
+`npm run typecheck`, `npm test` and `npm run build` are the release checks, and CI runs all three.
+
 ## Deploying to Vercel and Neon
 
 The Vercel target uses Next.js, Neon Auth, PostgreSQL, and private Neon object storage. See [deployment setup and verification](docs/VERCEL_NEON_DEPLOYMENT.md). The original Sites target remains available with `npm run build`; `npm run build:vercel` builds the Vercel target separately.

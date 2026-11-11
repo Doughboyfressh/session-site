@@ -192,10 +192,9 @@ await assert.rejects(() => zipAudio(files, control.signal), {
   name: 'AbortError',
 });
 checks++;
-await fs.writeFile(
-  new URL('../../../outputs/export-format-fixtures.zip', import.meta.url),
-  bytes,
-);
+const fixtureDir = new URL('../outputs/', import.meta.url);
+await fs.mkdir(fixtureDir, { recursive: true });
+await fs.writeFile(new URL('export-format-fixtures.zip', fixtureDir), bytes);
 console.log(
   checks + ' audio format checks passed. Independent ZIP fixture saved.',
 );
